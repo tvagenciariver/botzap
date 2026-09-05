@@ -60,7 +60,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <small>WAHA + Gemini 2.0 Flash</small>
+        <small>WAHA + Gemini / OpenAI GPT</small>
       </div>
     </aside>
 
@@ -113,8 +113,8 @@
       <section class="tab-pane" id="pane-prompts">
         <div class="card">
           <div class="card-header">
-            <h3>⚙️ Configuração do Agente e Instruções do Sistema</h3>
-            <p>Altere o comportamento, tom de voz, regras da empresa e instruções do Gemini Flash em tempo real.</p>
+            <h3>⚙️ Configuração do Agente e Inteligência Artificial</h3>
+            <p>Altere o comportamento, tom de voz, regras da empresa e selecione entre Google Gemini ou OpenAI.</p>
           </div>
           <div class="card-body">
             <form id="config-form">
@@ -129,30 +129,96 @@
                 </div>
               </div>
 
-              <div class="form-row">
-                <div class="form-group col-6">
-                  <label for="cfg-model">Modelo do Gemini</label>
-                  <select id="cfg-model" name="model" class="form-control">
-                    <option value="gemini-flash-lite-latest">Gemini Flash Lite (Recomendado - Ultra Rápido e Alto Limite)</option>
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-                    <option value="gemini-flash-latest">Gemini Flash Latest</option>
-                    <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-                    <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                    <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                  </select>
-                </div>
-                <div class="form-group col-6">
-                  <label for="cfg-temperature">Criatividade / Temperatura (0.0 a 1.0)</label>
-                  <input type="number" step="0.1" min="0" max="1" id="cfg-temperature" name="temperature" class="form-control">
-                  <small class="form-hint">Valores menores (ex: 0.3 - 0.5) tornam o bot mais factual e preciso.</small>
+              <!-- Seleção do Provedor de IA -->
+              <div class="form-group">
+                <label class="section-title">🧠 Provedor de Inteligência Artificial (LLM)</label>
+                <div class="provider-selector-grid">
+                  <label class="provider-card active" id="card-provider-gemini">
+                    <input type="radio" name="llmProvider" value="gemini" checked>
+                    <div class="provider-card-content">
+                      <div class="provider-icon">💎</div>
+                      <div class="provider-info">
+                        <strong>Google Gemini</strong>
+                        <small>Modelos Flash rápidos e cota gratuita do AI Studio</small>
+                      </div>
+                    </div>
+                  </label>
+
+                  <label class="provider-card" id="card-provider-openai">
+                    <input type="radio" name="llmProvider" value="openai">
+                    <div class="provider-card-content">
+                      <div class="provider-icon">⚡</div>
+                      <div class="provider-info">
+                        <strong>OpenAI (ChatGPT)</strong>
+                        <small>GPT-4o Mini, GPT-4o e máxima fidelidade</small>
+                      </div>
+                    </div>
+                  </label>
                 </div>
               </div>
 
-              <div class="form-group">
-                <label for="cfg-apiKey">Chave de API do Google Gemini (Google AI Studio)</label>
-                <input type="password" id="cfg-apiKey" name="apiKey" class="form-control" placeholder="Deixe em branco para manter a atual">
-                <small class="form-hint">Obtenha sua chave gratuita em: <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a></small>
+              <!-- Bloco de Configurações Google Gemini -->
+              <div id="group-gemini-settings" class="provider-settings-box">
+                <div class="form-row">
+                  <div class="form-group col-6">
+                    <label for="cfg-model">Modelo do Google Gemini</label>
+                    <select id="cfg-model" name="model" class="form-control">
+                      <option value="gemini-flash-lite-latest">Gemini Flash Lite (Recomendado - Ultra Rápido e Alto Limite)</option>
+                      <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                      <option value="gemini-flash-latest">Gemini Flash Latest</option>
+                      <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                      <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                      <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                    </select>
+                  </div>
+                  <div class="form-group col-6">
+                    <label for="cfg-temperature">Criatividade / Temperatura (0.0 a 1.0)</label>
+                    <input type="number" step="0.1" min="0" max="1" id="cfg-temperature" name="temperature" class="form-control">
+                    <small class="form-hint">Valores menores (ex: 0.3 - 0.5) tornam o bot mais factual e preciso.</small>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-apiKey">Chave de API do Google Gemini (Google AI Studio)</label>
+                  <div class="input-with-button">
+                    <input type="password" id="cfg-apiKey" name="apiKey" class="form-control" placeholder="Deixe em branco para manter a atual">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-gemini-key" title="Mostrar/Ocultar Chave">👁️</button>
+                  </div>
+                  <small class="form-hint">Obtenha sua chave gratuita em: <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a></small>
+                </div>
+              </div>
+
+              <!-- Bloco de Configurações OpenAI -->
+              <div id="group-openai-settings" class="provider-settings-box" style="display: none;">
+                <div class="form-row">
+                  <div class="form-group col-6">
+                    <label for="cfg-openaiModel">Modelo da OpenAI</label>
+                    <select id="cfg-openaiModel" name="openaiModel" class="form-control">
+                      <option value="gpt-4o-mini">GPT-4o Mini (Recomendado - Ultra Rápido, Inteligente e Econômico)</option>
+                      <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+                      <option value="gpt-4o">GPT-4o (Máxima Capacidade e Raciocínio)</option>
+                      <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                      <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                    </select>
+                  </div>
+                  <div class="form-group col-6">
+                    <label for="cfg-openai-temperature">Criatividade / Temperatura (0.0 a 1.0)</label>
+                    <input type="number" step="0.1" min="0" max="1" id="cfg-openai-temperature" class="form-control" value="0.4">
+                    <small class="form-hint">Valores de 0.3 a 0.5 mantêm respostas seguras e precisas.</small>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-openaiApiKey">Chave de API da OpenAI (sk-...)</label>
+                  <div class="input-with-button">
+                    <input type="password" id="cfg-openaiApiKey" name="openaiApiKey" class="form-control" placeholder="Deixe em branco para manter a atual ou cole sua chave">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-openai-key" title="Mostrar/Ocultar Chave">👁️</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-test-openai">🔍 Testar Chave</button>
+                  </div>
+                  <div id="openai-test-feedback" class="conn-test-feedback" style="display: none; margin-top: 8px;"></div>
+                  <small class="form-hint">Gerencie suas chaves em: <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform API Keys</a></small>
+                </div>
               </div>
 
               <div class="form-group">

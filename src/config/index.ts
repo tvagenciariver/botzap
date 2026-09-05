@@ -19,7 +19,10 @@ export interface BotConfig {
   enableSendSeen: boolean;
   pauseDurationHours: number;
   pauseDurationMinutes: number;
+  llmProvider: 'gemini' | 'openai';
   geminiApiKey?: string;
+  openaiApiKey?: string;
+  openaiModel?: string;
   wahaBaseUrl?: string;
   wahaApiKey?: string;
   wahaSession?: string;
@@ -77,7 +80,10 @@ export function loadBotConfig(): BotConfig {
     enableSendSeen: stored.enableSendSeen ?? true,
     pauseDurationHours: hours,
     pauseDurationMinutes: Math.round(hours * 60),
+    llmProvider: stored.llmProvider || (process.env.LLM_PROVIDER as 'gemini' | 'openai') || 'gemini',
     geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
+    openaiApiKey: stored.openaiApiKey || process.env.OPENAI_API_KEY || '',
+    openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini',
     wahaBaseUrl: stored.wahaBaseUrl || process.env.WAHA_BASE_URL || 'http://localhost:3000',
     wahaApiKey: stored.wahaApiKey || process.env.WAHA_API_KEY || '',
     wahaSession: stored.wahaSession || process.env.WAHA_SESSION || 'default',
@@ -117,6 +123,9 @@ export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
   if (updated.wahaApiKey !== undefined) env.wahaApiKey = updated.wahaApiKey;
   if (updated.wahaSession) env.wahaSession = updated.wahaSession;
   if (updated.geminiApiKey) env.geminiApiKey = updated.geminiApiKey;
+  if (updated.openaiApiKey !== undefined) env.openaiApiKey = updated.openaiApiKey;
+  if (updated.openaiModel) env.openaiModel = updated.openaiModel;
+  if (updated.llmProvider) env.llmProvider = updated.llmProvider;
   if (updated.webhookPublicUrl) env.webhookPublicUrl = updated.webhookPublicUrl;
   if (updated.adminUser) env.adminUser = updated.adminUser;
   if (updated.adminPassword) env.adminPassword = updated.adminPassword;
@@ -134,6 +143,9 @@ export const env = {
   wahaApiKey: process.env.WAHA_API_KEY || initialConfig.wahaApiKey || '',
   geminiApiKey: process.env.GEMINI_API_KEY || initialConfig.geminiApiKey || '',
   geminiModel: process.env.GEMINI_MODEL || initialConfig.model || 'gemini-1.5-flash',
+  llmProvider: (process.env.LLM_PROVIDER as 'gemini' | 'openai') || initialConfig.llmProvider || 'gemini',
+  openaiApiKey: process.env.OPENAI_API_KEY || initialConfig.openaiApiKey || '',
+  openaiModel: process.env.OPENAI_MODEL || initialConfig.openaiModel || 'gpt-4o-mini',
   webhookPublicUrl: (process.env.WEBHOOK_PUBLIC_URL || initialConfig.webhookPublicUrl || 'http://localhost:3001').replace(/\/$/, ''),
   adminUser: process.env.ADMIN_USER || initialConfig.adminUser || 'admin',
   adminPassword: process.env.ADMIN_PASSWORD || initialConfig.adminPassword || 'File@152341'

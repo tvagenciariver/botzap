@@ -125,6 +125,24 @@ export class MemoryStore {
     return validHistory;
   }
 
+  /**
+   * Retorna o histórico formatado para o padrão OpenAI / ChatGPT ({ role, content })
+   */
+  getOpenAIHistory(chatId: string): Array<{ role: 'user' | 'assistant'; content: string }> {
+    const session = this.getSession(chatId);
+    const result: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+    for (const m of session.messages) {
+      if (!m.parts || m.parts.length === 0 || !m.parts[0].text) continue;
+      const text = m.parts[0].text.trim();
+      if (!text) continue;
+      const role = m.role === 'model' ? 'assistant' : 'user';
+      result.push({ role, content: text });
+    }
+
+    return result;
+  }
+
   addMessage(chatId: string, role: 'user' | 'model', text: string, contactName?: string): void {
     const session = this.getSession(chatId);
     if (contactName) {

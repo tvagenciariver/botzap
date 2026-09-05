@@ -1,9 +1,9 @@
 import { IAgent, AgentContext, AgentResponse } from './base.js';
-import { geminiService } from '../../gemini/client.js';
+import { llmProviderManager } from '../llm-provider.js';
 
 export class AttendantAgent implements IAgent {
-  name = 'GeminiFlashAttendantAgent';
-  description = 'Agente de Atendimento ao Cliente alimentado pelo Google Gemini Flash';
+  name = 'SmartAttendantAgent';
+  description = 'Agente de Atendimento ao Cliente alimentado por IA (Google Gemini / OpenAI)';
 
   canHandle(_context: AgentContext): boolean {
     return true;
@@ -11,20 +11,24 @@ export class AttendantAgent implements IAgent {
 
   async execute(context: AgentContext): Promise<AgentResponse> {
     try {
-      const reply = await geminiService.generateReply(
+      const result = await llmProviderManager.generateReply(
         context.chatId,
         context.userMessage,
         context.contactName
       );
 
+      const agentLabel = result.provider === 'openai' 
+        ? `OpenAI (${result.model})` 
+        : `Gemini (${result.model})`;
+
       return {
         handled: true,
-        replyText: reply,
+        replyText: result.text,
         action: 'none',
-        agentName: this.name
+        agentName: agentLabel
       };
     } catch (error: any) {
-      console.error(`[AttendantAgent] Erro ao processar mensagem com Gemini Flash:`, error.message);
+      console.error(`[AttendantAgent] Erro ao processar mensagem com IA:`, error.message);
       const isSimulation = context.chatId.startsWith('simulador_');
       const clientMessage = 'Olá! No momento estamos com uma instabilidade técnica momentânea em nosso atendimento automatizado. Nossa equipe humana já foi notificada e logo te responderá por aqui!';
       return {

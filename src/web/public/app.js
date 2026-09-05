@@ -159,10 +159,16 @@ async function checkStatus() {
       }
     }
 
-    // Gemini Status
+    // Status da IA (Gemini ou OpenAI)
     const geminiDot = document.getElementById('dot-gemini');
     const geminiText = document.getElementById('status-gemini');
-    if (data.gemini && data.gemini.configured) {
+    if (data.activeLlm) {
+      const isOnline = data.activeLlm.configured;
+      const provLabel = data.activeLlm.provider === 'openai' ? 'OpenAI GPT' : 'Gemini Flash';
+      geminiDot.className = `status-dot ${isOnline ? 'online' : 'offline'}`;
+      geminiText.textContent = isOnline ? `${provLabel} (${data.activeLlm.model})` : `${provLabel} (Chave Pendente ⚠️)`;
+      geminiText.className = isOnline ? 'status-val text-green' : 'status-val text-orange';
+    } else if (data.gemini && data.gemini.configured) {
       geminiDot.className = 'status-dot online';
       geminiText.textContent = 'Configurado ✅';
       geminiText.className = 'status-val text-green';
@@ -259,6 +265,80 @@ document.getElementById('btn-clear-chat').addEventListener('click', () => {
 });
 
 // 3. Configurações & Prompts
+function setProviderUI(provider) {
+  const geminiCard = document.getElementById('card-provider-gemini');
+  const openaiCard = document.getElementById('card-provider-openai');
+  const geminiGroup = document.getElementById('group-gemini-settings');
+  const openaiGroup = document.getElementById('group-openai-settings');
+  const geminiRadio = document.querySelector('input[name="llmProvider"][value="gemini"]');
+  const openaiRadio = document.querySelector('input[name="llmProvider"][value="openai"]');
+
+  if (provider === 'openai') {
+    openaiCard?.classList.add('active');
+    geminiCard?.classList.remove('active');
+    if (openaiRadio) openaiRadio.checked = true;
+    if (geminiGroup) geminiGroup.style.display = 'none';
+    if (openaiGroup) openaiGroup.style.display = 'block';
+  } else {
+    geminiCard?.classList.add('active');
+    openaiCard?.classList.remove('active');
+    if (geminiRadio) geminiRadio.checked = true;
+    if (geminiGroup) geminiGroup.style.display = 'block';
+    if (openaiGroup) openaiGroup.style.display = 'none';
+  }
+}
+
+document.getElementById('card-provider-gemini')?.addEventListener('click', () => setProviderUI('gemini'));
+document.getElementById('card-provider-openai')?.addEventListener('click', () => setProviderUI('openai'));
+
+document.getElementById('btn-toggle-gemini-key')?.addEventListener('click', () => {
+  const input = document.getElementById('cfg-apiKey');
+  if (input) input.type = input.type === 'password' ? 'text' : 'password';
+});
+
+document.getElementById('btn-toggle-openai-key')?.addEventListener('click', () => {
+  const input = document.getElementById('cfg-openaiApiKey');
+  if (input) input.type = input.type === 'password' ? 'text' : 'password';
+});
+
+document.getElementById('btn-test-openai')?.addEventListener('click', async () => {
+  const key = document.getElementById('cfg-openaiApiKey').value.trim();
+  const feedback = document.getElementById('openai-test-feedback');
+  if (feedback) {
+    feedback.style.display = 'block';
+    feedback.className = 'conn-test-feedback test-testing';
+    feedback.textContent = '⏳ Conectando e validando chave na OpenAI...';
+  }
+
+  try {
+    const res = await fetchWithAuth('/api/openai/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: key || undefined })
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (feedback) {
+        feedback.className = 'conn-test-feedback test-success';
+        feedback.textContent = `✅ ${data.message} (${(data.models || []).length} modelos disponíveis)`;
+      }
+      showToast('Chave da OpenAI validada com sucesso!', 'success');
+    } else {
+      if (feedback) {
+        feedback.className = 'conn-test-feedback test-error';
+        feedback.textContent = `❌ ${data.message}`;
+      }
+      showToast('Falha ao validar chave da OpenAI.', 'error');
+    }
+  } catch (err) {
+    if (feedback) {
+      feedback.className = 'conn-test-feedback test-error';
+      feedback.textContent = `❌ Erro: ${err.message}`;
+    }
+    showToast(`Erro ao testar OpenAI: ${err.message}`, 'error');
+  }
+});
+
 async function loadConfig() {
   if (!getAuthToken()) return;
   try {
@@ -268,8 +348,25 @@ async function loadConfig() {
 
     document.getElementById('cfg-botName').value = cfg.botName || '';
     document.getElementById('cfg-companyName').value = cfg.companyName || '';
+    
+    // Provedor de IA
+    const provider = cfg.llmProvider || 'gemini';
+    setProviderUI(provider);
+
+    // Gemini
     document.getElementById('cfg-model').value = cfg.model || 'gemini-flash-lite-latest';
     document.getElementById('cfg-temperature').value = cfg.temperature ?? 0.4;
+    if (cfg.geminiApiKey) {
+      document.getElementById('cfg-apiKey').placeholder = cfg.geminiApiKey;
+    }
+
+    // OpenAI
+    document.getElementById('cfg-openaiModel').value = cfg.openaiModel || 'gpt-4o-mini';
+    document.getElementById('cfg-openai-temperature').value = cfg.temperature ?? 0.4;
+    if (cfg.openaiApiKey) {
+      document.getElementById('cfg-openaiApiKey').placeholder = cfg.openaiApiKey;
+    }
+
     document.getElementById('cfg-systemInstruction').value = cfg.systemInstruction || '';
     document.getElementById('cfg-businessInfo').value = cfg.businessInfo || '';
     document.getElementById('cfg-handoffKeywords').value = (cfg.handoffKeywords || []).join(', ');
@@ -296,11 +393,18 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
   const handoffKeywords = keywordsRaw.split(',').map(k => k.trim()).filter(k => k.length > 0);
   const pauseHours = parseFloat(document.getElementById('cfg-pauseDurationHours').value) || 6;
 
+  const selectedProvider = document.querySelector('input[name="llmProvider"]:checked')?.value || 'gemini';
+  const temperature = selectedProvider === 'openai'
+    ? parseFloat(document.getElementById('cfg-openai-temperature').value)
+    : parseFloat(document.getElementById('cfg-temperature').value);
+
   const payload = {
     botName: document.getElementById('cfg-botName').value,
     companyName: document.getElementById('cfg-companyName').value,
+    llmProvider: selectedProvider,
     model: document.getElementById('cfg-model').value,
-    temperature: parseFloat(document.getElementById('cfg-temperature').value),
+    openaiModel: document.getElementById('cfg-openaiModel').value,
+    temperature,
     systemInstruction: document.getElementById('cfg-systemInstruction').value,
     businessInfo: document.getElementById('cfg-businessInfo').value,
     handoffKeywords,
@@ -310,7 +414,8 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
     pauseDurationMinutes: Math.round(pauseHours * 60),
     enableTypingSimulation: document.getElementById('cfg-typing').checked,
     enableSendSeen: document.getElementById('cfg-seen').checked,
-    apiKey: document.getElementById('cfg-apiKey').value
+    apiKey: document.getElementById('cfg-apiKey').value,
+    openaiApiKey: document.getElementById('cfg-openaiApiKey').value
   };
 
   try {
@@ -325,15 +430,25 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
       feedback.textContent = '✅ Configurações salvas com sucesso!';
       feedback.className = 'feedback-msg text-green';
       document.getElementById('cfg-apiKey').value = '';
+      document.getElementById('cfg-openaiApiKey').value = '';
+      if (data.config.openaiApiKey) {
+        document.getElementById('cfg-openaiApiKey').placeholder = data.config.openaiApiKey;
+      }
+      if (data.config.geminiApiKey) {
+        document.getElementById('cfg-apiKey').placeholder = data.config.geminiApiKey;
+      }
+      showToast('Configurações de IA salvas com sucesso!', 'success');
       checkStatus();
       setTimeout(() => { feedback.textContent = ''; }, 3500);
     } else {
       feedback.textContent = `❌ Erro: ${data.error}`;
       feedback.className = 'feedback-msg text-red';
+      showToast(`Erro ao salvar: ${data.error}`, 'error');
     }
   } catch (err) {
     feedback.textContent = `❌ Erro ao salvar: ${err.message}`;
     feedback.className = 'feedback-msg text-red';
+    showToast(`Erro ao salvar: ${err.message}`, 'error');
   }
 });
 

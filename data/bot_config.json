@@ -25,5 +25,8 @@
   "enableSendSeen": true,
   "pauseDurationHours": 6,
   "pauseDurationMinutes": 360,
-  "geminiApiKey": ""
+  "geminiApiKey": "",
+  "llmProvider": "openai",
+  "openaiModel": "gpt-4o-mini",
+  "openaiApiKey": ""
 }

@@ -4,6 +4,7 @@ import { orchestrator } from '../orchestrator/engine.js';
 import { loadBotConfig, saveBotConfig, updateEnvFile, env } from '../config/index.js';
 import { memoryStore } from '../gemini/memory.js';
 import { geminiService } from '../gemini/client.js';
+import { openAIService } from '../openai/client.js';
 import { wahaClient } from '../waha/client.js';
 import { WahaWebhookEvent } from '../waha/types.js';
 
@@ -183,6 +184,9 @@ apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) =
     wahaOnline = false;
   }
 
+  const config = loadBotConfig();
+  const provider = config.llmProvider || 'gemini';
+
   res.json({
     orchestrator: 'online',
     timestamp: new Date().toISOString(),
@@ -195,6 +199,15 @@ apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) =
     gemini: {
       configured: geminiService.isConfigured(),
       model: env.geminiModel
+    },
+    openai: {
+      configured: openAIService.isConfigured(),
+      model: config.openaiModel || 'gpt-4o-mini'
+    },
+    activeLlm: {
+      provider,
+      configured: provider === 'openai' ? openAIService.isConfigured() : geminiService.isConfigured(),
+      model: provider === 'openai' ? (config.openaiModel || 'gpt-4o-mini') : (config.model || 'gemini-flash-lite-latest')
     }
   });
 });
@@ -207,12 +220,18 @@ apiRouter.get('/api/config', requireAuth, (_req: Request, res: Response) => {
   const { adminPassword: _hiddenPass, ...safeConfig } = config;
 
   res.json({
-    config: safeConfig,
+    config: {
+      ...safeConfig,
+      geminiApiKey: safeConfig.geminiApiKey ? '••••••••' + safeConfig.geminiApiKey.slice(-4) : '',
+      openaiApiKey: safeConfig.openaiApiKey ? '••••••••' + safeConfig.openaiApiKey.slice(-4) : ''
+    },
     env: {
       port: env.port,
       wahaBaseUrl: env.wahaBaseUrl,
       wahaSession: env.wahaSession,
       geminiConfigured: geminiService.isConfigured(),
+      openaiConfigured: openAIService.isConfigured(),
+      llmProvider: env.llmProvider,
       webhookPublicUrl: env.webhookPublicUrl
     }
   });
@@ -223,13 +242,28 @@ apiRouter.get('/api/config', requireAuth, (_req: Request, res: Response) => {
  */
 apiRouter.post('/api/config', requireAuth, (req: Request, res: Response) => {
   try {
-    const { apiKey, adminPassword, ...botSettings } = req.body;
+    const { apiKey, openaiApiKey, adminPassword, ...botSettings } = req.body;
 
     if (apiKey && typeof apiKey === 'string' && apiKey.trim() !== '') {
       const cleanKey = apiKey.trim();
       geminiService.updateApiKey(cleanKey);
       updateEnvFile('GEMINI_API_KEY', cleanKey);
       botSettings.geminiApiKey = cleanKey;
+    }
+
+    if (openaiApiKey && typeof openaiApiKey === 'string' && openaiApiKey.trim() !== '') {
+      const cleanOpenAIKey = openaiApiKey.trim();
+      openAIService.updateApiKey(cleanOpenAIKey);
+      updateEnvFile('OPENAI_API_KEY', cleanOpenAIKey);
+      botSettings.openaiApiKey = cleanOpenAIKey;
+    }
+
+    if (botSettings.openaiModel && typeof botSettings.openaiModel === 'string') {
+      updateEnvFile('OPENAI_MODEL', botSettings.openaiModel.trim());
+    }
+
+    if (botSettings.llmProvider && (botSettings.llmProvider === 'gemini' || botSettings.llmProvider === 'openai')) {
+      updateEnvFile('LLM_PROVIDER', botSettings.llmProvider);
     }
 
     if (adminPassword && typeof adminPassword === 'string' && adminPassword.trim() !== '') {
@@ -261,6 +295,19 @@ apiRouter.post('/api/config', requireAuth, (req: Request, res: Response) => {
     res.json({ success: true, config: safeUpdated });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 5.1 Testar chave da OpenAI
+ */
+apiRouter.post('/api/openai/test-connection', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { apiKey } = req.body;
+    const result = await openAIService.testConnection(apiKey);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: `Erro ao testar conexão com a OpenAI: ${err.message}` });
   }
 });
 
