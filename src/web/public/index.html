@@ -262,20 +262,83 @@
 
       <!-- TAB 5: Integração WAHA & Chatwoot -->
       <section class="tab-pane" id="pane-integration">
+        <!-- CARD 1: Conexão WAHA API -->
         <div class="card mb-4">
-          <div class="card-header">
-            <h3>⚡ Configuração Automática do Webhook na WAHA</h3>
+          <div class="card-header d-flex justify-between align-center">
+            <div>
+              <h3>🔌 Conexão com o Servidor WAHA (WhatsApp HTTP API)</h3>
+              <p>Informe a URL do seu servidor WAHA e a chave de API (X-Api-Key) para o BotZap poder enviar respostas no WhatsApp.</p>
+            </div>
+            <span class="badge" id="waha-conn-badge">Status da Conexão</span>
           </div>
           <div class="card-body">
-            <p>Clique no botão abaixo para cadastrar automaticamente a URL deste orquestrador na sua sessão da WAHA:</p>
-            <div class="webhook-setup-box">
-              <input type="text" id="target-webhook-url" class="form-control" value="http://localhost:3001/webhook/waha">
-              <button class="btn btn-primary" id="btn-register-waha-hook">🚀 Registrar Webhook na WAHA</button>
+            <div class="form-row">
+              <div class="form-group col-6">
+                <label for="waha-baseUrl">URL da WAHA API</label>
+                <input type="url" id="waha-baseUrl" class="form-control" placeholder="https://waha3.whatscorporativo.com">
+                <small class="form-hint">Ex: <code>https://waha3.whatscorporativo.com</code> ou <code>http://seu-servidor:3000</code></small>
+              </div>
+              <div class="form-group col-6">
+                <label for="waha-apiKey">Chave de API da WAHA (X-Api-Key / WHATSAPP_API_KEY)</label>
+                <input type="password" id="waha-apiKey" class="form-control" placeholder="Digite sua chave de API da WAHA">
+                <small class="form-hint">Deixe em branco se a sua WAHA não tiver autenticação por chave configurada.</small>
+              </div>
             </div>
-            <div id="waha-hook-result" class="feedback-msg mt-2"></div>
+
+            <div class="form-row">
+              <div class="form-group col-6">
+                <label for="waha-session">Nome da Sessão da WAHA</label>
+                <input type="text" id="waha-session" class="form-control" placeholder="default" value="default">
+                <small class="form-hint">Nome da sessão conectada ao WhatsApp (geralmente <code>default</code>).</small>
+              </div>
+              <div class="form-group col-6">
+                <label for="waha-publicWebhookUrl">URL Pública do Webhook do BotZap</label>
+                <input type="url" id="waha-publicWebhookUrl" class="form-control" placeholder="http://megaport3.whatscorporativo.com:3001/webhook/waha">
+                <small class="form-hint">Endereço público deste painel que a WAHA vai notificar a cada mensagem recebida.</small>
+              </div>
+            </div>
+
+            <div class="form-actions mt-3" style="display: flex; gap: 12px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-secondary" id="btn-test-waha">🔍 Testar Conexão com a WAHA</button>
+              <button type="button" class="btn btn-primary" id="btn-save-waha">💾 Salvar Conexão da WAHA</button>
+              <button type="button" class="btn btn-outline" id="btn-register-waha-hook">🚀 Registrar Webhook na WAHA</button>
+            </div>
+
+            <div id="waha-status-box" class="mt-3" style="display: none;"></div>
           </div>
         </div>
 
+        <!-- CARD 2: Webhook Manual & Instruções -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <h3>⚡ URL do Webhook para Colar na WAHA</h3>
+          </div>
+          <div class="card-body">
+            <p>Se você preferir configurar o webhook pelo painel web da WAHA ou no <code>docker-compose.yml</code> da WAHA, use a URL abaixo:</p>
+            <div class="webhook-setup-box" style="margin-bottom: 12px;">
+              <input type="text" id="copy-webhook-input" readonly class="form-control" value="">
+              <button class="btn btn-secondary" id="btn-copy-webhook-btn">📋 Copiar URL</button>
+            </div>
+            <small class="text-muted">Eventos recomendados para selecionar na WAHA: <strong><code>message</code></strong> e <strong><code>message.any</code></strong>.</small>
+          </div>
+        </div>
+
+        <!-- CARD 3: Integração Chatwoot -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <h3>💬 Sincronização Inteligente com Chatwoot</h3>
+          </div>
+          <div class="card-body">
+            <p>Se você utiliza o <strong>Chatwoot</strong>, adicione este webhook nas configurações do Chatwoot (Configurações &rarr; Integrações &rarr; Webhooks) para o BotZap pausar imediatamente quando um atendente responder por lá:</p>
+            <div class="webhook-setup-box" style="margin-bottom: 12px;">
+              <input type="text" id="copy-chatwoot-input" readonly class="form-control" value="">
+              <button class="btn btn-secondary" id="btn-copy-chatwoot-btn">📋 Copiar Webhook Chatwoot</button>
+            </div>
+            <small class="text-muted">O bot pausará automaticamente pelo tempo configurado (ex: 6 horas) sempre que um humano responder no Chatwoot ou no WhatsApp.</small>
+          </div>
+        </div>
+
+        <!-- CARD 4: Explicação do Fluxo -->
         <div class="card mb-4">
           <div class="card-header">
             <h3>📖 Como Funciona a Integração WAHA + Chatwoot + Gemini</h3>
@@ -284,21 +347,15 @@
             <h4>1. Fluxo de Atendimento Automático</h4>
             <ul>
               <li>O cliente envia mensagem no WhatsApp. A <strong>WAHA</strong> recebe e despacha para o <strong>Chatwoot</strong> (inbox de atendimento) e simultaneamente envia o webhook para o <strong>BotZap</strong>.</li>
-              <li>O <strong>BotZap</strong> aplica o buffer anti-mensagens picadas (debounce), carrega o histórico e chama o <strong>Gemini Flash</strong>.</li>
+              <li>O <strong>BotZap</strong> aplica o buffer anti-mensagens picadas (debounce), carrega o histórico e chama o <strong>Google Gemini Flash</strong>.</li>
               <li>O bot envia a resposta para a WAHA via <code>POST /api/sendText</code>. A mensagem vai para o cliente e aparece no Chatwoot!</li>
             </ul>
 
             <h4>2. Transbordo Humano Inteligente</h4>
             <ul>
-              <li>Se o cliente disser <em>"quero falar com uma pessoa"</em>, o <strong>HandoffAgent</strong> envia mensagem de aviso e pausa o bot para aquele número.</li>
-              <li>Se um atendente humano digitar diretamente no <strong>Chatwoot</strong> ou no celular do WhatsApp, a WAHA envia um evento com <code>fromMe: true</code>. O <strong>BotZap detecta automaticamente e pausa o bot</strong> por 60 minutos para não atrapalhar o atendente!</li>
+              <li>Se o cliente pedir atendente humano, o <strong>HandoffAgent</strong> avisa e pausa o bot para aquele número.</li>
+              <li>Se um atendente humano digitar diretamente no <strong>Chatwoot</strong> ou no celular do WhatsApp, a WAHA envia um evento com <code>fromMe: true</code>. O <strong>BotZap detecta automaticamente e pausa o bot</strong> por 6 horas (ou pelo tempo configurado) para não atrapalhar o atendente!</li>
             </ul>
-
-            <h4>3. Configuração de Variáveis na WAHA (Docker)</h4>
-            <pre><code># No arquivo docker-compose da WAHA:
-WHATSAPP_HOOK_URL=http://botzap:3001/webhook/waha
-WHATSAPP_HOOK_EVENTS=message
-</code></pre>
           </div>
         </div>
       </section>

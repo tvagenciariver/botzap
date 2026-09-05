@@ -34,6 +34,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (targetTab === 'chats') loadChats();
     if (targetTab === 'logs') loadLogs();
     if (targetTab === 'prompts') loadConfig();
+    if (targetTab === 'integration') loadWahaConfig();
   });
 });
 
@@ -338,36 +339,178 @@ document.getElementById('btn-clear-logs').addEventListener('click', async () => 
   loadLogs();
 });
 
-// 6. Registro do Webhook na WAHA
-document.getElementById('btn-register-waha-hook').addEventListener('click', async () => {
-  const targetUrl = document.getElementById('target-webhook-url').value;
-  const resultEl = document.getElementById('waha-hook-result');
+// 6. Integração com a WAHA API
+async function loadWahaConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const data = await res.json();
+    const cfg = data.config || {};
+    const envData = data.env || {};
 
-  resultEl.textContent = 'Enviando requisição para a WAHA...';
-  resultEl.className = 'feedback-msg text-orange';
+    const baseUrlEl = document.getElementById('waha-baseUrl');
+    const apiKeyEl = document.getElementById('waha-apiKey');
+    const sessionEl = document.getElementById('waha-session');
+    const publicWebhookUrlEl = document.getElementById('waha-publicWebhookUrl');
+    const copyWebhookEl = document.getElementById('copy-webhook-input');
+    const copyChatwootEl = document.getElementById('copy-chatwoot-input');
+
+    if (baseUrlEl) baseUrlEl.value = cfg.wahaBaseUrl || envData.wahaBaseUrl || 'https://waha3.whatscorporativo.com';
+    if (apiKeyEl && cfg.wahaApiKey) apiKeyEl.value = cfg.wahaApiKey;
+    if (sessionEl) sessionEl.value = cfg.wahaSession || envData.wahaSession || 'default';
+
+    // Auto-detect URL pública do webhook baseada na origem atual ou na configurada
+    const currentOrigin = window.location.origin;
+    let hookUrl = cfg.webhookPublicUrl || envData.webhookPublicUrl || '';
+    if (!hookUrl || hookUrl.includes('localhost')) {
+      hookUrl = currentOrigin;
+    }
+    const fullWahaHook = `${hookUrl.replace(/\/$/, '')}/webhook/waha`;
+    const fullChatwootHook = `${hookUrl.replace(/\/$/, '')}/webhook/chatwoot`;
+
+    if (publicWebhookUrlEl) publicWebhookUrlEl.value = fullWahaHook;
+    if (copyWebhookEl) copyWebhookEl.value = fullWahaHook;
+    if (copyChatwootEl) copyChatwootEl.value = fullChatwootHook;
+  } catch (err) {
+    console.error('Erro ao carregar dados da WAHA:', err);
+  }
+}
+
+// Testar Conexão com a WAHA
+document.getElementById('btn-test-waha')?.addEventListener('click', async () => {
+  const statusBox = document.getElementById('waha-status-box');
+  const badge = document.getElementById('waha-conn-badge');
+  const baseUrl = document.getElementById('waha-baseUrl').value.trim();
+  const apiKey = document.getElementById('waha-apiKey').value.trim();
+  const session = document.getElementById('waha-session').value.trim() || 'default';
+
+  statusBox.style.display = 'block';
+  statusBox.className = 'feedback-msg text-orange';
+  statusBox.textContent = 'Testando conexão com o servidor WAHA...';
+
+  try {
+    const res = await fetch('/api/waha/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl, apiKey, session })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      statusBox.className = 'feedback-msg text-green';
+      statusBox.innerHTML = `✅ <strong>Conexão bem sucedida:</strong> ${data.message} ${data.sessionStatus ? `<br>Status da Sessão: <strong>${data.sessionStatus}</strong>` : ''}`;
+      if (badge) {
+        badge.textContent = `WAHA: ${data.sessionStatus || 'Conectada'}`;
+        badge.className = 'badge text-green';
+      }
+    } else {
+      statusBox.className = 'feedback-msg text-red';
+      statusBox.innerHTML = `❌ <strong>Falha na conexão:</strong> ${data.message}`;
+      if (badge) {
+        badge.textContent = 'WAHA: Desconectada';
+        badge.className = 'badge text-red';
+      }
+    }
+    checkStatus();
+  } catch (err) {
+    statusBox.className = 'feedback-msg text-red';
+    statusBox.innerHTML = `❌ Erro de rede ou requisição: ${err.message}`;
+  }
+});
+
+// Salvar Configurações de Conexão da WAHA
+document.getElementById('btn-save-waha')?.addEventListener('click', async () => {
+  const statusBox = document.getElementById('waha-status-box');
+  const baseUrl = document.getElementById('waha-baseUrl').value.trim();
+  const apiKey = document.getElementById('waha-apiKey').value.trim();
+  const session = document.getElementById('waha-session').value.trim() || 'default';
+  const webhookPublicUrl = document.getElementById('waha-publicWebhookUrl').value.trim();
+
+  statusBox.style.display = 'block';
+  statusBox.className = 'feedback-msg text-orange';
+  statusBox.textContent = 'Salvando configurações da WAHA...';
+
+  try {
+    const res = await fetch('/api/waha/save-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl, apiKey, session, webhookPublicUrl })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      statusBox.className = 'feedback-msg text-green';
+      statusBox.innerHTML = `✅ <strong>${data.message}</strong>`;
+      checkStatus();
+      setTimeout(() => {
+        if (statusBox.className.includes('text-green')) statusBox.style.display = 'none';
+      }, 4000);
+    } else {
+      statusBox.className = 'feedback-msg text-red';
+      statusBox.innerHTML = `❌ Erro ao salvar: ${data.message || data.error}`;
+    }
+  } catch (err) {
+    statusBox.className = 'feedback-msg text-red';
+    statusBox.innerHTML = `❌ Erro de rede: ${err.message}`;
+  }
+});
+
+// Registrar Webhook Automaticamente na WAHA
+document.getElementById('btn-register-waha-hook')?.addEventListener('click', async () => {
+  const statusBox = document.getElementById('waha-status-box');
+  const publicWebhookUrl = document.getElementById('waha-publicWebhookUrl').value.trim();
+  const session = document.getElementById('waha-session').value.trim() || 'default';
+
+  statusBox.style.display = 'block';
+  statusBox.className = 'feedback-msg text-orange';
+  statusBox.textContent = 'Enviando comando para registrar webhook na WAHA...';
 
   try {
     const res = await fetch('/api/waha/setup-webhook', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: targetUrl })
+      body: JSON.stringify({ url: publicWebhookUrl, session })
     });
-
     const data = await res.json();
+
     if (data.success) {
-      resultEl.textContent = `✅ ${data.message}`;
-      resultEl.className = 'feedback-msg text-green';
+      statusBox.className = 'feedback-msg text-green';
+      statusBox.innerHTML = `✅ ${data.message}`;
     } else {
-      resultEl.textContent = `⚠️ ${data.message}`;
-      resultEl.className = 'feedback-msg text-orange';
+      statusBox.className = 'feedback-msg text-orange';
+      statusBox.innerHTML = `⚠️ ${data.message}`;
     }
   } catch (err) {
-    resultEl.textContent = `❌ Erro ao conectar com WAHA: ${err.message}`;
-    resultEl.className = 'feedback-msg text-red';
+    statusBox.className = 'feedback-msg text-red';
+    statusBox.innerHTML = `❌ Erro ao registrar webhook: ${err.message}`;
+  }
+});
+
+// Copiar Webhook da WAHA
+document.getElementById('btn-copy-webhook-btn')?.addEventListener('click', () => {
+  const input = document.getElementById('copy-webhook-input');
+  if (input && input.value) {
+    navigator.clipboard.writeText(input.value);
+    const btn = document.getElementById('btn-copy-webhook-btn');
+    const old = btn.textContent;
+    btn.textContent = '✅ Copiado!';
+    setTimeout(() => { btn.textContent = old; }, 2000);
+  }
+});
+
+// Copiar Webhook do Chatwoot
+document.getElementById('btn-copy-chatwoot-btn')?.addEventListener('click', () => {
+  const input = document.getElementById('copy-chatwoot-input');
+  if (input && input.value) {
+    navigator.clipboard.writeText(input.value);
+    const btn = document.getElementById('btn-copy-chatwoot-btn');
+    const old = btn.textContent;
+    btn.textContent = '✅ Copiado!';
+    setTimeout(() => { btn.textContent = old; }, 2000);
   }
 });
 
 // Inicialização
 checkStatus();
 loadConfig();
+loadWahaConfig();
 setInterval(checkStatus, 15000);

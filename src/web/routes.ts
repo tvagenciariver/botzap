@@ -149,7 +149,21 @@ apiRouter.post('/api/config', (req: Request, res: Response) => {
       botSettings.geminiApiKey = cleanKey;
     }
 
+    if (botSettings.wahaBaseUrl) {
+      updateEnvFile('WAHA_BASE_URL', botSettings.wahaBaseUrl.trim());
+    }
+    if (botSettings.wahaApiKey !== undefined) {
+      updateEnvFile('WAHA_API_KEY', botSettings.wahaApiKey.trim());
+    }
+    if (botSettings.wahaSession) {
+      updateEnvFile('WAHA_SESSION', botSettings.wahaSession.trim());
+    }
+    if (botSettings.webhookPublicUrl) {
+      updateEnvFile('WEBHOOK_PUBLIC_URL', botSettings.webhookPublicUrl.trim());
+    }
+
     const updated = saveBotConfig(botSettings);
+    wahaClient.reloadConfig();
     res.json({ success: true, config: updated });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -157,22 +171,69 @@ apiRouter.post('/api/config', (req: Request, res: Response) => {
 });
 
 /**
- * 6. Auto-registro de Webhook na WAHA
+ * 6. Testar conexão com a WAHA API
+ */
+apiRouter.post('/api/waha/test-connection', async (req: Request, res: Response) => {
+  try {
+    const { baseUrl, apiKey, session } = req.body;
+    if (baseUrl) {
+      wahaClient.updateConfig(baseUrl, apiKey, session);
+    }
+    const result = await wahaClient.testConnection(session);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: `Erro ao testar conexão: ${err.message}` });
+  }
+});
+
+/**
+ * 7. Salvar dados de conexão com a WAHA
+ */
+apiRouter.post('/api/waha/save-connection', (req: Request, res: Response) => {
+  try {
+    const { baseUrl, apiKey, session, webhookPublicUrl } = req.body;
+    const toUpdate: Record<string, any> = {};
+
+    if (baseUrl !== undefined) {
+      const cleanUrl = baseUrl.trim().replace(/\/$/, '');
+      toUpdate.wahaBaseUrl = cleanUrl;
+      updateEnvFile('WAHA_BASE_URL', cleanUrl);
+    }
+    if (apiKey !== undefined) {
+      const cleanKey = apiKey.trim();
+      toUpdate.wahaApiKey = cleanKey;
+      updateEnvFile('WAHA_API_KEY', cleanKey);
+    }
+    if (session !== undefined) {
+      const cleanSession = session.trim();
+      toUpdate.wahaSession = cleanSession;
+      updateEnvFile('WAHA_SESSION', cleanSession);
+    }
+    if (webhookPublicUrl !== undefined) {
+      const cleanHook = webhookPublicUrl.trim().replace(/\/$/, '');
+      toUpdate.webhookPublicUrl = cleanHook;
+      updateEnvFile('WEBHOOK_PUBLIC_URL', cleanHook);
+    }
+
+    const updated = saveBotConfig(toUpdate);
+    wahaClient.reloadConfig();
+    res.json({ success: true, message: 'Dados da WAHA salvos com sucesso!', config: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: `Erro ao salvar: ${err.message}` });
+  }
+});
+
+/**
+ * 8. Auto-registro de Webhook na WAHA
  */
 apiRouter.post('/api/waha/setup-webhook', async (req: Request, res: Response) => {
   try {
     const targetUrl = req.body.url || `${env.webhookPublicUrl}/webhook/waha`;
-    const success = await wahaClient.configureWebhook(targetUrl, env.wahaSession);
-    
-    res.json({
-      success,
-      webhookUrl: targetUrl,
-      message: success 
-        ? 'Webhook registrado com sucesso na WAHA!' 
-        : 'Tentativa enviada. Verifique se a WAHA suporta a chamada de webhook por sessão ou configure WHATSAPP_HOOK_URL na WAHA.'
-    });
+    const session = req.body.session || env.wahaSession;
+    const result = await wahaClient.configureWebhook(targetUrl, session);
+    res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: `Erro ao registrar webhook: ${err.message}` });
   }
 });
 

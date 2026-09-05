@@ -20,6 +20,10 @@ export interface BotConfig {
   pauseDurationHours: number;
   pauseDurationMinutes: number;
   geminiApiKey?: string;
+  wahaBaseUrl?: string;
+  wahaApiKey?: string;
+  wahaSession?: string;
+  webhookPublicUrl?: string;
 }
 
 const configPath = path.resolve(process.cwd(), 'data', 'bot_config.json');
@@ -71,7 +75,11 @@ export function loadBotConfig(): BotConfig {
     enableSendSeen: stored.enableSendSeen ?? true,
     pauseDurationHours: hours,
     pauseDurationMinutes: Math.round(hours * 60),
-    geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || ''
+    geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
+    wahaBaseUrl: stored.wahaBaseUrl || process.env.WAHA_BASE_URL || 'http://localhost:3000',
+    wahaApiKey: stored.wahaApiKey || process.env.WAHA_API_KEY || '',
+    wahaSession: stored.wahaSession || process.env.WAHA_SESSION || 'default',
+    webhookPublicUrl: stored.webhookPublicUrl || process.env.WEBHOOK_PUBLIC_URL || 'http://localhost:3001'
   };
 }
 
@@ -84,6 +92,13 @@ export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
     newConfig.pauseDurationHours = Number((newConfig.pauseDurationMinutes / 60).toFixed(1));
   }
 
+  if (newConfig.wahaBaseUrl) {
+    newConfig.wahaBaseUrl = newConfig.wahaBaseUrl.replace(/\/$/, '');
+  }
+  if (newConfig.webhookPublicUrl) {
+    newConfig.webhookPublicUrl = newConfig.webhookPublicUrl.replace(/\/$/, '');
+  }
+
   const updated = { ...current, ...newConfig };
   
   const dir = path.dirname(configPath);
@@ -92,16 +107,26 @@ export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
   }
 
   fs.writeFileSync(configPath, JSON.stringify(updated, null, 2), 'utf-8');
+
+  // Atualiza também as variáveis em memória do objeto env
+  if (updated.wahaBaseUrl) env.wahaBaseUrl = updated.wahaBaseUrl;
+  if (updated.wahaApiKey !== undefined) env.wahaApiKey = updated.wahaApiKey;
+  if (updated.wahaSession) env.wahaSession = updated.wahaSession;
+  if (updated.geminiApiKey) env.geminiApiKey = updated.geminiApiKey;
+  if (updated.webhookPublicUrl) env.webhookPublicUrl = updated.webhookPublicUrl;
+
   return updated;
 }
+
+const initialConfig = loadBotConfig();
 
 export const env = {
   port: parseInt(process.env.PORT || '3001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
-  wahaBaseUrl: (process.env.WAHA_BASE_URL || 'http://localhost:3000').replace(/\/$/, ''),
-  wahaSession: process.env.WAHA_SESSION || 'default',
-  wahaApiKey: process.env.WAHA_API_KEY || '',
-  geminiApiKey: process.env.GEMINI_API_KEY || loadBotConfig().geminiApiKey || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
-  webhookPublicUrl: (process.env.WEBHOOK_PUBLIC_URL || 'http://localhost:3001').replace(/\/$/, '')
+  wahaBaseUrl: (process.env.WAHA_BASE_URL || initialConfig.wahaBaseUrl || 'http://localhost:3000').replace(/\/$/, ''),
+  wahaSession: process.env.WAHA_SESSION || initialConfig.wahaSession || 'default',
+  wahaApiKey: process.env.WAHA_API_KEY || initialConfig.wahaApiKey || '',
+  geminiApiKey: process.env.GEMINI_API_KEY || initialConfig.geminiApiKey || '',
+  geminiModel: process.env.GEMINI_MODEL || initialConfig.model || 'gemini-1.5-flash',
+  webhookPublicUrl: (process.env.WEBHOOK_PUBLIC_URL || initialConfig.webhookPublicUrl || 'http://localhost:3001').replace(/\/$/, '')
 };
