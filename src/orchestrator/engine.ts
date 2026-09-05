@@ -1,0 +1,225 @@
+import { IAgent, AgentContext, AgentResponse } from './agents/base.js';
+import { HandoffAgent } from './agents/handoff.js';
+import { AttendantAgent } from './agents/attendant.js';
+import { messageDebouncer } from './debouncer.js';
+import { memoryStore } from '../gemini/memory.js';
+import { wahaClient } from '../waha/client.js';
+import { loadBotConfig, env } from '../config/index.js';
+import { WahaMessagePayload } from '../waha/types.js';
+
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  type: 'incoming' | 'outgoing' | 'info' | 'warn' | 'error' | 'handoff';
+  chatId: string;
+  contactName?: string;
+  message: string;
+  agentName?: string;
+}
+
+export class AgentOrchestrator {
+  private agents: IAgent[] = [];
+  private logs: LogEntry[] = [];
+  private maxLogs: number = 200;
+
+  constructor() {
+    // Ordem de prioridade dos agentes:
+    // 1. HandoffAgent (checa se o cliente quer atendente humano)
+    // 2. AttendantAgent (Gemini Flash)
+    this.agents = [
+      new HandoffAgent(),
+      new AttendantAgent()
+    ];
+
+    // Registra o callback do debouncer
+    messageDebouncer.registerHandler(this.handleDebouncedMessage.bind(this));
+  }
+
+  addLog(entry: Omit<LogEntry, 'id' | 'timestamp'>): void {
+    const log: LogEntry = {
+      ...entry,
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: new Date().toLocaleTimeString('pt-BR')
+    };
+    this.logs.unshift(log);
+    if (this.logs.length > this.maxLogs) {
+      this.logs = this.logs.slice(0, this.maxLogs);
+    }
+  }
+
+  getLogs(): LogEntry[] {
+    return this.logs;
+  }
+
+  clearLogs(): void {
+    this.logs = [];
+  }
+
+  /**
+   * Ponto de entrada do Webhook da WAHA
+   */
+  async processIncomingWahaMessage(payload: WahaMessagePayload, sessionName: string): Promise<void> {
+    const { from, to, fromMe, body, hasMedia } = payload;
+    const chatId = fromMe ? to : from;
+
+    // 1. Ignorar canais de status e newsletter
+    if (chatId.includes('status@broadcast') || chatId.includes('@newsletter')) {
+      return;
+    }
+
+    // 2. Se for grupo (@g.us) e desejar ignorar grupos por padrão:
+    if (chatId.includes('@g.us')) {
+      console.log(`[Orchestrator] Mensagem de grupo ignorada: ${chatId}`);
+      return;
+    }
+
+    // 3. Se a mensagem foi enviada pelo próprio número (fromMe === true)
+    // Isso acontece quando um ATENDENTE HUMANO no Chatwoot ou no celular responde ao cliente!
+    if (fromMe) {
+      const config = loadBotConfig();
+      // Pausa o bot automaticamente para não atropelar a conversa do atendente humano
+      memoryStore.pauseChat(chatId, config.pauseDurationMinutes || 60);
+      messageDebouncer.cancel(chatId);
+
+      this.addLog({
+        type: 'info',
+        chatId,
+        message: `Mensagem enviada por atendente humano (Chatwoot/WhatsApp). Bot pausado para ${chatId}.`
+      });
+      return;
+    }
+
+    // 4. Se o bot estiver pausado para este chatId, ignora
+    if (memoryStore.isChatPaused(chatId)) {
+      console.log(`[Orchestrator] Bot pausado para ${chatId}, ignorando processamento.`);
+      this.addLog({
+        type: 'info',
+        chatId,
+        message: `Mensagem recebida mas bot está pausado para este contato: "${body}"`
+      });
+      return;
+    }
+
+    // 5. Verifica se há texto válido
+    if (!body || body.trim() === '') {
+      if (hasMedia) {
+        this.addLog({
+          type: 'info',
+          chatId,
+          message: 'Mensagem com mídia recebida sem legenda.'
+        });
+      }
+      return;
+    }
+
+    const contactName = payload._data?.notifyName || payload.from.split('@')[0];
+
+    this.addLog({
+      type: 'incoming',
+      chatId,
+      contactName,
+      message: body
+    });
+
+    // 6. Envia mensagem para o debouncer (buffer de mensagens consecutivas)
+    messageDebouncer.enqueue(chatId, body, contactName);
+  }
+
+  /**
+   * Processa a mensagem unificada após a janela de debounce
+   */
+  private async handleDebouncedMessage(chatId: string, messageText: string, contactName?: string): Promise<void> {
+    const config = loadBotConfig();
+    const session = env.wahaSession;
+
+    // 1. Confirmação de leitura (sendSeen) e indicador de digitação (startTyping)
+    if (config.enableSendSeen) {
+      await wahaClient.sendSeen(chatId, session);
+    }
+
+    if (config.enableTypingSimulation) {
+      await wahaClient.startTyping(chatId, session);
+    }
+
+    const context: AgentContext = {
+      chatId,
+      userMessage: messageText,
+      contactName,
+      session
+    };
+
+    let response: AgentResponse | null = null;
+
+    try {
+      // 2. Execução pela esteira de agentes
+      for (const agent of this.agents) {
+        const canHandle = await agent.canHandle(context);
+        if (canHandle) {
+          response = await agent.execute(context);
+          if (response.handled) {
+            break;
+          }
+        }
+      }
+
+      // 3. Aguarda um pequeno delay para humanizar a resposta
+      if (config.enableTypingSimulation) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        await wahaClient.stopTyping(chatId, session);
+      }
+
+      // 4. Envia a resposta final via WAHA
+      if (response && response.replyText) {
+        await wahaClient.sendText(chatId, response.replyText, { session });
+
+        this.addLog({
+          type: response.action === 'transferred_human' ? 'handoff' : 'outgoing',
+          chatId,
+          contactName,
+          message: response.replyText,
+          agentName: response.agentName
+        });
+      }
+    } catch (error: any) {
+      if (config.enableTypingSimulation) {
+        await wahaClient.stopTyping(chatId, session);
+      }
+      console.error(`[Orchestrator] Falha no processamento de ${chatId}:`, error.message);
+      this.addLog({
+        type: 'error',
+        chatId,
+        message: `Erro ao responder: ${error.message}`
+      });
+    }
+  }
+
+  /**
+   * Permite executar uma simulação direta (para teste no painel web)
+   */
+  async simulateMessage(chatId: string, messageText: string): Promise<AgentResponse> {
+    const context: AgentContext = {
+      chatId,
+      userMessage: messageText,
+      contactName: 'Cliente Teste',
+      session: 'simulator'
+    };
+
+    for (const agent of this.agents) {
+      const canHandle = await agent.canHandle(context);
+      if (canHandle) {
+        const res = await agent.execute(context);
+        if (res.handled) {
+          return res;
+        }
+      }
+    }
+
+    return {
+      handled: false,
+      replyText: 'Nenhum agente pôde responder.',
+      agentName: 'None'
+    };
+  }
+}
+
+export const orchestrator = new AgentOrchestrator();

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BotZap | Orquestrador de Agentes IA (WAHA + Gemini Flash)</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar / Header -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-text">
+          <h1>BotZap</h1>
+          <span>Orquestrador IA</span>
+        </div>
+      </div>
+
+      <!-- Status Bar -->
+      <div class="status-card">
+        <div class="status-item">
+          <span class="status-dot online"></span>
+          <span class="status-label">Orquestrador:</span>
+          <span class="status-val text-green" id="status-orch">Online</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot" id="dot-waha"></span>
+          <span class="status-label">WAHA API:</span>
+          <span class="status-val" id="status-waha">Checando...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot" id="dot-gemini"></span>
+          <span class="status-label">Gemini Flash:</span>
+          <span class="status-val" id="status-gemini">Checando...</span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="nav-menu">
+        <button class="nav-btn active" data-tab="simulator">
+          <span class="nav-icon">💬</span> Simulador de Chat
+        </button>
+        <button class="nav-btn" data-tab="prompts">
+          <span class="nav-icon">⚙️</span> Agente & Prompts
+        </button>
+        <button class="nav-btn" data-tab="chats">
+          <span class="nav-icon">👥</span> Conversas & Pausa
+        </button>
+        <button class="nav-btn" data-tab="logs">
+          <span class="nav-icon">📋</span> Logs em Tempo Real
+        </button>
+        <button class="nav-btn" data-tab="integration">
+          <span class="nav-icon">🔌</span> Conectar WAHA / Chatwoot
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <small>WAHA + Gemini 2.0 Flash</small>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Bar -->
+      <header class="topbar">
+        <div class="page-title" id="page-title">Simulador de Atendimento</div>
+        <div class="topbar-actions">
+          <button class="btn btn-secondary btn-sm" id="btn-refresh-status">🔄 Atualizar Status</button>
+          <a href="https://waha.devlike.pro/docs/overview/" target="_blank" class="btn btn-outline btn-sm">📖 Docs WAHA</a>
+        </div>
+      </header>
+
+      <!-- TAB 1: Simulador -->
+      <section class="tab-pane active" id="pane-simulator">
+        <div class="chat-container">
+          <div class="chat-header">
+            <div class="chat-contact-info">
+              <div class="avatar">🤖</div>
+              <div>
+                <strong id="sim-bot-name">Assistente Virtual</strong>
+                <span class="sim-badge">Simulador Interativo do WhatsApp</span>
+              </div>
+            </div>
+            <button class="btn btn-outline btn-sm" id="btn-clear-chat">Limpar Conversa</button>
+          </div>
+
+          <div class="chat-messages" id="chat-messages">
+            <div class="message incoming">
+              <div class="message-bubble">
+                Olá! Eu sou o assistente virtual com <strong>Gemini Flash</strong>. Digite sua mensagem abaixo para testar o atendimento exatamente como seu cliente no WhatsApp! 👋
+              </div>
+              <span class="message-time">Agora</span>
+            </div>
+          </div>
+
+          <form class="chat-input-area" id="chat-form">
+            <input type="text" id="chat-input" placeholder="Digite uma mensagem como se fosse o cliente..." autocomplete="off">
+            <button type="submit" class="btn btn-primary" id="btn-send-sim">Enviar</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- TAB 2: Configuração de Prompts & Agente -->
+      <section class="tab-pane" id="pane-prompts">
+        <div class="card">
+          <div class="card-header">
+            <h3>⚙️ Configuração do Agente e Instruções do Sistema</h3>
+            <p>Altere o comportamento, tom de voz, regras da empresa e instruções do Gemini Flash em tempo real.</p>
+          </div>
+          <div class="card-body">
+            <form id="config-form">
+              <div class="form-row">
+                <div class="form-group col-6">
+                  <label for="cfg-botName">Nome do Bot</label>
+                  <input type="text" id="cfg-botName" name="botName" class="form-control" required>
+                </div>
+                <div class="form-group col-6">
+                  <label for="cfg-companyName">Nome da Empresa</label>
+                  <input type="text" id="cfg-companyName" name="companyName" class="form-control" required>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group col-6">
+                  <label for="cfg-model">Modelo do Gemini</label>
+                  <select id="cfg-model" name="model" class="form-control">
+                    <option value="gemini-1.5-flash">Gemini 1.5 Flash (Recomendado - Estável e Rápido)</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                  </select>
+                </div>
+                <div class="form-group col-6">
+                  <label for="cfg-temperature">Criatividade / Temperatura (0.0 a 1.0)</label>
+                  <input type="number" step="0.1" min="0" max="1" id="cfg-temperature" name="temperature" class="form-control">
+                  <small class="form-hint">Valores menores (ex: 0.3 - 0.5) tornam o bot mais factual e preciso.</small>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-apiKey">Chave de API do Google Gemini (Google AI Studio)</label>
+                <input type="password" id="cfg-apiKey" name="apiKey" class="form-control" placeholder="Deixe em branco para manter a atual">
+                <small class="form-hint">Obtenha sua chave gratuita em: <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a></small>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-systemInstruction">Instruções do Sistema (System Prompt)</label>
+                <textarea id="cfg-systemInstruction" name="systemInstruction" rows="6" class="form-control"></textarea>
+                <small class="form-hint">Use a tag <code>{companyName}</code> para referenciar o nome da empresa.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-businessInfo">Base de Conhecimento da Empresa (Horários, Serviços, Preços, FAQ)</label>
+                <textarea id="cfg-businessInfo" name="businessInfo" rows="6" class="form-control"></textarea>
+                <small class="form-hint">Todas essas informações serão injetadas nas instruções do Gemini Flash para responder os clientes.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-handoffKeywords">Palavras de Transbordo para Humano (separadas por vírgula)</label>
+                <input type="text" id="cfg-handoffKeywords" name="handoffKeywords" class="form-control">
+                <small class="form-hint">Quando o cliente usar estes termos, o bot responderá com a mensagem de transbordo e pausará para o Chatwoot.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-handoffMessage">Mensagem de Transbordo Humano</label>
+                <textarea id="cfg-handoffMessage" name="handoffMessage" rows="2" class="form-control"></textarea>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group col-4">
+                  <label for="cfg-debounce">Buffer de Mensagens (Segundos)</label>
+                  <input type="number" step="0.5" min="1" max="10" id="cfg-debounce" name="debounceSeconds" class="form-control">
+                  <small class="form-hint">Espera o cliente terminar de mandar frases picadas antes de responder.</small>
+                </div>
+                <div class="form-group col-4">
+                  <label for="cfg-pauseDuration">Tempo de Pausa do Bot (Minutos)</label>
+                  <input type="number" min="5" max="1440" id="cfg-pauseDuration" name="pauseDurationMinutes" class="form-control">
+                  <small class="form-hint">Tempo em que o bot fica em silêncio quando um atendente assume no Chatwoot.</small>
+                </div>
+                <div class="form-group col-4">
+                  <label>Humanização</label>
+                  <div class="checkbox-group">
+                    <label><input type="checkbox" id="cfg-typing" name="enableTypingSimulation"> Simular Digitando...</label>
+                    <label><input type="checkbox" id="cfg-seen" name="enableSendSeen"> Enviar Visto (Check Azul)</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="btn-save-config">💾 Salvar Configurações</button>
+                <span id="save-feedback" class="feedback-msg"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: Conversas & Controle de Pausa -->
+      <section class="tab-pane" id="pane-chats">
+        <div class="card">
+          <div class="card-header d-flex justify-between align-center">
+            <div>
+              <h3>👥 Conversas Ativas e Controle do Bot por Contato</h3>
+              <p>Monitore quais números conversaram recentemente e pause/reative o bot individualmente.</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btn-refresh-chats">Atualizar Lista</button>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>WhatsApp ID / Telefone</th>
+                    <th>Nome</th>
+                    <th>Status do Bot</th>
+                    <th>Mensagens</th>
+                    <th>Última Interação</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="chats-tbody">
+                  <tr>
+                    <td colspan="6" class="text-center text-muted">Nenhuma conversa registrada ainda.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: Logs em Tempo Real -->
+      <section class="tab-pane" id="pane-logs">
+        <div class="card">
+          <div class="card-header d-flex justify-between align-center">
+            <div>
+              <h3>📋 Logs de Eventos e Atendimentos</h3>
+              <p>Acompanhe mensagens recebidas da WAHA, respostas geradas pelo Gemini e transbordos.</p>
+            </div>
+            <div>
+              <button class="btn btn-outline btn-sm" id="btn-clear-logs">Limpar Logs</button>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-logs">Atualizar</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="logs-console" id="logs-console">
+              <div class="log-entry info">
+                <span class="log-time">--:--:--</span>
+                <span class="log-tag tag-info">INFO</span>
+                <span class="log-text">Aguardando eventos da WAHA...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: Integração WAHA & Chatwoot -->
+      <section class="tab-pane" id="pane-integration">
+        <div class="card mb-4">
+          <div class="card-header">
+            <h3>⚡ Configuração Automática do Webhook na WAHA</h3>
+          </div>
+          <div class="card-body">
+            <p>Clique no botão abaixo para cadastrar automaticamente a URL deste orquestrador na sua sessão da WAHA:</p>
+            <div class="webhook-setup-box">
+              <input type="text" id="target-webhook-url" class="form-control" value="http://localhost:3001/webhook/waha">
+              <button class="btn btn-primary" id="btn-register-waha-hook">🚀 Registrar Webhook na WAHA</button>
+            </div>
+            <div id="waha-hook-result" class="feedback-msg mt-2"></div>
+          </div>
+        </div>
+
+        <div class="card mb-4">
+          <div class="card-header">
+            <h3>📖 Como Funciona a Integração WAHA + Chatwoot + Gemini</h3>
+          </div>
+          <div class="card-body guide-content">
+            <h4>1. Fluxo de Atendimento Automático</h4>
+            <ul>
+              <li>O cliente envia mensagem no WhatsApp. A <strong>WAHA</strong> recebe e despacha para o <strong>Chatwoot</strong> (inbox de atendimento) e simultaneamente envia o webhook para o <strong>BotZap</strong>.</li>
+              <li>O <strong>BotZap</strong> aplica o buffer anti-mensagens picadas (debounce), carrega o histórico e chama o <strong>Gemini Flash</strong>.</li>
+              <li>O bot envia a resposta para a WAHA via <code>POST /api/sendText</code>. A mensagem vai para o cliente e aparece no Chatwoot!</li>
+            </ul>
+
+            <h4>2. Transbordo Humano Inteligente</h4>
+            <ul>
+              <li>Se o cliente disser <em>"quero falar com uma pessoa"</em>, o <strong>HandoffAgent</strong> envia mensagem de aviso e pausa o bot para aquele número.</li>
+              <li>Se um atendente humano digitar diretamente no <strong>Chatwoot</strong> ou no celular do WhatsApp, a WAHA envia um evento com <code>fromMe: true</code>. O <strong>BotZap detecta automaticamente e pausa o bot</strong> por 60 minutos para não atrapalhar o atendente!</li>
+            </ul>
+
+            <h4>3. Configuração de Variáveis na WAHA (Docker)</h4>
+            <pre><code># No arquivo docker-compose da WAHA:
+WHATSAPP_HOOK_URL=http://botzap:3001/webhook/waha
+WHATSAPP_HOOK_EVENTS=message
+</code></pre>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
