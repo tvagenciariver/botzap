@@ -112,6 +112,30 @@ async function runTests() {
   }
   console.log('Sanitização de histórico para Gemini: APROVADO ✅');
 
+  // Teste 7: Descarte de mensagens antigas ou sincronizadas pelo histórico da WAHA (stale messages)
+  console.log('\nTeste 7: Descarte de mensagens antigas (stale messages do WhatsApp)');
+  const staleChatId = '5511999990006@c.us';
+  const initialLogsCount = orchestrator.getLogs().length;
+
+  const stalePayload: WahaMessagePayload = {
+    id: 'stale_msg_test_' + Date.now(),
+    timestamp: Math.round((Date.now() - 300000) / 1000), // 5 minutos atrás (em segundos)
+    from: staleChatId,
+    to: '5511888880000@c.us',
+    fromMe: false,
+    body: 'Oi, mensagem antiga de horas atrás',
+    hasMedia: false
+  };
+
+  await orchestrator.processIncomingWahaMessage(stalePayload, 'default');
+  const logs = orchestrator.getLogs();
+  const lastLog = logs[0];
+  console.log(`Último log gerado: "${lastLog?.message}" (tipo: ${lastLog?.type})`);
+  if (!lastLog?.message?.includes('Mensagem antiga/histórico ignorada')) {
+    throw new Error('Falha: mensagem antiga não foi descartada pelo orquestrador');
+  }
+  console.log('Descarte de mensagens antigas da WAHA: APROVADO ✅');
+
   console.log('\n✅ TODOS OS TESTES PASSARAM COM SUCESSO!\n');
 }
 

@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 export interface ChatMessage {
   role: 'user' | 'model';
   parts: Array<{ text: string }>;
@@ -13,9 +16,56 @@ export interface ChatSessionState {
   messages: ChatMessage[];
 }
 
+const memoryPath = path.resolve(process.cwd(), 'data', 'chat_sessions.json');
+
 export class MemoryStore {
   private sessions: Map<string, ChatSessionState> = new Map();
   private maxHistoryPerChat: number = 20;
+  private saveTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.loadFromDisk();
+  }
+
+  private loadFromDisk(): void {
+    try {
+      if (fs.existsSync(memoryPath)) {
+        const raw = fs.readFileSync(memoryPath, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data)) {
+          for (const item of data) {
+            if (item && item.chatId) {
+              this.sessions.set(item.chatId, item);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[MemoryStore] Aviso ao carregar chat_sessions.json:', err.message);
+    }
+  }
+
+  private scheduleSave(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.saveToDisk();
+    }, 1000);
+  }
+
+  private saveToDisk(): void {
+    try {
+      const dir = path.dirname(memoryPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      // Salva os dados no disco
+      const data = Array.from(this.sessions.values());
+      fs.writeFileSync(memoryPath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err: any) {
+      console.error('[MemoryStore] Erro ao salvar chat_sessions.json:', err.message);
+    }
+  }
 
   getSession(chatId: string): ChatSessionState {
     let state = this.sessions.get(chatId);
@@ -94,6 +144,7 @@ export class MemoryStore {
         session.messages.shift();
       }
     }
+    this.scheduleSave();
   }
 
   isChatPaused(chatId: string): boolean {
@@ -104,6 +155,7 @@ export class MemoryStore {
     if (session.pausedUntil && Date.now() > session.pausedUntil) {
       session.isPaused = false;
       session.pausedUntil = undefined;
+      this.scheduleSave();
       return false;
     }
 
@@ -114,18 +166,21 @@ export class MemoryStore {
     const session = this.getSession(chatId);
     session.isPaused = true;
     session.pausedUntil = Date.now() + durationMinutes * 60 * 1000;
+    this.saveToDisk();
   }
 
   resumeChat(chatId: string): void {
     const session = this.getSession(chatId);
     session.isPaused = false;
     session.pausedUntil = undefined;
+    this.saveToDisk();
   }
 
   clearHistory(chatId: string): void {
-    const session = this.sessions.get(chatId);
+    const session = this.getSession(chatId);
     if (session) {
       session.messages = [];
+      this.scheduleSave();
     }
   }
 

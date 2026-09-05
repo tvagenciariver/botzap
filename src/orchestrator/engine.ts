@@ -23,6 +23,7 @@ export class AgentOrchestrator {
   private logs: LogEntry[] = [];
   private maxLogs: number = 200;
   private processedMessageIds: Set<string> = new Set();
+  private botStartTime: number = Date.now();
 
   constructor() {
     // Ordem de prioridade dos agentes:
@@ -81,18 +82,37 @@ export class AgentOrchestrator {
       chatId = to || payload._data?.to || payload._data?.id?.remote || from;
     }
 
-    // 1. Ignorar canais de status e newsletter
+    // 1. Descartar mensagens antigas ou sincronizadas do histórico (stale messages ao reconectar WAHA)
+    if (payload.timestamp) {
+      const msgTimeMs = payload.timestamp > 1e11 ? payload.timestamp : payload.timestamp * 1000;
+      const now = Date.now();
+      const ageSeconds = Math.round((now - msgTimeMs) / 1000);
+      const maxAgeSeconds = 120; // Limite de 2 minutos
+
+      // Se a mensagem for anterior ao início do bot ou tiver mais de 2 minutos
+      if (ageSeconds > maxAgeSeconds || msgTimeMs < (this.botStartTime - 15000)) {
+        console.log(`[Orchestrator] Mensagem antiga de ${chatId} ignorada (${ageSeconds}s atrás): "${body}"`);
+        this.addLog({
+          type: 'info',
+          chatId,
+          message: `Mensagem antiga/histórico ignorada (${ageSeconds}s atrás): "${body}"`
+        });
+        return;
+      }
+    }
+
+    // 2. Ignorar canais de status e newsletter
     if (chatId.includes('status@broadcast') || chatId.includes('@newsletter')) {
       return;
     }
 
-    // 2. Se for grupo (@g.us) e desejar ignorar grupos por padrão:
+    // 3. Se for grupo (@g.us) e desejar ignorar grupos por padrão:
     if (chatId.includes('@g.us')) {
       console.log(`[Orchestrator] Mensagem de grupo ignorada: ${chatId}`);
       return;
     }
 
-    // 3. Se a mensagem foi enviada pelo próprio número (fromMe === true)
+    // 4. Se a mensagem foi enviada pelo próprio número (fromMe === true)
     // Isso acontece quando um ATENDENTE HUMANO no Chatwoot ou no celular responde ao cliente!
     if (fromMe) {
       // Verifica se a mensagem foi enviada pelo próprio BotZap

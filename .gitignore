@@ -27,3 +27,4 @@ Thumbs.db
 
 # Docker / Volumes locais
 waha_sessions/
+data/chat_sessions.json
