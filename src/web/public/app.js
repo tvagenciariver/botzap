@@ -360,12 +360,13 @@ async function loadWahaConfig() {
 
     // Auto-detect URL pública do webhook baseada na origem atual ou na configurada
     const currentOrigin = window.location.origin;
-    let hookUrl = cfg.webhookPublicUrl || envData.webhookPublicUrl || '';
-    if (!hookUrl || hookUrl.includes('localhost')) {
-      hookUrl = currentOrigin;
+    let rawUrl = cfg.webhookPublicUrl || envData.webhookPublicUrl || currentOrigin;
+    let baseOrigin = rawUrl.replace(/(\/webhook\/(waha|chatwoot))+/gi, '').replace(/\/$/, '');
+    if (!baseOrigin || baseOrigin.includes('localhost')) {
+      baseOrigin = currentOrigin;
     }
-    const fullWahaHook = `${hookUrl.replace(/\/$/, '')}/webhook/waha`;
-    const fullChatwootHook = `${hookUrl.replace(/\/$/, '')}/webhook/chatwoot`;
+    const fullWahaHook = `${baseOrigin}/webhook/waha`;
+    const fullChatwootHook = `${baseOrigin}/webhook/chatwoot`;
 
     if (publicWebhookUrlEl) publicWebhookUrlEl.value = fullWahaHook;
     if (copyWebhookEl) copyWebhookEl.value = fullWahaHook;
@@ -423,7 +424,8 @@ document.getElementById('btn-save-waha')?.addEventListener('click', async () => 
   const baseUrl = document.getElementById('waha-baseUrl').value.trim();
   const apiKey = document.getElementById('waha-apiKey').value.trim();
   const session = document.getElementById('waha-session').value.trim() || 'default';
-  const webhookPublicUrl = document.getElementById('waha-publicWebhookUrl').value.trim();
+  const rawHook = document.getElementById('waha-publicWebhookUrl').value.trim();
+  const cleanBaseHook = rawHook.replace(/(\/webhook\/(waha|chatwoot))+/gi, '').replace(/\/$/, '');
 
   statusBox.style.display = 'block';
   statusBox.className = 'feedback-msg text-orange';
@@ -433,7 +435,7 @@ document.getElementById('btn-save-waha')?.addEventListener('click', async () => 
     const res = await fetch('/api/waha/save-connection', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ baseUrl, apiKey, session, webhookPublicUrl })
+      body: JSON.stringify({ baseUrl, apiKey, session, webhookPublicUrl: cleanBaseHook })
     });
     const data = await res.json();
 

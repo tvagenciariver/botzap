@@ -210,7 +210,7 @@ apiRouter.post('/api/waha/save-connection', (req: Request, res: Response) => {
       updateEnvFile('WAHA_SESSION', cleanSession);
     }
     if (webhookPublicUrl !== undefined) {
-      const cleanHook = webhookPublicUrl.trim().replace(/\/$/, '');
+      const cleanHook = webhookPublicUrl.trim().replace(/(\/webhook\/(waha|chatwoot))+/gi, '').replace(/\/$/, '');
       toUpdate.webhookPublicUrl = cleanHook;
       updateEnvFile('WEBHOOK_PUBLIC_URL', cleanHook);
     }
@@ -228,7 +228,9 @@ apiRouter.post('/api/waha/save-connection', (req: Request, res: Response) => {
  */
 apiRouter.post('/api/waha/setup-webhook', async (req: Request, res: Response) => {
   try {
-    const targetUrl = req.body.url || `${env.webhookPublicUrl}/webhook/waha`;
+    const rawTarget = req.body.url || env.webhookPublicUrl;
+    const baseTarget = (rawTarget || '').replace(/(\/webhook\/(waha|chatwoot))+/gi, '').replace(/\/$/, '');
+    const targetUrl = `${baseTarget}/webhook/waha`;
     const session = req.body.session || env.wahaSession;
     const result = await wahaClient.configureWebhook(targetUrl, session);
     res.json(result);

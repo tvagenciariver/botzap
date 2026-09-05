@@ -22,6 +22,7 @@ export class AgentOrchestrator {
   private agents: IAgent[] = [];
   private logs: LogEntry[] = [];
   private maxLogs: number = 200;
+  private processedMessageIds: Set<string> = new Set();
 
   constructor() {
     // Ordem de prioridade dos agentes:
@@ -61,6 +62,19 @@ export class AgentOrchestrator {
    */
   async processIncomingWahaMessage(payload: WahaMessagePayload, sessionName: string): Promise<void> {
     const { from, to, fromMe, body, hasMedia } = payload;
+
+    // 0. Deduplicação de mensagens idênticas (evita duplicar eventos da WAHA como message e message.any)
+    if (payload.id) {
+      if (this.processedMessageIds.has(payload.id)) {
+        return;
+      }
+      this.processedMessageIds.add(payload.id);
+      if (this.processedMessageIds.size > 2000) {
+        const first = this.processedMessageIds.values().next().value;
+        if (first) this.processedMessageIds.delete(first);
+      }
+    }
+
     // Determina o chatId remoto do cliente
     let chatId = from;
     if (fromMe) {

@@ -96,7 +96,7 @@ export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
     newConfig.wahaBaseUrl = newConfig.wahaBaseUrl.replace(/\/$/, '');
   }
   if (newConfig.webhookPublicUrl) {
-    newConfig.webhookPublicUrl = newConfig.webhookPublicUrl.replace(/\/$/, '');
+    newConfig.webhookPublicUrl = newConfig.webhookPublicUrl.replace(/(\/webhook\/(waha|chatwoot))+/gi, '').replace(/\/$/, '');
   }
 
   const updated = { ...current, ...newConfig };

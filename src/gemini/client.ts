@@ -68,14 +68,17 @@ export class GeminiService {
     const systemInstruction = this.buildFullSystemInstruction();
     const history = memoryStore.getHistory(chatId);
 
-    // Lista de modelos candidatos priorizados para garantir alta disponibilidade
-    const preferredModel = config.model || 'gemini-1.5-flash';
+    // Lista de modelos candidatos priorizados para garantir altíssima disponibilidade
+    const preferredModel = config.model || 'gemini-flash-lite-latest';
     const candidateModels = Array.from(new Set([
       preferredModel,
-      'gemini-1.5-flash',
-      'gemini-2.5-flash',
+      'gemini-flash-lite-latest',
+      'gemini-2.5-flash-lite',
+      'gemini-flash-latest',
       'gemini-3.6-flash',
-      'gemini-1.5-pro'
+      'gemini-3.5-flash',
+      'gemini-2.5-flash',
+      'gemini-1.5-flash'
     ]));
 
     let lastError: any = null;
@@ -113,7 +116,7 @@ export class GeminiService {
 
         // Se precisou usar outro modelo com sucesso, atualiza a configuração para os próximos
         if (modelName !== config.model) {
-          console.log(`[Gemini] Modelo alterado com sucesso para "${modelName}" (anterior "${config.model}" indisponível).`);
+          console.log(`[Gemini] Modelo alternado com sucesso para "${modelName}" (anterior "${config.model}" falhou/sem quota).`);
           saveBotConfig({ model: modelName });
         }
 
@@ -128,12 +131,17 @@ export class GeminiService {
       } catch (error: any) {
         lastError = error;
         const msg = error.message || '';
-        // Se o erro for 404 (modelo indisponível/descontinuado), tenta o próximo modelo da lista
-        if (msg.includes('404') || msg.includes('not found') || msg.includes('no longer available')) {
-          console.warn(`[Gemini] Modelo "${modelName}" retornou 404/indisponível. Tentando próximo modelo...`);
+        // Se o erro for 404 (modelo indisponível), 429 (quota esgotada no modelo específico), 503 (sobrecarregado)
+        const isModelSpecificError =
+          msg.includes('404') || msg.includes('not found') || msg.includes('no longer available') ||
+          msg.includes('429') || msg.includes('quota') || msg.includes('Quota exceeded') || msg.includes('ResourceExhausted') ||
+          msg.includes('503') || msg.includes('overloaded') || msg.includes('high demand');
+
+        if (isModelSpecificError) {
+          console.warn(`[Gemini] Modelo "${modelName}" falhou (${msg.slice(0, 110)}...). Tentando modelo de contingência...`);
           continue;
         } else {
-          // Erro de autenticação, quota ou outro, não adianta trocar modelo
+          // Erro global (como chave de API inválida), lança exceção
           throw error;
         }
       }
