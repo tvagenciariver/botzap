@@ -1,13 +1,10 @@
 version: '3.8'
 
 services:
-  # Orquestrador de Agentes IA (Google Gemini Flash)
   botzap:
-    build: .
-    container_name: botzap-orchestrator
-    restart: unless-stopped
+    image: ghcr.io/tvagenciariver/botzap:latest
     ports:
-      - "${PORT:-3001}:3001"
+      - "3001:3001"
     environment:
       - PORT=3001
       - WAHA_BASE_URL=${WAHA_BASE_URL:-http://waha:3000}
@@ -18,34 +15,28 @@ services:
       - WEBHOOK_PUBLIC_URL=${WEBHOOK_PUBLIC_URL:-http://botzap:3001}
     volumes:
       - botzap_data:/app/data
-    networks:
-      - botzap_network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
 
-  # WAHA (WhatsApp HTTP API) - Core Engine (opcional se já tiver rodando em outra stack)
+  # WAHA (Caso já tenha uma WAHA rodando no Portainer, você pode comentar este serviço)
   waha:
     image: devlikeapro/waha:latest
-    container_name: waha-api
-    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       - WHATSAPP_DEFAULT_ENGINE=GOWS
       - WHATSAPP_HOOK_URL=${WHATSAPP_HOOK_URL:-http://botzap:3001/webhook/waha}
       - WHATSAPP_HOOK_EVENTS=message
-      # Caso utilize Chatwoot com WAHA:
       - WAHA_APPS_ENABLED=True
       - WAHA_APPS_ON=chatwoot
-      # Configurações do Chatwoot (se aplicável):
-      # - REDIS_URL=redis://redis:6379
-      # - WAHA_API_KEY_PLAIN=seutoken
     volumes:
       - waha_sessions:/app/.sessions
-    networks:
-      - botzap_network
-
-networks:
-  botzap_network:
-    driver: bridge
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
 
 volumes:
   botzap_data:
