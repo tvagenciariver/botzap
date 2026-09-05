@@ -94,8 +94,21 @@ export class GeminiService {
           }
         });
 
-        const chat = model.startChat({ history });
-        const result = await chat.sendMessage(userMessage);
+        let result;
+        try {
+          const chat = model.startChat({ history });
+          result = await chat.sendMessage(userMessage);
+        } catch (chatErr: any) {
+          const errMsg = chatErr?.message || '';
+          if (errMsg.includes('role') || errMsg.includes('First content') || errMsg.includes('history')) {
+            console.warn(`[Gemini] Inconsistência no histórico detectada (${errMsg}). Limpando histórico de ${chatId} e regenerando...`);
+            memoryStore.clearHistory(chatId);
+            const freshChat = model.startChat({ history: [] });
+            result = await freshChat.sendMessage(userMessage);
+          } else {
+            throw chatErr;
+          }
+        }
         let replyText = result.response.text();
 
         // Se precisou usar outro modelo com sucesso, atualiza a configuração para os próximos

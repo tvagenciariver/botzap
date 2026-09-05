@@ -25,9 +25,13 @@ export class AttendantAgent implements IAgent {
       };
     } catch (error: any) {
       console.error(`[AttendantAgent] Erro ao processar mensagem com Gemini Flash:`, error.message);
+      const isSimulation = context.chatId.startsWith('simulador_');
+      const clientMessage = 'Olá! No momento estamos com uma instabilidade técnica momentânea em nosso atendimento automatizado. Nossa equipe humana já foi notificada e logo te responderá por aqui!';
       return {
         handled: true,
-        replyText: `⚠️ Aviso do Bot: Não foi possível obter resposta da IA (${error.message}). Por favor, verifique sua chave de API e modelo nas configurações.`,
+        replyText: isSimulation 
+          ? `⚠️ Aviso do Bot: Não foi possível obter resposta da IA (${error.message}). Por favor, verifique sua chave de API e modelo nas configurações.`
+          : clientMessage,
         action: 'none',
         agentName: this.name
       };

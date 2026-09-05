@@ -92,6 +92,26 @@ async function runTests() {
   console.log(`Quantidade de mensagens no histórico: ${history.length} (esperado: 2)`);
   if (history.length !== 2) throw new Error('Falha na memória conversacional');
 
+  // Teste 6: Proteção contra erro "First content should be with role 'user', got model"
+  console.log('\nTeste 6: Sanitização de histórico para Gemini (primeira mensagem DEVE ser user)');
+  const bugChatId = '5511999990005@c.us';
+  // Injeta propositalmente uma mensagem 'model' no início
+  memoryStore.addMessage(bugChatId, 'model', 'Mensagem inicial do bot');
+  memoryStore.addMessage(bugChatId, 'user', 'Pergunta do cliente 1');
+  memoryStore.addMessage(bugChatId, 'model', 'Resposta do bot 1');
+  memoryStore.addMessage(bugChatId, 'user', 'Pergunta do cliente 2');
+
+  const sanitizedHistory = memoryStore.getHistory(bugChatId);
+  console.log(`Primeiro item no histórico: role='${sanitizedHistory[0]?.role}' (DEVE ser 'user')`);
+  console.log(`Último item no histórico: role='${sanitizedHistory[sanitizedHistory.length - 1]?.role}' (DEVE ser 'model')`);
+  if (sanitizedHistory[0]?.role !== 'user') {
+    throw new Error('Falha: histórico sanitizado começou com role diferente de "user"');
+  }
+  if (sanitizedHistory[sanitizedHistory.length - 1]?.role !== 'model') {
+    throw new Error('Falha: histórico para startChat terminou com role diferente de "model"');
+  }
+  console.log('Sanitização de histórico para Gemini: APROVADO ✅');
+
   console.log('\n✅ TODOS OS TESTES PASSARAM COM SUCESSO!\n');
 }
 

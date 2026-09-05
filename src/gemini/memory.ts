@@ -15,7 +15,7 @@ export interface ChatSessionState {
 
 export class MemoryStore {
   private sessions: Map<string, ChatSessionState> = new Map();
-  private maxHistoryPerChat: number = 15;
+  private maxHistoryPerChat: number = 20;
 
   getSession(chatId: string): ChatSessionState {
     let state = this.sessions.get(chatId);
@@ -31,12 +31,48 @@ export class MemoryStore {
     return state;
   }
 
+  /**
+   * Retorna o histórico formatado e estritamente validado para a SDK do Gemini.
+   * O Gemini EXIGE que:
+   * 1. A primeira mensagem seja estritamente 'user' (nunca 'model').
+   * 2. As mensagens alternem rigorosamente entre 'user' e 'model'.
+   * 3. Termine em 'model', pois o startChat será seguido por sendMessage('user').
+   */
   getHistory(chatId: string): Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> {
     const session = this.getSession(chatId);
-    return session.messages.map(m => ({
-      role: m.role,
-      parts: m.parts
-    }));
+    const validHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+
+    for (const m of session.messages) {
+      if (!m.parts || m.parts.length === 0 || !m.parts[0].text) continue;
+
+      if (validHistory.length === 0) {
+        // Regra do Gemini: a primeira mensagem DEVE ter role 'user'
+        if (m.role === 'user') {
+          validHistory.push({
+            role: 'user',
+            parts: [{ text: m.parts[0].text }]
+          });
+        }
+      } else {
+        const last = validHistory[validHistory.length - 1];
+        if (last.role === m.role) {
+          // Mescla mensagens consecutivas do mesmo papel
+          last.parts[0].text += `\n${m.parts[0].text}`;
+        } else {
+          validHistory.push({
+            role: m.role,
+            parts: [{ text: m.parts[0].text }]
+          });
+        }
+      }
+    }
+
+    // O histórico passado para startChat deve terminar em 'model', pois a próxima chamada será chat.sendMessage(userMessage)
+    while (validHistory.length > 0 && validHistory[validHistory.length - 1].role === 'user') {
+      validHistory.pop();
+    }
+
+    return validHistory;
   }
 
   addMessage(chatId: string, role: 'user' | 'model', text: string, contactName?: string): void {
@@ -53,6 +89,10 @@ export class MemoryStore {
 
     if (session.messages.length > this.maxHistoryPerChat) {
       session.messages = session.messages.slice(-this.maxHistoryPerChat);
+      // Garante que o histórico armazenado comece sempre com 'user'
+      while (session.messages.length > 0 && session.messages[0].role !== 'user') {
+        session.messages.shift();
+      }
     }
   }
 
