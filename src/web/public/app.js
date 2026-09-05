@@ -171,7 +171,8 @@ async function loadConfig() {
     document.getElementById('cfg-handoffKeywords').value = (cfg.handoffKeywords || []).join(', ');
     document.getElementById('cfg-handoffMessage').value = cfg.handoffMessage || '';
     document.getElementById('cfg-debounce').value = cfg.debounceSeconds ?? 2.5;
-    document.getElementById('cfg-pauseDuration').value = cfg.pauseDurationMinutes ?? 60;
+    const pauseHours = cfg.pauseDurationHours || (cfg.pauseDurationMinutes ? cfg.pauseDurationMinutes / 60 : 6);
+    document.getElementById('cfg-pauseDurationHours').value = pauseHours;
     document.getElementById('cfg-typing').checked = cfg.enableTypingSimulation !== false;
     document.getElementById('cfg-seen').checked = cfg.enableSendSeen !== false;
 
@@ -189,6 +190,7 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
 
   const keywordsRaw = document.getElementById('cfg-handoffKeywords').value;
   const handoffKeywords = keywordsRaw.split(',').map(k => k.trim()).filter(k => k.length > 0);
+  const pauseHours = parseFloat(document.getElementById('cfg-pauseDurationHours').value) || 6;
 
   const payload = {
     botName: document.getElementById('cfg-botName').value,
@@ -200,7 +202,8 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
     handoffKeywords,
     handoffMessage: document.getElementById('cfg-handoffMessage').value,
     debounceSeconds: parseFloat(document.getElementById('cfg-debounce').value),
-    pauseDurationMinutes: parseInt(document.getElementById('cfg-pauseDuration').value, 10),
+    pauseDurationHours: pauseHours,
+    pauseDurationMinutes: Math.round(pauseHours * 60),
     enableTypingSimulation: document.getElementById('cfg-typing').checked,
     enableSendSeen: document.getElementById('cfg-seen').checked,
     apiKey: document.getElementById('cfg-apiKey').value
@@ -244,8 +247,18 @@ async function loadChats() {
 
     tbody.innerHTML = data.chats.map(chat => {
       const isPaused = chat.isPaused;
+      let remainingText = '';
+      if (isPaused && chat.pausedUntil) {
+        const diffMs = chat.pausedUntil - Date.now();
+        if (diffMs > 0) {
+          const h = Math.floor(diffMs / (1000 * 60 * 60));
+          const m = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+          remainingText = ` (${h}h ${m}m restantes)`;
+        }
+      }
+
       const statusBadge = isPaused
-        ? '<span class="badge badge-paused">⏸️ Pausado (Humano)</span>'
+        ? `<span class="badge badge-paused">⏸️ Pausado (Humano)${remainingText}</span>`
         : '<span class="badge badge-active">🤖 Bot Ativo</span>';
 
       const lastDate = new Date(chat.lastMessageAt).toLocaleTimeString('pt-BR');
@@ -260,7 +273,7 @@ async function loadChats() {
           <td>
             ${isPaused 
               ? `<button class="btn btn-secondary btn-sm" onclick="resumeChat('${chat.chatId}')">▶️ Reativar Bot</button>` 
-              : `<button class="btn btn-outline btn-sm" onclick="pauseChat('${chat.chatId}')">⏸️ Pausar 60m</button>`}
+              : `<button class="btn btn-outline btn-sm" onclick="pauseChat('${chat.chatId}')">⏸️ Pausar 6h</button>`}
             <button class="btn btn-outline btn-sm" onclick="clearChat('${chat.chatId}')">🗑️ Limpar</button>
           </td>
         </tr>
@@ -277,7 +290,7 @@ window.pauseChat = async function(chatId) {
   await fetch(`/api/chats/${encodeURIComponent(chatId)}/pause`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ minutes: 60 })
+    body: JSON.stringify({ minutes: 360 })
   });
   loadChats();
 };

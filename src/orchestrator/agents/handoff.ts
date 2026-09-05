@@ -13,7 +13,7 @@ export class HandoffAgent implements IAgent {
 
   async execute(context: AgentContext): Promise<AgentResponse> {
     const config = loadBotConfig();
-    const pauseMinutes = config.pauseDurationMinutes || 60;
+    const pauseMinutes = (config.pauseDurationHours ? config.pauseDurationHours * 60 : config.pauseDurationMinutes) || 360;
 
     // Pausa o bot para este contato
     memoryStore.pauseChat(context.chatId, pauseMinutes);

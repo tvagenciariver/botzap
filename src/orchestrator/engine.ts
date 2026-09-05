@@ -2,6 +2,7 @@ import { IAgent, AgentContext, AgentResponse } from './agents/base.js';
 import { HandoffAgent } from './agents/handoff.js';
 import { AttendantAgent } from './agents/attendant.js';
 import { messageDebouncer } from './debouncer.js';
+import { botTracker } from './bot-tracker.js';
 import { memoryStore } from '../gemini/memory.js';
 import { wahaClient } from '../waha/client.js';
 import { loadBotConfig, env } from '../config/index.js';
@@ -60,7 +61,11 @@ export class AgentOrchestrator {
    */
   async processIncomingWahaMessage(payload: WahaMessagePayload, sessionName: string): Promise<void> {
     const { from, to, fromMe, body, hasMedia } = payload;
-    const chatId = fromMe ? to : from;
+    // Determina o chatId remoto do cliente
+    let chatId = from;
+    if (fromMe) {
+      chatId = to || payload._data?.to || payload._data?.id?.remote || from;
+    }
 
     // 1. Ignorar canais de status e newsletter
     if (chatId.includes('status@broadcast') || chatId.includes('@newsletter')) {
@@ -76,15 +81,24 @@ export class AgentOrchestrator {
     // 3. Se a mensagem foi enviada pelo próprio número (fromMe === true)
     // Isso acontece quando um ATENDENTE HUMANO no Chatwoot ou no celular responde ao cliente!
     if (fromMe) {
+      // Verifica se a mensagem foi enviada pelo próprio BotZap
+      if (botTracker.isSentByBot(chatId, body || '', payload.id)) {
+        // É o eco da resposta do próprio bot, ignora e NÃO pausa
+        return;
+      }
+
       const config = loadBotConfig();
+      const pauseMinutes = config.pauseDurationMinutes || (config.pauseDurationHours ? config.pauseDurationHours * 60 : 360);
+      const pauseHours = config.pauseDurationHours || (pauseMinutes / 60);
+
       // Pausa o bot automaticamente para não atropelar a conversa do atendente humano
-      memoryStore.pauseChat(chatId, config.pauseDurationMinutes || 60);
+      memoryStore.pauseChat(chatId, pauseMinutes);
       messageDebouncer.cancel(chatId);
 
       this.addLog({
         type: 'info',
         chatId,
-        message: `Mensagem enviada por atendente humano (Chatwoot/WhatsApp). Bot pausado para ${chatId}.`
+        message: `Intervenção humana detectada (WhatsApp/Chatwoot). Bot pausado para ${chatId} por ${pauseHours} horas.`
       });
       return;
     }
@@ -170,7 +184,8 @@ export class AgentOrchestrator {
 
       // 4. Envia a resposta final via WAHA
       if (response && response.replyText) {
-        await wahaClient.sendText(chatId, response.replyText, { session });
+        const sendResult = await wahaClient.sendText(chatId, response.replyText, { session });
+        botTracker.recordBotMessage(chatId, response.replyText, sendResult?.id);
 
         this.addLog({
           type: response.action === 'transferred_human' ? 'handoff' : 'outgoing',

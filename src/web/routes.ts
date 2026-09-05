@@ -60,11 +60,26 @@ apiRouter.post('/webhook/chatwoot', async (req: Request, res: Response) => {
       // Se conversa foi reaberta ou atribuída a um atendente no Chatwoot, pausa o bot
       if (eventType === 'conversation_opened' && data.assignee_id) {
         const config = loadBotConfig();
-        memoryStore.pauseChat(chatId, config.pauseDurationMinutes || 60);
+        const pauseMinutes = config.pauseDurationMinutes || (config.pauseDurationHours ? config.pauseDurationHours * 60 : 360);
+        const pauseHours = config.pauseDurationHours || (pauseMinutes / 60);
+        memoryStore.pauseChat(chatId, pauseMinutes);
         orchestrator.addLog({
           type: 'info',
           chatId,
-          message: 'Atendente atribuído no Chatwoot. Bot pausado para este contato.'
+          message: `Atendente atribuído no Chatwoot. Bot pausado para ${chatId} por ${pauseHours} horas.`
+        });
+      }
+
+      // Se um atendente humano digitou no Chatwoot
+      if (eventType === 'message_created' && data.message_type === 'outgoing' && data.sender?.type === 'User') {
+        const config = loadBotConfig();
+        const pauseMinutes = config.pauseDurationMinutes || (config.pauseDurationHours ? config.pauseDurationHours * 60 : 360);
+        const pauseHours = config.pauseDurationHours || (pauseMinutes / 60);
+        memoryStore.pauseChat(chatId, pauseMinutes);
+        orchestrator.addLog({
+          type: 'info',
+          chatId,
+          message: `Atendente humano (${data.sender?.name || 'Agente'}) respondeu no Chatwoot. Bot pausado para ${chatId} por ${pauseHours} horas.`
         });
       }
     }

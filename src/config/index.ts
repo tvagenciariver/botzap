@@ -17,6 +17,7 @@ export interface BotConfig {
   debounceSeconds: number;
   enableTypingSimulation: boolean;
   enableSendSeen: boolean;
+  pauseDurationHours: number;
   pauseDurationMinutes: number;
   geminiApiKey?: string;
 }
@@ -53,6 +54,8 @@ export function loadBotConfig(): BotConfig {
     console.error('Erro ao carregar bot_config.json, usando padrão:', err);
   }
 
+  const hours = stored.pauseDurationHours ?? (stored.pauseDurationMinutes ? stored.pauseDurationMinutes / 60 : 6);
+
   return {
     botName: stored.botName || 'Assistente Virtual',
     companyName: stored.companyName || 'Minha Empresa',
@@ -66,13 +69,21 @@ export function loadBotConfig(): BotConfig {
     debounceSeconds: stored.debounceSeconds ?? 2.5,
     enableTypingSimulation: stored.enableTypingSimulation ?? true,
     enableSendSeen: stored.enableSendSeen ?? true,
-    pauseDurationMinutes: stored.pauseDurationMinutes ?? 60,
+    pauseDurationHours: hours,
+    pauseDurationMinutes: Math.round(hours * 60),
     geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || ''
   };
 }
 
 export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
   const current = loadBotConfig();
+  
+  if (newConfig.pauseDurationHours !== undefined) {
+    newConfig.pauseDurationMinutes = Math.round(newConfig.pauseDurationHours * 60);
+  } else if (newConfig.pauseDurationMinutes !== undefined) {
+    newConfig.pauseDurationHours = Number((newConfig.pauseDurationMinutes / 60).toFixed(1));
+  }
+
   const updated = { ...current, ...newConfig };
   
   const dir = path.dirname(configPath);

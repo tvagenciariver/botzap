@@ -23,6 +23,7 @@
   "debounceSeconds": 2.5,
   "enableTypingSimulation": true,
   "enableSendSeen": true,
-  "pauseDurationMinutes": 60,
+  "pauseDurationHours": 6,
+  "pauseDurationMinutes": 360,
   "geminiApiKey": ""
 }

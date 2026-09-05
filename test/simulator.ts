@@ -1,6 +1,7 @@
 import { orchestrator } from '../src/orchestrator/engine.js';
 import { memoryStore } from '../src/gemini/memory.js';
 import { geminiService } from '../src/gemini/client.js';
+import { botTracker } from '../src/orchestrator/bot-tracker.js';
 import { WahaMessagePayload } from '../src/waha/types.js';
 
 async function runTests() {
@@ -30,7 +31,7 @@ async function runTests() {
   }
 
   // Teste 3: Anti-Loop e Detecção de Atendente Humano (fromMe: true)
-  console.log('\nTeste 3: Detecção de mensagem de atendente (fromMe: true)');
+  console.log('\nTeste 3: Detecção de mensagem de atendente humano (fromMe: true) com pausa de 6 horas');
   const testChatId = '5511999990002@c.us';
   memoryStore.resumeChat(testChatId);
   console.log(`Status inicial do bot para ${testChatId}: Pausado = ${memoryStore.isChatPaused(testChatId)}`);
@@ -47,13 +48,43 @@ async function runTests() {
 
   await orchestrator.processIncomingWahaMessage(humanPayload, 'default');
   const isPausedAfterHuman = memoryStore.isChatPaused(testChatId);
+  const sessionState = memoryStore.getSession(testChatId);
+  const remainingHours = sessionState.pausedUntil ? (sessionState.pausedUntil - Date.now()) / (1000 * 60 * 60) : 0;
+
   console.log(`Status do bot após atendente humano falar: Pausado = ${isPausedAfterHuman ? 'SIM ✅' : 'NÃO ❌'}`);
-  if (!isPausedAfterHuman) {
-    throw new Error('Falha ao pausar bot após mensagem do atendente');
+  console.log(`Tempo de pausa registrado: ~${remainingHours.toFixed(1)} horas (esperado: ~6.0h)`);
+  if (!isPausedAfterHuman || remainingHours < 5.8) {
+    throw new Error('Falha ao pausar bot após mensagem do atendente pelo intervalo correto');
   }
 
-  // Teste 4: Memória Conversacional
-  console.log('\nTeste 4: Memória e histórico conversacional');
+  // Teste 4: Ecos do próprio bot NÃO devem pausar a conversa
+  console.log('\nTeste 4: Eco de mensagem do próprio bot (fromMe: true gerado pelo bot)');
+  const echoChatId = '5511999990004@c.us';
+  memoryStore.resumeChat(echoChatId);
+
+  // O bot registra que acabou de enviar esta mensagem:
+  botTracker.recordBotMessage(echoChatId, 'Olá! Como posso ajudar você hoje?', 'msg_bot_echo_123');
+
+  // A WAHA emite o evento fromMe: true correspondente à resposta do bot:
+  const botEchoPayload: WahaMessagePayload = {
+    id: 'msg_bot_echo_123',
+    timestamp: Date.now(),
+    from: '5511888880000@c.us',
+    to: echoChatId,
+    fromMe: true,
+    body: 'Olá! Como posso ajudar você hoje?',
+    hasMedia: false
+  };
+
+  await orchestrator.processIncomingWahaMessage(botEchoPayload, 'default');
+  const isPausedAfterEcho = memoryStore.isChatPaused(echoChatId);
+  console.log(`Status do bot após eco da sua própria mensagem: Pausado = ${isPausedAfterEcho ? 'SIM (incorreto) ❌' : 'NÃO (correto) ✅'}`);
+  if (isPausedAfterEcho) {
+    throw new Error('Falha: o eco do bot causou pausa indevida');
+  }
+
+  // Teste 5: Memória Conversacional
+  console.log('\nTeste 5: Memória e histórico conversacional');
   const memChatId = '5511999990003@c.us';
   memoryStore.addMessage(memChatId, 'user', 'Mensagem 1');
   memoryStore.addMessage(memChatId, 'model', 'Resposta 1');
@@ -61,7 +92,7 @@ async function runTests() {
   console.log(`Quantidade de mensagens no histórico: ${history.length} (esperado: 2)`);
   if (history.length !== 2) throw new Error('Falha na memória conversacional');
 
-  console.log('\n✅ TODOS OS TESTES UNITÁRIOS E DE FLUXO PASSARAM COM SUCESSO!\n');
+  console.log('\n✅ TODOS OS TESTES PASSARAM COM SUCESSO!\n');
 }
 
 runTests().catch(err => {
