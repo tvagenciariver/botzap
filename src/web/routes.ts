@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { orchestrator } from '../orchestrator/engine.js';
 import { loadBotConfig, saveBotConfig, updateEnvFile, env } from '../config/index.js';
 import { memoryStore } from '../gemini/memory.js';
@@ -7,6 +8,86 @@ import { wahaClient } from '../waha/client.js';
 import { WahaWebhookEvent } from '../waha/types.js';
 
 export const apiRouter = Router();
+
+// Sessões de autenticação ativas (Tokens de sessão em memória)
+const activeSessions = new Set<string>();
+
+/**
+ * Middleware de Autenticação para rotas protegidas da API
+ */
+const requireAuth = (req: Request, res: Response, next: () => void) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Não autorizado. Faça login para acessar o sistema.', unauthorized: true });
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (!token || !activeSessions.has(token)) {
+    return res.status(401).json({ error: 'Sessão expirada ou inválida. Faça login novamente.', unauthorized: true });
+  }
+
+  next();
+};
+
+/**
+ * Endpoint de Login (Usuário e Senha)
+ */
+apiRouter.post('/api/auth/login', (req: Request, res: Response) => {
+  const { username, password } = req.body;
+  const config = loadBotConfig();
+
+  const expectedUser = config.adminUser || env.adminUser || 'admin';
+  const expectedPass = config.adminPassword || env.adminPassword || 'File@152341';
+
+  if (username === expectedUser && password === expectedPass) {
+    const token = crypto.randomBytes(32).toString('hex');
+    activeSessions.add(token);
+    return res.json({
+      success: true,
+      token,
+      user: {
+        username: expectedUser
+      }
+    });
+  }
+
+  return res.status(401).json({
+    success: false,
+    error: 'Usuário ou senha incorretos.'
+  });
+});
+
+/**
+ * Endpoint de Logout
+ */
+apiRouter.post('/api/auth/logout', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    activeSessions.delete(token);
+  }
+  return res.json({ success: true, message: 'Logout realizado com sucesso.' });
+});
+
+/**
+ * Endpoint para validar sessão atual
+ */
+apiRouter.get('/api/auth/me', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    if (token && activeSessions.has(token)) {
+      const config = loadBotConfig();
+      return res.json({
+        authenticated: true,
+        user: {
+          username: config.adminUser || env.adminUser || 'admin'
+        }
+      });
+    }
+  }
+  return res.status(401).json({ authenticated: false });
+});
 
 /**
  * 1. Webhook principal da WAHA
@@ -91,7 +172,7 @@ apiRouter.post('/webhook/chatwoot', async (req: Request, res: Response) => {
 /**
  * 3. Status geral do sistema e serviços
  */
-apiRouter.get('/api/status', async (_req: Request, res: Response) => {
+apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) => {
   let wahaOnline = false;
   let sessionStatus = null;
 
@@ -121,10 +202,12 @@ apiRouter.get('/api/status', async (_req: Request, res: Response) => {
 /**
  * 4. Obter configurações do bot
  */
-apiRouter.get('/api/config', (_req: Request, res: Response) => {
+apiRouter.get('/api/config', requireAuth, (_req: Request, res: Response) => {
   const config = loadBotConfig();
+  const { adminPassword: _hiddenPass, ...safeConfig } = config;
+
   res.json({
-    config,
+    config: safeConfig,
     env: {
       port: env.port,
       wahaBaseUrl: env.wahaBaseUrl,
@@ -138,15 +221,25 @@ apiRouter.get('/api/config', (_req: Request, res: Response) => {
 /**
  * 5. Salvar configurações do bot
  */
-apiRouter.post('/api/config', (req: Request, res: Response) => {
+apiRouter.post('/api/config', requireAuth, (req: Request, res: Response) => {
   try {
-    const { apiKey, ...botSettings } = req.body;
+    const { apiKey, adminPassword, ...botSettings } = req.body;
 
     if (apiKey && typeof apiKey === 'string' && apiKey.trim() !== '') {
       const cleanKey = apiKey.trim();
       geminiService.updateApiKey(cleanKey);
       updateEnvFile('GEMINI_API_KEY', cleanKey);
       botSettings.geminiApiKey = cleanKey;
+    }
+
+    if (adminPassword && typeof adminPassword === 'string' && adminPassword.trim() !== '') {
+      botSettings.adminPassword = adminPassword.trim();
+      updateEnvFile('ADMIN_PASSWORD', adminPassword.trim());
+    }
+
+    if (botSettings.adminUser && typeof botSettings.adminUser === 'string') {
+      botSettings.adminUser = botSettings.adminUser.trim();
+      updateEnvFile('ADMIN_USER', botSettings.adminUser);
     }
 
     if (botSettings.wahaBaseUrl) {
@@ -164,7 +257,8 @@ apiRouter.post('/api/config', (req: Request, res: Response) => {
 
     const updated = saveBotConfig(botSettings);
     wahaClient.reloadConfig();
-    res.json({ success: true, config: updated });
+    const { adminPassword: _hiddenPass, ...safeUpdated } = updated;
+    res.json({ success: true, config: safeUpdated });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -173,7 +267,7 @@ apiRouter.post('/api/config', (req: Request, res: Response) => {
 /**
  * 6. Testar conexão com a WAHA API
  */
-apiRouter.post('/api/waha/test-connection', async (req: Request, res: Response) => {
+apiRouter.post('/api/waha/test-connection', requireAuth, async (req: Request, res: Response) => {
   try {
     const { baseUrl, apiKey, session } = req.body;
     if (baseUrl) {
@@ -189,7 +283,7 @@ apiRouter.post('/api/waha/test-connection', async (req: Request, res: Response) 
 /**
  * 7. Salvar dados de conexão com a WAHA
  */
-apiRouter.post('/api/waha/save-connection', (req: Request, res: Response) => {
+apiRouter.post('/api/waha/save-connection', requireAuth, (req: Request, res: Response) => {
   try {
     const { baseUrl, apiKey, session, webhookPublicUrl } = req.body;
     const toUpdate: Record<string, any> = {};
@@ -226,7 +320,7 @@ apiRouter.post('/api/waha/save-connection', (req: Request, res: Response) => {
 /**
  * 8. Auto-registro de Webhook na WAHA
  */
-apiRouter.post('/api/waha/setup-webhook', async (req: Request, res: Response) => {
+apiRouter.post('/api/waha/setup-webhook', requireAuth, async (req: Request, res: Response) => {
   try {
     const rawTarget = req.body.url || env.webhookPublicUrl;
     const baseTarget = (rawTarget || '').replace(/(\/webhook\/(waha|chatwoot))+/gi, '').replace(/\/$/, '');
@@ -242,7 +336,7 @@ apiRouter.post('/api/waha/setup-webhook', async (req: Request, res: Response) =>
 /**
  * 7. Listar conversas ativas
  */
-apiRouter.get('/api/chats', (_req: Request, res: Response) => {
+apiRouter.get('/api/chats', requireAuth, (_req: Request, res: Response) => {
   const chats = memoryStore.listActiveChats();
   res.json({ chats });
 });
@@ -250,7 +344,7 @@ apiRouter.get('/api/chats', (_req: Request, res: Response) => {
 /**
  * 8. Pausar bot para um contato específico
  */
-apiRouter.post('/api/chats/:chatId/pause', (req: Request, res: Response) => {
+apiRouter.post('/api/chats/:chatId/pause', requireAuth, (req: Request, res: Response) => {
   const { chatId } = req.params;
   const minutes = parseInt(req.body.minutes || '60', 10);
   memoryStore.pauseChat(chatId, minutes);
@@ -265,7 +359,7 @@ apiRouter.post('/api/chats/:chatId/pause', (req: Request, res: Response) => {
 /**
  * 9. Reativar bot para um contato específico
  */
-apiRouter.post('/api/chats/:chatId/resume', (req: Request, res: Response) => {
+apiRouter.post('/api/chats/:chatId/resume', requireAuth, (req: Request, res: Response) => {
   const { chatId } = req.params;
   memoryStore.resumeChat(chatId);
   orchestrator.addLog({
@@ -279,7 +373,7 @@ apiRouter.post('/api/chats/:chatId/resume', (req: Request, res: Response) => {
 /**
  * 10. Limpar histórico de um contato
  */
-apiRouter.post('/api/chats/:chatId/clear', (req: Request, res: Response) => {
+apiRouter.post('/api/chats/:chatId/clear', requireAuth, (req: Request, res: Response) => {
   const { chatId } = req.params;
   memoryStore.clearHistory(chatId);
   res.json({ success: true, chatId });
@@ -288,7 +382,7 @@ apiRouter.post('/api/chats/:chatId/clear', (req: Request, res: Response) => {
 /**
  * 11. Simular conversa (Chat Simulator)
  */
-apiRouter.post('/api/simulate', async (req: Request, res: Response) => {
+apiRouter.post('/api/simulate', requireAuth, async (req: Request, res: Response) => {
   const { chatId = 'simulacao@c.us', message } = req.body;
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'Mensagem inválida.' });
@@ -305,14 +399,14 @@ apiRouter.post('/api/simulate', async (req: Request, res: Response) => {
 /**
  * 12. Obter logs em tempo real
  */
-apiRouter.get('/api/logs', (_req: Request, res: Response) => {
+apiRouter.get('/api/logs', requireAuth, (_req: Request, res: Response) => {
   res.json({ logs: orchestrator.getLogs() });
 });
 
 /**
  * 13. Limpar logs
  */
-apiRouter.delete('/api/logs', (_req: Request, res: Response) => {
+apiRouter.delete('/api/logs', requireAuth, (_req: Request, res: Response) => {
   orchestrator.clearLogs();
   res.json({ success: true });
 });

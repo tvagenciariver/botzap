@@ -70,6 +70,10 @@
       <header class="topbar">
         <div class="page-title" id="page-title">Simulador de Atendimento</div>
         <div class="topbar-actions">
+          <div class="user-badge-container" id="user-badge-container" style="display: none;">
+            <span class="user-badge-name" id="user-badge-name">👤 admin</span>
+            <button class="btn btn-outline btn-sm" id="btn-logout" title="Encerrar Sessão">🚪 Sair</button>
+          </div>
           <button class="btn btn-secondary btn-sm" id="btn-refresh-status">🔄 Atualizar Status</button>
           <a href="https://waha.devlike.pro/docs/overview/" target="_blank" class="btn btn-outline btn-sm">📖 Docs WAHA</a>
         </div>
@@ -300,9 +304,9 @@
               </div>
             </div>
 
-            <div class="form-actions mt-3" style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <div class="form-actions mt-3" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+              <button type="button" class="btn btn-primary" id="btn-save-waha" style="padding: 10px 24px; font-weight: 700; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);">💾 Salvar Conexão da WAHA</button>
               <button type="button" class="btn btn-secondary" id="btn-test-waha">🔍 Testar Conexão com a WAHA</button>
-              <button type="button" class="btn btn-primary" id="btn-save-waha">💾 Salvar Conexão da WAHA</button>
               <button type="button" class="btn btn-outline" id="btn-register-waha-hook">🚀 Registrar Webhook na WAHA</button>
             </div>
 
@@ -316,7 +320,7 @@
             <h3>⚡ URL do Webhook para Colar na WAHA</h3>
           </div>
           <div class="card-body">
-            <p>Se você preferir configurar o webhook pelo painel web da WAHA ou no <code>docker-compose.yml</code> da WAHA, use a URL abaixo:</p>
+            <p style="color: #f1f5f9; margin-bottom: 8px;">Se você preferir configurar o webhook pelo painel web da WAHA ou no <code>docker-compose.yml</code> da WAHA, use a URL abaixo:</p>
             <div class="webhook-setup-box" style="margin-bottom: 12px;">
               <input type="text" id="copy-webhook-input" readonly class="form-control" value="">
               <button class="btn btn-secondary" id="btn-copy-webhook-btn">📋 Copiar URL</button>
@@ -331,7 +335,7 @@
             <h3>💬 Sincronização Inteligente com Chatwoot</h3>
           </div>
           <div class="card-body">
-            <p>Se você utiliza o <strong>Chatwoot</strong>, adicione este webhook nas configurações do Chatwoot (Configurações &rarr; Integrações &rarr; Webhooks) para o BotZap pausar imediatamente quando um atendente responder por lá:</p>
+            <p style="color: #f1f5f9; margin-bottom: 8px;">Se você utiliza o <strong>Chatwoot</strong>, adicione este webhook nas configurações do Chatwoot (Configurações &rarr; Integrações &rarr; Webhooks) para o BotZap pausar imediatamente quando um atendente responder por lá:</p>
             <div class="webhook-setup-box" style="margin-bottom: 12px;">
               <input type="text" id="copy-chatwoot-input" readonly class="form-control" value="">
               <button class="btn btn-secondary" id="btn-copy-chatwoot-btn">📋 Copiar Webhook Chatwoot</button>
@@ -362,6 +366,35 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- Modal / Tela de Login com Usuário e Senha -->
+  <div id="login-overlay" class="login-overlay">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-icon">🔒</div>
+        <h2>Painel BotZap</h2>
+        <p>Acesso Restrito ao Orquestrador de Agentes IA</p>
+      </div>
+
+      <div id="login-error" class="login-error"></div>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label for="login-username">Usuário</label>
+          <input type="text" id="login-username" class="form-control" placeholder="admin" required autofocus autocomplete="username">
+        </div>
+
+        <div class="form-group">
+          <label for="login-password">Senha</label>
+          <input type="password" id="login-password" class="form-control" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="btn-login-submit" style="margin-top: 10px;">
+          Entrar no Painel 🚀
+        </button>
+      </form>
+    </div>
   </div>
 
   <script src="/app.js"></script>

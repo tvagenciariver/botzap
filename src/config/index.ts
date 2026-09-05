@@ -24,6 +24,8 @@ export interface BotConfig {
   wahaApiKey?: string;
   wahaSession?: string;
   webhookPublicUrl?: string;
+  adminUser?: string;
+  adminPassword?: string;
 }
 
 const configPath = path.resolve(process.cwd(), 'data', 'bot_config.json');
@@ -79,7 +81,9 @@ export function loadBotConfig(): BotConfig {
     wahaBaseUrl: stored.wahaBaseUrl || process.env.WAHA_BASE_URL || 'http://localhost:3000',
     wahaApiKey: stored.wahaApiKey || process.env.WAHA_API_KEY || '',
     wahaSession: stored.wahaSession || process.env.WAHA_SESSION || 'default',
-    webhookPublicUrl: stored.webhookPublicUrl || process.env.WEBHOOK_PUBLIC_URL || 'http://localhost:3001'
+    webhookPublicUrl: stored.webhookPublicUrl || process.env.WEBHOOK_PUBLIC_URL || 'http://localhost:3001',
+    adminUser: stored.adminUser || process.env.ADMIN_USER || 'admin',
+    adminPassword: stored.adminPassword || process.env.ADMIN_PASSWORD || 'File@152341'
   };
 }
 
@@ -114,6 +118,8 @@ export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
   if (updated.wahaSession) env.wahaSession = updated.wahaSession;
   if (updated.geminiApiKey) env.geminiApiKey = updated.geminiApiKey;
   if (updated.webhookPublicUrl) env.webhookPublicUrl = updated.webhookPublicUrl;
+  if (updated.adminUser) env.adminUser = updated.adminUser;
+  if (updated.adminPassword) env.adminPassword = updated.adminPassword;
 
   return updated;
 }
@@ -128,5 +134,7 @@ export const env = {
   wahaApiKey: process.env.WAHA_API_KEY || initialConfig.wahaApiKey || '',
   geminiApiKey: process.env.GEMINI_API_KEY || initialConfig.geminiApiKey || '',
   geminiModel: process.env.GEMINI_MODEL || initialConfig.model || 'gemini-1.5-flash',
-  webhookPublicUrl: (process.env.WEBHOOK_PUBLIC_URL || initialConfig.webhookPublicUrl || 'http://localhost:3001').replace(/\/$/, '')
+  webhookPublicUrl: (process.env.WEBHOOK_PUBLIC_URL || initialConfig.webhookPublicUrl || 'http://localhost:3001').replace(/\/$/, ''),
+  adminUser: process.env.ADMIN_USER || initialConfig.adminUser || 'admin',
+  adminPassword: process.env.ADMIN_PASSWORD || initialConfig.adminPassword || 'File@152341'
 };

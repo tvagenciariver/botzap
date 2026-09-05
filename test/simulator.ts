@@ -86,6 +86,7 @@ async function runTests() {
   // Teste 5: Memória Conversacional
   console.log('\nTeste 5: Memória e histórico conversacional');
   const memChatId = '5511999990003@c.us';
+  memoryStore.clearHistory(memChatId);
   memoryStore.addMessage(memChatId, 'user', 'Mensagem 1');
   memoryStore.addMessage(memChatId, 'model', 'Resposta 1');
   const history = memoryStore.getHistory(memChatId);
@@ -95,6 +96,7 @@ async function runTests() {
   // Teste 6: Proteção contra erro "First content should be with role 'user', got model"
   console.log('\nTeste 6: Sanitização de histórico para Gemini (primeira mensagem DEVE ser user)');
   const bugChatId = '5511999990005@c.us';
+  memoryStore.clearHistory(bugChatId);
   // Injeta propositalmente uma mensagem 'model' no início
   memoryStore.addMessage(bugChatId, 'model', 'Mensagem inicial do bot');
   memoryStore.addMessage(bugChatId, 'user', 'Pergunta do cliente 1');

@@ -1,5 +1,63 @@
-// Estado Global
+// Estado Global e Autenticação
+const AUTH_TOKEN_KEY = 'botzap_auth_token';
 let currentChatId = 'simulador_' + Math.random().toString(36).substring(2, 7) + '@c.us';
+
+function getAuthToken() {
+  return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function setAuthToken(token) {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+function clearAuthToken() {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+function showLoginModal(errorMsg = '') {
+  const overlay = document.getElementById('login-overlay');
+  const userBadge = document.getElementById('user-badge-container');
+  const errorEl = document.getElementById('login-error');
+  if (overlay) overlay.classList.remove('hidden');
+  if (userBadge) userBadge.style.display = 'none';
+  if (errorEl) {
+    if (errorMsg) {
+      errorEl.textContent = errorMsg;
+      errorEl.style.display = 'block';
+    } else {
+      errorEl.textContent = '';
+      errorEl.style.display = 'none';
+    }
+  }
+}
+
+function hideLoginModal(username = 'admin') {
+  const overlay = document.getElementById('login-overlay');
+  const userBadge = document.getElementById('user-badge-container');
+  const userNameEl = document.getElementById('user-badge-name');
+  if (overlay) overlay.classList.add('hidden');
+  if (userBadge) userBadge.style.display = 'flex';
+  if (userNameEl) userNameEl.textContent = `👤 ${username}`;
+}
+
+/**
+ * Wrapper de Fetch com token de autorização Bearer
+ */
+async function fetchWithAuth(url, options = {}) {
+  const token = getAuthToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401 && !url.includes('/api/auth/login')) {
+    clearAuthToken();
+    showLoginModal('Sessão expirada. Por favor, faça login novamente.');
+    throw new Error('Não autorizado (401)');
+  }
+  return response;
+}
 
 // Utilitário para formatar texto estilo WhatsApp
 function formatWhatsAppText(text) {
@@ -31,23 +89,26 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     };
     document.getElementById('page-title').textContent = titles[targetTab] || 'BotZap';
 
-    if (targetTab === 'chats') loadChats();
-    if (targetTab === 'logs') loadLogs();
-    if (targetTab === 'prompts') loadConfig();
-    if (targetTab === 'integration') loadWahaConfig();
+    if (getAuthToken()) {
+      if (targetTab === 'chats') loadChats();
+      if (targetTab === 'logs') loadLogs();
+      if (targetTab === 'prompts') loadConfig();
+      if (targetTab === 'integration') loadWahaConfig();
+    }
   });
 });
 
 // 1. Checar Status
 async function checkStatus() {
+  if (!getAuthToken()) return;
   try {
-    const res = await fetch('/api/status');
+    const res = await fetchWithAuth('/api/status');
     const data = await res.json();
 
     // WAHA Status
     const wahaDot = document.getElementById('dot-waha');
     const wahaText = document.getElementById('status-waha');
-    if (data.waha.online) {
+    if (data.waha && data.waha.online) {
       wahaDot.className = 'status-dot online';
       wahaText.textContent = data.waha.status || 'Conectada';
       wahaText.className = 'status-val text-green';
@@ -60,7 +121,7 @@ async function checkStatus() {
     // Gemini Status
     const geminiDot = document.getElementById('dot-gemini');
     const geminiText = document.getElementById('status-gemini');
-    if (data.gemini.configured) {
+    if (data.gemini && data.gemini.configured) {
       geminiDot.className = 'status-dot online';
       geminiText.textContent = 'Configurado ✅';
       geminiText.className = 'status-val text-green';
@@ -74,7 +135,7 @@ async function checkStatus() {
   }
 }
 
-document.getElementById('btn-refresh-status').addEventListener('click', checkStatus);
+document.getElementById('btn-refresh-status')?.addEventListener('click', checkStatus);
 
 // 2. Simulador de Chat
 const chatMessages = document.getElementById('chat-messages');
@@ -104,7 +165,7 @@ function appendMessage(text, isOutgoing, isHandoff = false) {
   return msgDiv;
 }
 
-chatForm.addEventListener('submit', async (e) => {
+chatForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = chatInput.value.trim();
   if (!text) return;
@@ -127,7 +188,7 @@ chatForm.addEventListener('submit', async (e) => {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
   try {
-    const res = await fetch('/api/simulate', {
+    const res = await fetchWithAuth('/api/simulate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -158,14 +219,15 @@ document.getElementById('btn-clear-chat').addEventListener('click', () => {
 
 // 3. Configurações & Prompts
 async function loadConfig() {
+  if (!getAuthToken()) return;
   try {
-    const res = await fetch('/api/config');
+    const res = await fetchWithAuth('/api/config');
     const data = await res.json();
     const cfg = data.config;
 
     document.getElementById('cfg-botName').value = cfg.botName || '';
     document.getElementById('cfg-companyName').value = cfg.companyName || '';
-    document.getElementById('cfg-model').value = cfg.model || 'gemini-2.0-flash';
+    document.getElementById('cfg-model').value = cfg.model || 'gemini-flash-lite-latest';
     document.getElementById('cfg-temperature').value = cfg.temperature ?? 0.4;
     document.getElementById('cfg-systemInstruction').value = cfg.systemInstruction || '';
     document.getElementById('cfg-businessInfo').value = cfg.businessInfo || '';
@@ -183,7 +245,7 @@ async function loadConfig() {
   }
 }
 
-document.getElementById('config-form').addEventListener('submit', async (e) => {
+document.getElementById('config-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const feedback = document.getElementById('save-feedback');
   feedback.textContent = 'Salvando...';
@@ -211,7 +273,7 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
   };
 
   try {
-    const res = await fetch('/api/config', {
+    const res = await fetchWithAuth('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -223,7 +285,7 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
       feedback.className = 'feedback-msg text-green';
       document.getElementById('cfg-apiKey').value = '';
       checkStatus();
-      setTimeout(() => { feedback.textContent = ''; }, 3000);
+      setTimeout(() => { feedback.textContent = ''; }, 3500);
     } else {
       feedback.textContent = `❌ Erro: ${data.error}`;
       feedback.className = 'feedback-msg text-red';
@@ -236,9 +298,10 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
 
 // 4. Conversas Ativas & Pausa
 async function loadChats() {
+  if (!getAuthToken()) return;
   const tbody = document.getElementById('chats-tbody');
   try {
-    const res = await fetch('/api/chats');
+    const res = await fetchWithAuth('/api/chats');
     const data = await res.json();
 
     if (!data.chats || data.chats.length === 0) {
@@ -285,10 +348,10 @@ async function loadChats() {
   }
 }
 
-document.getElementById('btn-refresh-chats').addEventListener('click', loadChats);
+document.getElementById('btn-refresh-chats')?.addEventListener('click', loadChats);
 
 window.pauseChat = async function(chatId) {
-  await fetch(`/api/chats/${encodeURIComponent(chatId)}/pause`, {
+  await fetchWithAuth(`/api/chats/${encodeURIComponent(chatId)}/pause`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ minutes: 360 })
@@ -297,20 +360,21 @@ window.pauseChat = async function(chatId) {
 };
 
 window.resumeChat = async function(chatId) {
-  await fetch(`/api/chats/${encodeURIComponent(chatId)}/resume`, { method: 'POST' });
+  await fetchWithAuth(`/api/chats/${encodeURIComponent(chatId)}/resume`, { method: 'POST' });
   loadChats();
 };
 
 window.clearChat = async function(chatId) {
-  await fetch(`/api/chats/${encodeURIComponent(chatId)}/clear`, { method: 'POST' });
+  await fetchWithAuth(`/api/chats/${encodeURIComponent(chatId)}/clear`, { method: 'POST' });
   loadChats();
 };
 
 // 5. Logs em Tempo Real
 async function loadLogs() {
+  if (!getAuthToken()) return;
   const consoleEl = document.getElementById('logs-console');
   try {
-    const res = await fetch('/api/logs');
+    const res = await fetchWithAuth('/api/logs');
     const data = await res.json();
 
     if (!data.logs || data.logs.length === 0) {
@@ -333,16 +397,17 @@ async function loadLogs() {
   }
 }
 
-document.getElementById('btn-refresh-logs').addEventListener('click', loadLogs);
-document.getElementById('btn-clear-logs').addEventListener('click', async () => {
-  await fetch('/api/logs', { method: 'DELETE' });
+document.getElementById('btn-refresh-logs')?.addEventListener('click', loadLogs);
+document.getElementById('btn-clear-logs')?.addEventListener('click', async () => {
+  await fetchWithAuth('/api/logs', { method: 'DELETE' });
   loadLogs();
 });
 
 // 6. Integração com a WAHA API
 async function loadWahaConfig() {
+  if (!getAuthToken()) return;
   try {
-    const res = await fetch('/api/config');
+    const res = await fetchWithAuth('/api/config');
     const data = await res.json();
     const cfg = data.config || {};
     const envData = data.env || {};
@@ -389,7 +454,7 @@ document.getElementById('btn-test-waha')?.addEventListener('click', async () => 
   statusBox.textContent = 'Testando conexão com o servidor WAHA...';
 
   try {
-    const res = await fetch('/api/waha/test-connection', {
+    const res = await fetchWithAuth('/api/waha/test-connection', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ baseUrl, apiKey, session })
@@ -432,7 +497,7 @@ document.getElementById('btn-save-waha')?.addEventListener('click', async () => 
   statusBox.textContent = 'Salvando configurações da WAHA...';
 
   try {
-    const res = await fetch('/api/waha/save-connection', {
+    const res = await fetchWithAuth('/api/waha/save-connection', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ baseUrl, apiKey, session, webhookPublicUrl: cleanBaseHook })
@@ -467,7 +532,7 @@ document.getElementById('btn-register-waha-hook')?.addEventListener('click', asy
   statusBox.textContent = 'Enviando comando para registrar webhook na WAHA...';
 
   try {
-    const res = await fetch('/api/waha/setup-webhook', {
+    const res = await fetchWithAuth('/api/waha/setup-webhook', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: publicWebhookUrl, session })
@@ -511,8 +576,95 @@ document.getElementById('btn-copy-chatwoot-btn')?.addEventListener('click', () =
   }
 });
 
-// Inicialização
-checkStatus();
-loadConfig();
-loadWahaConfig();
-setInterval(checkStatus, 15000);
+// ==========================================
+// Handlers de Login e Logout
+// ==========================================
+document.getElementById('login-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const usernameInput = document.getElementById('login-username');
+  const passwordInput = document.getElementById('login-password');
+  const submitBtn = document.getElementById('btn-login-submit');
+  const errorEl = document.getElementById('login-error');
+
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+
+  if (!username || !password) return;
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Verificando... ⏳';
+  errorEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success && data.token) {
+      setAuthToken(data.token);
+      hideLoginModal(data.user?.username || username);
+      passwordInput.value = '';
+      checkStatus();
+      loadConfig();
+      loadWahaConfig();
+    } else {
+      errorEl.textContent = data.error || 'Credenciais inválidas. Verifique usuário e senha.';
+      errorEl.style.display = 'block';
+    }
+  } catch (err) {
+    errorEl.textContent = `Erro ao conectar com o servidor: ${err.message}`;
+    errorEl.style.display = 'block';
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Entrar no Painel 🚀';
+  }
+});
+
+document.getElementById('btn-logout')?.addEventListener('click', async () => {
+  try {
+    await fetchWithAuth('/api/auth/logout', { method: 'POST' });
+  } catch (_) {}
+  clearAuthToken();
+  showLoginModal();
+});
+
+// Inicialização da Aplicação
+async function initApp() {
+  const token = getAuthToken();
+  if (!token) {
+    showLoginModal();
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      hideLoginModal(data.user?.username || 'admin');
+      checkStatus();
+      loadConfig();
+      loadWahaConfig();
+    } else {
+      clearAuthToken();
+      showLoginModal();
+    }
+  } catch (err) {
+    showLoginModal();
+  }
+}
+
+// Auto-refresh do status a cada 15 segundos se logado
+setInterval(() => {
+  const overlay = document.getElementById('login-overlay');
+  if (getAuthToken() && overlay && overlay.classList.contains('hidden')) {
+    checkStatus();
+  }
+}, 15000);
+
+initApp();
+
