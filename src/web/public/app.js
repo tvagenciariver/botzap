@@ -70,6 +70,28 @@ function formatWhatsAppText(text) {
     .replace(/\n/g, '<br>');
 }
 
+/**
+ * Exibe notificação flutuante suave (Toast Notification)
+ */
+function showToast(message, type = 'info', duration = 3500) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+
+  const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
+  toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(50px)';
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
 // Navegação por Abas
 document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -108,14 +130,33 @@ async function checkStatus() {
     // WAHA Status
     const wahaDot = document.getElementById('dot-waha');
     const wahaText = document.getElementById('status-waha');
+    const wahaBadge = document.getElementById('waha-conn-badge');
+    const wahaBadgeTop = document.getElementById('waha-conn-badge-top');
+
     if (data.waha && data.waha.online) {
       wahaDot.className = 'status-dot online';
       wahaText.textContent = data.waha.status || 'Conectada';
       wahaText.className = 'status-val text-green';
+      if (wahaBadge) {
+        wahaBadge.textContent = `WAHA: ${data.waha.status || 'Conectada'}`;
+        wahaBadge.className = 'badge text-green';
+      }
+      if (wahaBadgeTop) {
+        wahaBadgeTop.textContent = `WAHA: ${data.waha.status || 'Conectada'}`;
+        wahaBadgeTop.className = 'badge text-green';
+      }
     } else {
       wahaDot.className = 'status-dot offline';
       wahaText.textContent = 'Desconectada';
       wahaText.className = 'status-val text-red';
+      if (wahaBadge) {
+        wahaBadge.textContent = 'WAHA: Desconectada';
+        wahaBadge.className = 'badge text-red';
+      }
+      if (wahaBadgeTop) {
+        wahaBadgeTop.textContent = 'WAHA: Desconectada';
+        wahaBadgeTop.className = 'badge text-red';
+      }
     }
 
     // Gemini Status
@@ -404,6 +445,7 @@ document.getElementById('btn-clear-logs')?.addEventListener('click', async () =>
 });
 
 // 6. Integração com a WAHA API
+// 6. Integração com a WAHA API
 async function loadWahaConfig() {
   if (!getAuthToken()) return;
   try {
@@ -415,13 +457,17 @@ async function loadWahaConfig() {
     const baseUrlEl = document.getElementById('waha-baseUrl');
     const apiKeyEl = document.getElementById('waha-apiKey');
     const sessionEl = document.getElementById('waha-session');
+    const sessionBadgeEl = document.getElementById('waha-session-badge');
     const publicWebhookUrlEl = document.getElementById('waha-publicWebhookUrl');
     const copyWebhookEl = document.getElementById('copy-webhook-input');
     const copyChatwootEl = document.getElementById('copy-chatwoot-input');
 
     if (baseUrlEl) baseUrlEl.value = cfg.wahaBaseUrl || envData.wahaBaseUrl || 'https://waha3.whatscorporativo.com';
     if (apiKeyEl && cfg.wahaApiKey) apiKeyEl.value = cfg.wahaApiKey;
-    if (sessionEl) sessionEl.value = cfg.wahaSession || envData.wahaSession || 'default';
+    if (sessionEl) {
+      sessionEl.value = cfg.wahaSession || envData.wahaSession || 'default';
+      if (sessionBadgeEl) sessionBadgeEl.textContent = sessionEl.value;
+    }
 
     // Auto-detect URL pública do webhook baseada na origem atual ou na configurada
     const currentOrigin = window.location.origin;
@@ -442,16 +488,23 @@ async function loadWahaConfig() {
 }
 
 // Testar Conexão com a WAHA
-document.getElementById('btn-test-waha')?.addEventListener('click', async () => {
+async function handleTestWaha() {
   const statusBox = document.getElementById('waha-status-box');
   const badge = document.getElementById('waha-conn-badge');
+  const badgeTop = document.getElementById('waha-conn-badge-top');
   const baseUrl = document.getElementById('waha-baseUrl').value.trim();
   const apiKey = document.getElementById('waha-apiKey').value.trim();
   const session = document.getElementById('waha-session').value.trim() || 'default';
 
+  if (!baseUrl) {
+    showToast('Por favor, informe a URL da WAHA API antes de testar.', 'error');
+    return;
+  }
+
   statusBox.style.display = 'block';
   statusBox.className = 'feedback-msg text-orange';
   statusBox.textContent = 'Testando conexão com o servidor WAHA...';
+  showToast('Testando conexão com a WAHA...', 'info');
 
   try {
     const res = await fetchWithAuth('/api/waha/test-connection', {
@@ -464,10 +517,16 @@ document.getElementById('btn-test-waha')?.addEventListener('click', async () => 
     if (data.success) {
       statusBox.className = 'feedback-msg text-green';
       statusBox.innerHTML = `✅ <strong>Conexão bem sucedida:</strong> ${data.message} ${data.sessionStatus ? `<br>Status da Sessão: <strong>${data.sessionStatus}</strong>` : ''}`;
+      const txt = `WAHA: ${data.sessionStatus || 'Conectada'}`;
       if (badge) {
-        badge.textContent = `WAHA: ${data.sessionStatus || 'Conectada'}`;
+        badge.textContent = txt;
         badge.className = 'badge text-green';
       }
+      if (badgeTop) {
+        badgeTop.textContent = txt;
+        badgeTop.className = 'badge text-green';
+      }
+      showToast(`Conectado com sucesso! Sessão: ${data.sessionStatus || 'OK'}`, 'success');
     } else {
       statusBox.className = 'feedback-msg text-red';
       statusBox.innerHTML = `❌ <strong>Falha na conexão:</strong> ${data.message}`;
@@ -475,16 +534,25 @@ document.getElementById('btn-test-waha')?.addEventListener('click', async () => 
         badge.textContent = 'WAHA: Desconectada';
         badge.className = 'badge text-red';
       }
+      if (badgeTop) {
+        badgeTop.textContent = 'WAHA: Desconectada';
+        badgeTop.className = 'badge text-red';
+      }
+      showToast(`Falha na conexão: ${data.message}`, 'error');
     }
     checkStatus();
   } catch (err) {
     statusBox.className = 'feedback-msg text-red';
     statusBox.innerHTML = `❌ Erro de rede ou requisição: ${err.message}`;
+    showToast(`Erro ao testar conexão: ${err.message}`, 'error');
   }
-});
+}
+
+document.getElementById('btn-test-waha')?.addEventListener('click', handleTestWaha);
+document.getElementById('btn-test-waha-top')?.addEventListener('click', handleTestWaha);
 
 // Salvar Configurações de Conexão da WAHA
-document.getElementById('btn-save-waha')?.addEventListener('click', async () => {
+async function handleSaveWaha() {
   const statusBox = document.getElementById('waha-status-box');
   const baseUrl = document.getElementById('waha-baseUrl').value.trim();
   const apiKey = document.getElementById('waha-apiKey').value.trim();
@@ -507,6 +575,9 @@ document.getElementById('btn-save-waha')?.addEventListener('click', async () => 
     if (data.success) {
       statusBox.className = 'feedback-msg text-green';
       statusBox.innerHTML = `✅ <strong>${data.message}</strong>`;
+      const sessionBadge = document.getElementById('waha-session-badge');
+      if (sessionBadge) sessionBadge.textContent = session;
+      showToast('Configurações da WAHA salvas com sucesso!', 'success');
       checkStatus();
       setTimeout(() => {
         if (statusBox.className.includes('text-green')) statusBox.style.display = 'none';
@@ -514,11 +585,48 @@ document.getElementById('btn-save-waha')?.addEventListener('click', async () => 
     } else {
       statusBox.className = 'feedback-msg text-red';
       statusBox.innerHTML = `❌ Erro ao salvar: ${data.message || data.error}`;
+      showToast(`Erro ao salvar: ${data.message || data.error}`, 'error');
     }
   } catch (err) {
     statusBox.className = 'feedback-msg text-red';
     statusBox.innerHTML = `❌ Erro de rede: ${err.message}`;
+    showToast(`Erro de rede: ${err.message}`, 'error');
   }
+}
+
+document.getElementById('btn-save-waha')?.addEventListener('click', handleSaveWaha);
+document.getElementById('btn-save-waha-top')?.addEventListener('click', handleSaveWaha);
+
+// Mostrar / Ocultar Chave de API
+document.getElementById('btn-toggle-waha-key')?.addEventListener('click', () => {
+  const input = document.getElementById('waha-apiKey');
+  const btn = document.getElementById('btn-toggle-waha-key');
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.textContent = '🙈';
+    btn.title = 'Ocultar Chave';
+  } else {
+    input.type = 'password';
+    btn.textContent = '👁️';
+    btn.title = 'Mostrar Chave';
+  }
+});
+
+// Auto-detectar URL Pública do Webhook pelo navegador
+document.getElementById('btn-auto-detect-url')?.addEventListener('click', () => {
+  const currentOrigin = window.location.origin;
+  const input = document.getElementById('waha-publicWebhookUrl');
+  const copyWaha = document.getElementById('copy-webhook-input');
+  const copyChatwoot = document.getElementById('copy-chatwoot-input');
+
+  const wahaHook = `${currentOrigin}/webhook/waha`;
+  const chatwootHook = `${currentOrigin}/webhook/chatwoot`;
+
+  if (input) input.value = wahaHook;
+  if (copyWaha) copyWaha.value = wahaHook;
+  if (copyChatwoot) copyChatwoot.value = chatwootHook;
+
+  showToast('URL detectada automaticamente pelo navegador!', 'info');
 });
 
 // Registrar Webhook Automaticamente na WAHA
@@ -542,13 +650,16 @@ document.getElementById('btn-register-waha-hook')?.addEventListener('click', asy
     if (data.success) {
       statusBox.className = 'feedback-msg text-green';
       statusBox.innerHTML = `✅ ${data.message}`;
+      showToast(data.message, 'success');
     } else {
       statusBox.className = 'feedback-msg text-orange';
       statusBox.innerHTML = `⚠️ ${data.message}`;
+      showToast(data.message, 'info');
     }
   } catch (err) {
     statusBox.className = 'feedback-msg text-red';
     statusBox.innerHTML = `❌ Erro ao registrar webhook: ${err.message}`;
+    showToast(`Erro ao registrar webhook: ${err.message}`, 'error');
   }
 });
 
@@ -560,6 +671,7 @@ document.getElementById('btn-copy-webhook-btn')?.addEventListener('click', () =>
     const btn = document.getElementById('btn-copy-webhook-btn');
     const old = btn.textContent;
     btn.textContent = '✅ Copiado!';
+    showToast('URL do Webhook da WAHA copiada!', 'success');
     setTimeout(() => { btn.textContent = old; }, 2000);
   }
 });
@@ -572,7 +684,22 @@ document.getElementById('btn-copy-chatwoot-btn')?.addEventListener('click', () =
     const btn = document.getElementById('btn-copy-chatwoot-btn');
     const old = btn.textContent;
     btn.textContent = '✅ Copiado!';
+    showToast('URL do Webhook do Chatwoot copiada!', 'success');
     setTimeout(() => { btn.textContent = old; }, 2000);
+  }
+});
+
+// Atalho de Teclado Global: Ctrl + S / Cmd + S para Salvar
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    const integrationPane = document.getElementById('pane-integration');
+    const promptsPane = document.getElementById('pane-prompts');
+    if (integrationPane && integrationPane.classList.contains('active')) {
+      handleSaveWaha();
+    } else if (promptsPane && promptsPane.classList.contains('active')) {
+      document.getElementById('btn-save-config')?.click();
+    }
   }
 });
 
