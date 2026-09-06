@@ -14,12 +14,21 @@ import { checkBusinessHoursStatus } from '../orchestrator/schedule-helper.js';
 export const apiRouter = Router();
 
 function sanitizeAgentProfile(agent: AgentProfile) {
+  const bhStatus = checkBusinessHoursStatus(agent);
   return {
     ...agent,
     geminiApiKey: agent.geminiApiKey ? '••••••••' + agent.geminiApiKey.slice(-4) : '',
     openaiApiKey: agent.openaiApiKey ? '••••••••' + agent.openaiApiKey.slice(-4) : '',
     hasGeminiKey: !!(agent.geminiApiKey && agent.geminiApiKey.trim()),
-    hasOpenAIKey: !!(agent.openaiApiKey && agent.openaiApiKey.trim())
+    hasOpenAIKey: !!(agent.openaiApiKey && agent.openaiApiKey.trim()),
+    businessHoursStatus: {
+      enabled: !!agent.businessHours?.enabled,
+      isOpen: bhStatus.isOpen,
+      reason: bhStatus.reason,
+      currentTime: bhStatus.currentTime,
+      currentDay: bhStatus.currentDayName,
+      timezone: bhStatus.timezone
+    }
   };
 }
 
@@ -204,10 +213,16 @@ apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) =
 
   const config = loadBotConfig();
   const provider = config.llmProvider || 'gemini';
+  const allAgents = agentManager.listAgents();
+  const activeAgents = allAgents.filter(a => a.active !== false);
 
   res.json({
     orchestrator: 'online',
     timestamp: new Date().toISOString(),
+    agentsCount: {
+      total: allAgents.length,
+      active: activeAgents.length
+    },
     waha: {
       baseUrl: env.wahaBaseUrl,
       session: env.wahaSession,

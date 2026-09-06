@@ -21,8 +21,11 @@
         </div>
       </div>
 
-      <!-- Status Bar -->
+      <!-- Status Bar: Infraestrutura Global + Agente em Foco -->
       <div class="status-card">
+        <div class="status-group-title">
+          <span>🌐 Infraestrutura</span>
+        </div>
         <div class="status-item">
           <span class="status-dot online"></span>
           <span class="status-label">Orquestrador:</span>
@@ -34,14 +37,36 @@
           <span class="status-val" id="status-waha">Checando...</span>
         </div>
         <div class="status-item">
-          <span class="status-dot" id="dot-gemini"></span>
-          <span class="status-label">IA Ativa:</span>
-          <span class="status-val" id="status-gemini">Checando...</span>
+          <span class="status-dot online" id="dot-agents-count"></span>
+          <span class="status-label">Agentes:</span>
+          <span class="status-val text-indigo" id="status-agents-count">Carregando...</span>
+        </div>
+
+        <div class="status-divider"></div>
+
+        <!-- Seção do Agente em Foco -->
+        <div class="status-group-title">
+          <span>🤖 Agente em Foco</span>
+        </div>
+        <div class="sidebar-agent-select-wrap">
+          <select id="sidebar-agent-select" class="sidebar-agent-select" title="Selecione o agente para inspecionar">
+            <option value="">Carregando agentes...</option>
+          </select>
         </div>
         <div class="status-item">
-          <span class="status-dot" id="dot-schedule"></span>
+          <span class="status-dot" id="dot-agent-ai"></span>
+          <span class="status-label">IA do Bot:</span>
+          <span class="status-val" id="status-agent-ai">Checando...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot" id="dot-agent-schedule"></span>
           <span class="status-label">Expediente:</span>
-          <span class="status-val" id="status-schedule">Checando...</span>
+          <span class="status-val" id="status-agent-schedule">Checando...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot online" id="dot-agent-session"></span>
+          <span class="status-label">Sessão:</span>
+          <span class="status-val text-cyan" id="status-agent-session">--</span>
         </div>
       </div>
 

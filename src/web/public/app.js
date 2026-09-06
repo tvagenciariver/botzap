@@ -164,66 +164,42 @@ async function checkStatus() {
       }
     }
 
-    // Status da IA (Gemini ou OpenAI)
-    const geminiDot = document.getElementById('dot-gemini');
-    const geminiText = document.getElementById('status-gemini');
-    if (data.activeLlm) {
-      const isOnline = data.activeLlm.configured;
-      const provLabel = data.activeLlm.provider === 'openai' ? 'OpenAI GPT' : 'Gemini Flash';
-      geminiDot.className = `status-dot ${isOnline ? 'online' : 'offline'}`;
-      geminiText.textContent = isOnline ? `${provLabel} (${data.activeLlm.model})` : `${provLabel} (Chave Pendente ⚠️)`;
-      geminiText.className = isOnline ? 'status-val text-green' : 'status-val text-orange';
-    } else if (data.gemini && data.gemini.configured) {
-      geminiDot.className = 'status-dot online';
-      geminiText.textContent = 'Configurado ✅';
-      geminiText.className = 'status-val text-green';
-    } else {
-      geminiDot.className = 'status-dot offline';
-      geminiText.textContent = 'Chave Pendente ⚠️';
-      geminiText.className = 'status-val text-orange';
+    // Status Geral de Agentes (Infraestrutura)
+    const agentsCountText = document.getElementById('status-agents-count');
+    const agentsCountDot = document.getElementById('dot-agents-count');
+    if (data.agentsCount) {
+      if (agentsCountText) {
+        agentsCountText.textContent = `${data.agentsCount.active}/${data.agentsCount.total} Ativos`;
+        agentsCountText.className = data.agentsCount.active > 0 ? 'status-val text-indigo' : 'status-val text-muted';
+      }
+      if (agentsCountDot) {
+        agentsCountDot.className = data.agentsCount.active > 0 ? 'status-dot online' : 'status-dot offline';
+      }
     }
 
-    // Status do Horário Comercial
-    const schedDot = document.getElementById('dot-schedule');
-    const schedText = document.getElementById('status-schedule');
-    const schedBadge = document.getElementById('schedule-status-badge');
+    // Atualiza status do agente em foco na barra lateral se já selecionado
+    const sidebarSelect = document.getElementById('sidebar-agent-select');
+    if (sidebarSelect && sidebarSelect.value) {
+      updateSidebarAgentStatus(sidebarSelect.value);
+    }
 
-    if (data.businessHours) {
+    // Status do Horário Comercial (Aba de Horário Padrão / Legado)
+    const schedBadge = document.getElementById('schedule-status-badge');
+    if (data.businessHours && schedBadge) {
       const isEnabled = data.businessHours.enabled;
       const isOpen = data.businessHours.isOpen;
       const reason = data.businessHours.reason;
 
       if (!isEnabled) {
-        if (schedDot) schedDot.className = 'status-dot offline';
-        if (schedText) {
-          schedText.textContent = 'Desativado ⏸️';
-          schedText.className = 'status-val text-muted';
-        }
-        if (schedBadge) {
-          schedBadge.className = 'badge text-muted';
-          schedBadge.innerHTML = '<span class="status-dot offline"></span> Desativado (Sempre Aberto)';
-        }
+        schedBadge.className = 'badge text-muted';
+        schedBadge.innerHTML = '<span class="status-dot offline"></span> Desativado (Sempre Aberto)';
       } else if (isOpen) {
-        if (schedDot) schedDot.className = 'status-dot online';
-        if (schedText) {
-          schedText.textContent = 'Aberto 🟢';
-          schedText.className = 'status-val text-green';
-        }
-        if (schedBadge) {
-          schedBadge.className = 'badge text-green';
-          schedBadge.innerHTML = `<span class="status-dot online"></span> Aberto agora (${data.businessHours.currentTime} - ${data.businessHours.currentDay})`;
-        }
+        schedBadge.className = 'badge text-green';
+        schedBadge.innerHTML = `<span class="status-dot online"></span> Aberto agora (${data.businessHours.currentTime} - ${data.businessHours.currentDay})`;
       } else {
         const reasonLabel = reason === 'lunch' ? 'Almoço 🍽️' : reason === 'day_closed' ? 'Fechado hoje' : 'Fora de expediente';
-        if (schedDot) schedDot.className = 'status-dot offline';
-        if (schedText) {
-          schedText.textContent = `${reasonLabel} 🔴`;
-          schedText.className = 'status-val text-red';
-        }
-        if (schedBadge) {
-          schedBadge.className = 'badge text-red';
-          schedBadge.innerHTML = `<span class="status-dot offline"></span> Fechado (${reasonLabel} - ${data.businessHours.currentTime})`;
-        }
+        schedBadge.className = 'badge text-red';
+        schedBadge.innerHTML = `<span class="status-dot offline"></span> Fechado (${reasonLabel} - ${data.businessHours.currentTime})`;
       }
     }
   } catch (err) {
@@ -1146,6 +1122,7 @@ async function loadAgents() {
 
     renderAgentsGrid(allAgents);
     populateSimulatorAgentSelect(allAgents);
+    populateSidebarAgentSelect(allAgents);
   } catch (err) {
     console.error('Erro ao carregar agentes:', err);
     showToast(`Erro ao carregar agentes: ${err.message}`, 'error');
@@ -1174,7 +1151,30 @@ function renderAgentsGrid(agents) {
     const provider = agent.llmProvider || 'openai';
     const model = provider === 'openai' ? (agent.openaiModel || 'gpt-4o-mini') : (agent.model || 'gemini-flash-lite');
     const sessionLabel = agent.wahaSession ? (agent.wahaSession === '*' ? 'Todas (*)' : agent.wahaSession) : 'Não vinculada';
+    
+    // Status de Horário Comercial em Tempo Real para este Agente
     const hasSchedule = !!agent.businessHours?.enabled;
+    const bh = agent.businessHoursStatus;
+    let bhBadgeClass = 'agent-badge-item';
+    let bhText = '🕒 Atendimento 24/7';
+
+    if (hasSchedule && bh) {
+      if (bh.isOpen) {
+        bhBadgeClass += ' agent-badge-bh-open';
+        bhText = `🟢 Aberto (${bh.currentTime || ''})`;
+      } else {
+        if (bh.reason === 'lunch') {
+          bhBadgeClass += ' agent-badge-bh-lunch';
+          bhText = '🍽️ Em Almoço';
+        } else if (bh.reason === 'day_closed') {
+          bhBadgeClass += ' agent-badge-bh-closed';
+          bhText = '🔴 Fechado Hoje';
+        } else {
+          bhBadgeClass += ' agent-badge-bh-closed';
+          bhText = `🔴 Fora de Horário (${bh.currentTime || ''})`;
+        }
+      }
+    }
 
     return `
       <div class="agent-card ${isActive ? '' : 'inactive'}" id="agent-card-${agent.id}">
@@ -1198,8 +1198,8 @@ function renderAgentsGrid(agents) {
             <span class="agent-badge-item ${provider === 'openai' ? 'agent-badge-provider-openai' : 'agent-badge-provider-gemini'}">
               🧠 ${provider === 'openai' ? 'OpenAI ' : 'Gemini '} ${escapeHtml(model)}
             </span>
-            <span class="agent-badge-item">
-              🕒 ${hasSchedule ? 'Expediente Ativo' : 'Atendimento 24/7'}
+            <span class="${bhBadgeClass}">
+              ${bhText}
             </span>
           </div>
 
@@ -1256,6 +1256,110 @@ document.getElementById('agents-search-input')?.addEventListener('input', (e) =>
   renderAgentsGrid(filtered);
 });
 
+// Popula o seletor de agentes do menu lateral (Agente em Foco)
+function populateSidebarAgentSelect(agents) {
+  const select = document.getElementById('sidebar-agent-select');
+  if (!select) return;
+
+  if (!agents || agents.length === 0) {
+    select.innerHTML = '<option value="">Nenhum agente cadastrado</option>';
+    updateSidebarAgentStatus(null);
+    return;
+  }
+
+  const currentVal = select.value;
+  select.innerHTML = agents.map(a => `
+    <option value="${a.id}">${escapeHtml(a.name)} (${escapeHtml(a.companyName)})${a.isDefault ? ' ⭐' : ''}</option>
+  `).join('');
+
+  if (currentVal && agents.some(a => a.id === currentVal)) {
+    select.value = currentVal;
+  } else {
+    const def = agents.find(a => a.isDefault) || agents[0];
+    select.value = def.id;
+  }
+
+  updateSidebarAgentStatus(select.value);
+}
+
+// Atualiza os indicadores de IA, Expediente e Sessão do agente em foco na barra lateral
+function updateSidebarAgentStatus(agentId) {
+  const dotAi = document.getElementById('dot-agent-ai');
+  const textAi = document.getElementById('status-agent-ai');
+  const dotSched = document.getElementById('dot-agent-schedule');
+  const textSched = document.getElementById('status-agent-schedule');
+  const dotSession = document.getElementById('dot-agent-session');
+  const textSession = document.getElementById('status-agent-session');
+
+  const agent = allAgents.find(a => a.id === agentId);
+  if (!agent) {
+    if (textAi) { textAi.textContent = 'Nenhum'; textAi.className = 'status-val text-muted'; }
+    if (dotAi) dotAi.className = 'status-dot offline';
+    if (textSched) { textSched.textContent = '--'; textSched.className = 'status-val text-muted'; }
+    if (dotSched) dotSched.className = 'status-dot offline';
+    if (textSession) textSession.textContent = '--';
+    return;
+  }
+
+  // 1. Provedor e Modelo de IA do Agente
+  const prov = agent.llmProvider === 'openai' ? 'OpenAI' : 'Gemini';
+  const model = agent.llmProvider === 'openai' ? (agent.openaiModel || 'gpt-4o-mini') : (agent.model || 'flash');
+  if (textAi) {
+    textAi.textContent = `${prov} (${model})`;
+    textAi.className = prov === 'openai' ? 'status-val text-green' : 'status-val text-cyan';
+  }
+  if (dotAi) {
+    dotAi.className = 'status-dot online';
+  }
+
+  // 2. Expediente e Horário Comercial do Agente
+  const bh = agent.businessHoursStatus;
+  const hasSched = !!agent.businessHours?.enabled;
+
+  if (!hasSched) {
+    if (textSched) {
+      textSched.textContent = '24/7 🕒';
+      textSched.className = 'status-val text-green';
+    }
+    if (dotSched) dotSched.className = 'status-dot online';
+  } else if (bh && bh.isOpen) {
+    if (textSched) {
+      textSched.textContent = `Aberto 🟢 (${bh.currentTime})`;
+      textSched.className = 'status-val text-green';
+    }
+    if (dotSched) dotSched.className = 'status-dot online';
+  } else if (bh && !bh.isOpen) {
+    let reasonText = 'Fechado 🔴';
+    if (bh.reason === 'lunch') reasonText = 'Almoço 🍽️';
+    else if (bh.reason === 'day_closed') reasonText = 'Fechado hoje 🔴';
+    else reasonText = `Fechado 🔴 (${bh.currentTime})`;
+
+    if (textSched) {
+      textSched.textContent = reasonText;
+      textSched.className = bh.reason === 'lunch' ? 'status-val text-orange' : 'status-val text-red';
+    }
+    if (dotSched) dotSched.className = 'status-dot offline';
+  }
+
+  // 3. Sessão WAHA
+  if (textSession) {
+    textSession.textContent = agent.wahaSession === '*' ? 'Todas (*)' : (agent.wahaSession || 'Padrão');
+  }
+  if (dotSession) {
+    dotSession.className = agent.active !== false ? 'status-dot online' : 'status-dot offline';
+  }
+}
+
+document.getElementById('sidebar-agent-select')?.addEventListener('change', (e) => {
+  const agentId = e.target.value;
+  updateSidebarAgentStatus(agentId);
+  const simSelect = document.getElementById('sim-agent-select');
+  if (simSelect && simSelect.value !== agentId) {
+    simSelect.value = agentId;
+    simSelect.dispatchEvent(new Event('change'));
+  }
+});
+
 // Popula o seletor de agentes do Simulador
 function populateSimulatorAgentSelect(agents) {
   const select = document.getElementById('sim-agent-select');
@@ -1296,11 +1400,19 @@ function updateSimulatorHeaderForSelectedAgent() {
 }
 
 document.getElementById('sim-agent-select')?.addEventListener('change', () => {
+  const select = document.getElementById('sim-agent-select');
   updateSimulatorHeaderForSelectedAgent();
+
+  // Sincroniza seletor da barra lateral
+  const sidebarSelect = document.getElementById('sidebar-agent-select');
+  if (sidebarSelect && select && sidebarSelect.value !== select.value) {
+    sidebarSelect.value = select.value;
+    updateSidebarAgentStatus(select.value);
+  }
+
   currentChatId = 'simulador_' + Math.random().toString(36).substring(2, 7) + '@c.us';
   const chatMessages = document.getElementById('chat-messages');
   if (chatMessages) {
-    const select = document.getElementById('sim-agent-select');
     const agent = allAgents.find(a => a.id === select?.value);
     chatMessages.innerHTML = '';
     appendMessage(`Simulador alternado para o agente <strong>${agent ? agent.name : ''}</strong> (${agent ? agent.companyName : ''}). Olá! Como posso ajudar você hoje? 👋`, false);
@@ -1315,6 +1427,12 @@ function switchToSimulatorWithAgent(agentId) {
   if (select) {
     select.value = agentId;
     select.dispatchEvent(new Event('change'));
+  }
+
+  const sidebarSelect = document.getElementById('sidebar-agent-select');
+  if (sidebarSelect) {
+    sidebarSelect.value = agentId;
+    updateSidebarAgentStatus(agentId);
   }
 }
 
