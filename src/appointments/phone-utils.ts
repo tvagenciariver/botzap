@@ -69,8 +69,8 @@ export function matchPhoneOrChatId(a?: string, b?: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
 
-  let cleanA = a.split('@')[0].replace(/\D/g, '');
-  let cleanB = b.split('@')[0].replace(/\D/g, '');
+  let cleanA = a.split('@')[0].split(':')[0].replace(/\D/g, '');
+  let cleanB = b.split('@')[0].split(':')[0].replace(/\D/g, '');
 
   if (!cleanA || !cleanB) return false;
   if (cleanA === cleanB) return true;

@@ -9,11 +9,21 @@ export class ExamDeliveryAgent implements IAgent {
   description = 'Valida os 3 primeiros dígitos do CPF do paciente e entrega com segurança e sigilo laudos e exames médicos no WhatsApp.';
 
   /**
-   * Ativado se houver qualquer laudo/exame aguardando validação de CPF para o contato atual
+   * Ativado se houver qualquer laudo/exame aguardando validação de CPF para o contato atual,
+   * ou se a mensagem enviada for dígitos que correspondam a um exame pendente.
    */
   canHandle(context: AgentContext): boolean {
     const pending = examService.getPendingExamsForChat(context.chatId);
-    return pending.length > 0;
+    if (pending.length > 0) return true;
+
+    // Também intercepta se o usuário digitou dígitos (possível CPF) e há exame não verificado
+    const cleanDigits = context.userMessage.replace(/\D/g, '');
+    if (cleanDigits.length >= 3 && cleanDigits.length <= 11) {
+      const match = examService.findPendingExam(context.chatId, context.userMessage);
+      if (match) return true;
+    }
+
+    return false;
   }
 
   async execute(context: AgentContext): Promise<AgentResponse> {
@@ -50,6 +60,9 @@ export class ExamDeliveryAgent implements IAgent {
     }
 
     if (verification.replyText) {
+      memoryStore.addMessage(context.chatId, 'user', context.userMessage, context.contactName);
+      memoryStore.addMessage(context.chatId, 'model', verification.replyText, context.contactName);
+
       return {
         handled: true,
         replyText: verification.replyText,

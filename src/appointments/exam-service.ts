@@ -145,6 +145,19 @@ export class ExamService {
         );
 
         botTracker.recordBotMessage(patientChatId, challengeMessage, sendRes?.id);
+        
+        // Despausa o bot para este contato para garantir que possa responder o CPF
+        memoryStore.resumeChat(patientChatId, agent.id);
+        const altChat = getAlternateBrazilianChatId(patientChatId);
+        if (altChat) memoryStore.resumeChat(altChat, agent.id);
+
+        // Zera tentativas de CPF anteriores para este paciente
+        for (const ex of this.exams) {
+          if (!ex.cpfVerified && (matchPhoneOrChatId(ex.patientChatId, patientChatId) || matchPhoneOrChatId(ex.patientPhone, data.patientPhone))) {
+            ex.failedCpfAttempts = 0;
+          }
+        }
+
         attempts.push({
           target: 'patient',
           recipientName: data.patientName.trim(),
@@ -273,8 +286,7 @@ export class ExamService {
     if (isSimulatorChatId(chatId)) {
       const simulatorPending = this.exams.filter(exam =>
         !exam.cpfVerified &&
-        (exam.target === 'patient' || exam.target === 'both') &&
-        (exam.failedCpfAttempts || 0) < 3
+        (exam.target === 'patient' || exam.target === 'both')
       );
       return simulatorPending.slice(0, 1);
     }
@@ -285,11 +297,57 @@ export class ExamService {
       if (exam.cpfVerified) return false;
       // Se o envio é exclusivo para parceiro, dispensa CPF
       if (exam.target === 'partner') return false;
-      // Se já atingiu 3 tentativas e foi transferido para humano, não processa automaticamente pelo bot
-      if ((exam.failedCpfAttempts || 0) >= 3) return false;
 
-      return matchPhoneOrChatId(exam.patientChatId, chatId) || matchPhoneOrChatId(exam.patientPhone, chatId);
+      // Correspondência inteligente direta
+      if (matchPhoneOrChatId(exam.patientChatId, chatId) || matchPhoneOrChatId(exam.patientPhone, chatId)) {
+        return true;
+      }
+
+      // Correspondência com chatId alternativo do contato recebido (com/sem 9º dígito)
+      const altChatId = getAlternateBrazilianChatId(chatId);
+      if (altChatId && (matchPhoneOrChatId(exam.patientChatId, altChatId) || matchPhoneOrChatId(exam.patientPhone, altChatId))) {
+        return true;
+      }
+
+      // Correspondência com chatId alternativo do exame registrado
+      const altExamChatId = exam.patientChatId ? getAlternateBrazilianChatId(exam.patientChatId) : null;
+      if (altExamChatId && matchPhoneOrChatId(altExamChatId, chatId)) {
+        return true;
+      }
+
+      return false;
     });
+  }
+
+  /**
+   * Busca um exame pendente de validação de CPF, seja pelo chatId/telefone do contato,
+   * ou pelo matching dos 3 primeiros dígitos do CPF informados na mensagem.
+   */
+  findPendingExam(chatId?: string, messageText?: string): ExamDispatch | undefined {
+    this.loadFromDisk();
+
+    // 1. Tenta buscar por chatId/telefone
+    if (chatId) {
+      const pending = this.getPendingExamsForChat(chatId);
+      if (pending.length > 0) return pending[0];
+    }
+
+    // 2. Se informou dígitos na mensagem, busca por correspondência de CPF
+    if (messageText) {
+      const cleanDigits = messageText.replace(/\D/g, '');
+      if (cleanDigits.length >= 3) {
+        const input3 = cleanDigits.substring(0, 3);
+        const match = this.exams.find(exam => {
+          if (exam.cpfVerified) return false;
+          if (exam.target === 'partner') return false;
+          const expected3 = (exam.patientCpf || '').replace(/\D/g, '').substring(0, 3);
+          return expected3 && expected3 === input3;
+        });
+        if (match) return match;
+      }
+    }
+
+    return undefined;
   }
 
   /**
@@ -307,12 +365,21 @@ export class ExamService {
     deliveredExams: ExamDispatch[];
   }> {
     this.loadFromDisk();
-    const pendingExams = this.getPendingExamsForChat(chatId);
+    let pendingExams = this.getPendingExamsForChat(chatId);
+
+    const inputDigits = inputMessage.replace(/\D/g, '');
+
+    // Se não encontrou pelo chatId diretamente, mas digitou 3+ dígitos, tenta encontrar por findPendingExam
+    if (pendingExams.length === 0 && inputDigits.length >= 3) {
+      const fallbackExam = this.findPendingExam(chatId, inputMessage);
+      if (fallbackExam) {
+        pendingExams = [fallbackExam];
+      }
+    }
+
     if (pendingExams.length === 0) {
       return { success: false, replyText: '', action: 'none', deliveredExams: [] };
     }
-
-    const inputDigits = inputMessage.replace(/\D/g, '');
 
     // Se digitou menos de 3 dígitos numéricos
     if (inputDigits.length < 3) {
@@ -341,7 +408,7 @@ export class ExamService {
       }
       this.saveToDisk();
 
-      // Se errou 3 vezes: Transbordo para atendimento humanizado
+      // Se errou 3 vezes ou mais: Transbordo para atendimento humanizado
       if (maxAttempts >= 3) {
         const exceededMsg =
           `⚠️ *Limite de tentativas excedido.*\n\n` +
@@ -382,6 +449,16 @@ export class ExamService {
         ? sessionName
         : ((agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : (env.wahaSession || 'default'));
 
+      // Despausa contato no bot caso estivesse pausado
+      memoryStore.resumeChat(chatId, exam.agentId);
+      const altChat = getAlternateBrazilianChatId(chatId);
+      if (altChat) memoryStore.resumeChat(altChat, exam.agentId);
+      if (exam.patientChatId) {
+        memoryStore.resumeChat(exam.patientChatId, exam.agentId);
+        const altExamChat = getAlternateBrazilianChatId(exam.patientChatId);
+        if (altExamChat) memoryStore.resumeChat(altExamChat, exam.agentId);
+      }
+
       let fileSentOk = false;
       if (fs.existsSync(exam.fileStoredPath)) {
         try {
@@ -398,8 +475,9 @@ export class ExamService {
               `_Documento emitido com segurança e privacidade._`;
 
           if (sessionName !== 'simulator' && !isSimulatorChatId(chatId)) {
+            const sendTarget = isSimulatorChatId(chatId) ? chatId : (exam.patientChatId || chatId);
             const sendRes = await wahaClient.sendFile(
-              exam.patientChatId,
+              sendTarget,
               {
                 mimetype: exam.fileMimeType,
                 filename: exam.originalName,
@@ -408,7 +486,24 @@ export class ExamService {
               patientCaption,
               { session }
             );
-            botTracker.recordBotMessage(exam.patientChatId, patientCaption, sendRes?.id);
+            botTracker.recordBotMessage(sendTarget, patientCaption, sendRes?.id);
+
+            // Se o chatId atual for diferente do target enviado, envia também para o chatId atual
+            if (chatId && chatId !== sendTarget && !chatId.startsWith('simulador_')) {
+              try {
+                const sendRes2 = await wahaClient.sendFile(
+                  chatId,
+                  {
+                    mimetype: exam.fileMimeType,
+                    filename: exam.originalName,
+                    base64: base64Prefix
+                  },
+                  patientCaption,
+                  { session }
+                );
+                botTracker.recordBotMessage(chatId, patientCaption, sendRes2?.id);
+              } catch (ignored) {}
+            }
           }
           fileSentOk = true;
           console.log(`[ExamService] Laudo entregue com sucesso após validação de CPF para ${exam.patientName} (${exam.patientChatId}).`);

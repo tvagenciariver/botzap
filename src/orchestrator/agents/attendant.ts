@@ -1,5 +1,7 @@
 import { IAgent, AgentContext, AgentResponse } from './base.js';
 import { llmProviderManager } from '../llm-provider.js';
+import { examService } from '../../appointments/exam-service.js';
+import { ExamDeliveryAgent } from './exam-delivery.js';
 
 export class AttendantAgent implements IAgent {
   name = 'SmartAttendantAgent';
@@ -10,6 +12,31 @@ export class AttendantAgent implements IAgent {
   }
 
   async execute(context: AgentContext): Promise<AgentResponse> {
+    // PROTEÇÃO CRÍTICA: Se a mensagem do cliente for composta unicamente por dígitos ou formatação de CPF
+    // (ex: "123", "582", "123.456.789-00"), NUNCA enviar para a IA (OpenAI / Gemini).
+    // Evita respostas alucinadas como: "Olá, notei que continua enviando apenas números, vou te transferir..."
+    const rawTrimmed = context.userMessage.trim();
+    const cleanDigits = rawTrimmed.replace(/\D/g, '');
+    const isPureDigitsOrCpf = /^[\d.\-\s,]{3,20}$/.test(rawTrimmed) && cleanDigits.length >= 3;
+
+    if (isPureDigitsOrCpf) {
+      // 1. Tenta validar como entrega de exame
+      const pendingExam = examService.findPendingExam(context.chatId, context.userMessage);
+      if (pendingExam) {
+        const examAgent = new ExamDeliveryAgent();
+        return await examAgent.execute(context);
+      }
+
+      // 2. Se não há exame pendente para esse número/contato:
+      return {
+        handled: true,
+        replyText: `Olá! Recebemos sua resposta (*${cleanDigits}*).\n\n` +
+          `Se você está tentando liberar o resultado do seu exame/laudo, verifique se o aviso de exame pronto já foi enviado para este WhatsApp ou digite *humano* para falar com nossa recepção! 👩‍⚕️🤝`,
+        action: 'none',
+        agentName: this.name
+      };
+    }
+
     try {
       const result = await llmProviderManager.generateReply(
         context.chatId,

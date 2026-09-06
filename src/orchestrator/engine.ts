@@ -11,6 +11,7 @@ import { wahaClient } from '../waha/client.js';
 import { loadBotConfig, env } from '../config/index.js';
 import { agentManager } from '../config/agent-manager.js';
 import { WahaMessagePayload } from '../waha/types.js';
+import { getAlternateBrazilianChatId } from '../appointments/phone-utils.js';
 
 export interface LogEntry {
   id: string;
@@ -92,6 +93,15 @@ export class AgentOrchestrator {
       chatId = to || payload._data?.to || payload._data?.id?.remote || from;
     }
 
+    // Remove sufixo de dispositivo multi-device (:1, :0, etc) antes de @
+    if (chatId && chatId.includes(':') && (chatId.includes('@c.us') || chatId.includes('@s.whatsapp.net'))) {
+      const atIdx = chatId.indexOf('@');
+      const colonIdx = chatId.indexOf(':');
+      if (colonIdx !== -1 && colonIdx < atIdx) {
+        chatId = chatId.substring(0, colonIdx) + chatId.substring(atIdx);
+      }
+    }
+
     // Se o chatId veio no formato @lid (Linked Device), traduz para o chatId do telefone real (@c.us)
     if (chatId && chatId.endsWith('@lid')) {
       const realPhone = payload._data?.author ||
@@ -101,8 +111,16 @@ export class AgentOrchestrator {
         payload.replyTo?.participant ||
         payload._data?.from;
       if (realPhone && (realPhone.endsWith('@c.us') || realPhone.endsWith('@s.whatsapp.net'))) {
-        console.log(`[Orchestrator] Mapeado chatId LID ${chatId} para telefone real: ${realPhone}`);
-        chatId = realPhone;
+        let cleanReal = realPhone;
+        if (cleanReal.includes(':')) {
+          const atIdx = cleanReal.indexOf('@');
+          const colonIdx = cleanReal.indexOf(':');
+          if (colonIdx !== -1 && colonIdx < atIdx) {
+            cleanReal = cleanReal.substring(0, colonIdx) + cleanReal.substring(atIdx);
+          }
+        }
+        console.log(`[Orchestrator] Mapeado chatId LID ${chatId} para telefone real: ${cleanReal}`);
+        chatId = cleanReal;
       }
     }
 
@@ -196,6 +214,9 @@ export class AgentOrchestrator {
 
       if (canHandleBooking || canHandleExam) {
         memoryStore.resumeChat(chatId, agent.id);
+        const altChat = getAlternateBrazilianChatId(chatId);
+        if (altChat) memoryStore.resumeChat(altChat, agent.id);
+
         const reason = canHandleExam ? 'validação de exame (CPF)' : 'agenda/lembrete';
         console.log(`[Orchestrator] Contato ${chatId} interagiu com ${reason}. Pausa removida automaticamente.`);
         this.addLog({
