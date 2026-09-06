@@ -105,6 +105,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     const titles = {
       simulator: 'Simulador de Atendimento (WhatsApp)',
       prompts: 'Configuração do Agente & Prompts',
+      schedule: 'Horário Comercial & Mensagem de Ausência',
       chats: 'Conversas Ativas & Pausa do Bot',
       logs: 'Logs em Tempo Real do Orquestrador',
       integration: 'Integração WAHA API & Chatwoot'
@@ -115,6 +116,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
       if (targetTab === 'chats') loadChats();
       if (targetTab === 'logs') loadLogs();
       if (targetTab === 'prompts') loadConfig();
+      if (targetTab === 'schedule') loadSchedule();
       if (targetTab === 'integration') loadWahaConfig();
     }
   });
@@ -176,6 +178,50 @@ async function checkStatus() {
       geminiDot.className = 'status-dot offline';
       geminiText.textContent = 'Chave Pendente ⚠️';
       geminiText.className = 'status-val text-orange';
+    }
+
+    // Status do Horário Comercial
+    const schedDot = document.getElementById('dot-schedule');
+    const schedText = document.getElementById('status-schedule');
+    const schedBadge = document.getElementById('schedule-status-badge');
+
+    if (data.businessHours) {
+      const isEnabled = data.businessHours.enabled;
+      const isOpen = data.businessHours.isOpen;
+      const reason = data.businessHours.reason;
+
+      if (!isEnabled) {
+        if (schedDot) schedDot.className = 'status-dot offline';
+        if (schedText) {
+          schedText.textContent = 'Desativado ⏸️';
+          schedText.className = 'status-val text-muted';
+        }
+        if (schedBadge) {
+          schedBadge.className = 'badge text-muted';
+          schedBadge.innerHTML = '<span class="status-dot offline"></span> Desativado (Sempre Aberto)';
+        }
+      } else if (isOpen) {
+        if (schedDot) schedDot.className = 'status-dot online';
+        if (schedText) {
+          schedText.textContent = 'Aberto 🟢';
+          schedText.className = 'status-val text-green';
+        }
+        if (schedBadge) {
+          schedBadge.className = 'badge text-green';
+          schedBadge.innerHTML = `<span class="status-dot online"></span> Aberto agora (${data.businessHours.currentTime} - ${data.businessHours.currentDay})`;
+        }
+      } else {
+        const reasonLabel = reason === 'lunch' ? 'Almoço 🍽️' : reason === 'day_closed' ? 'Fechado hoje' : 'Fora de expediente';
+        if (schedDot) schedDot.className = 'status-dot offline';
+        if (schedText) {
+          schedText.textContent = `${reasonLabel} 🔴`;
+          schedText.className = 'status-val text-red';
+        }
+        if (schedBadge) {
+          schedBadge.className = 'badge text-red';
+          schedBadge.innerHTML = `<span class="status-dot offline"></span> Fechado (${reasonLabel} - ${data.businessHours.currentTime})`;
+        }
+      }
     }
   } catch (err) {
     console.error('Erro ao checar status:', err);
@@ -451,6 +497,214 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
     showToast(`Erro ao salvar: ${err.message}`, 'error');
   }
 });
+
+// ==========================================================================
+// 3.1 Horário Comercial & Mensagem de Ausência
+// ==========================================================================
+const SCHEDULE_DAYS = [
+  { key: 'monday', label: 'Segunda-feira' },
+  { key: 'tuesday', label: 'Terça-feira' },
+  { key: 'wednesday', label: 'Quarta-feira' },
+  { key: 'thursday', label: 'Quinta-feira' },
+  { key: 'friday', label: 'Sexta-feira' },
+  { key: 'saturday', label: 'Sábado' },
+  { key: 'sunday', label: 'Domingo' }
+];
+
+let currentScheduleData = null;
+
+function renderScheduleTable(schedule = {}) {
+  const tbody = document.getElementById('schedule-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = SCHEDULE_DAYS.map(day => {
+    const d = schedule[day.key] || {
+      enabled: day.key !== 'sunday',
+      start: '08:00',
+      end: day.key === 'saturday' ? '12:00' : '18:00',
+      hasLunch: day.key !== 'saturday' && day.key !== 'sunday',
+      lunchStart: '12:00',
+      lunchEnd: '13:00'
+    };
+
+    const isDayDisabled = !d.enabled;
+    const isLunchDisabled = !d.hasLunch;
+
+    return `
+      <tr class="${isDayDisabled ? 'schedule-row-disabled' : ''}" id="sched-row-${day.key}">
+        <td>
+          <strong>${day.label}</strong>
+        </td>
+        <td>
+          <label class="mini-switch">
+            <input type="checkbox" class="day-enabled-toggle" data-day="${day.key}" ${d.enabled ? 'checked' : ''}>
+            <span class="mini-slider"></span>
+            <span class="mini-switch-label" id="day-label-${day.key}">${d.enabled ? 'Aberto' : 'Fechado'}</span>
+          </label>
+        </td>
+        <td>
+          <div class="time-range-box">
+            <input type="time" class="time-input day-start" data-day="${day.key}" value="${d.start || '08:00'}">
+            <span class="time-sep">até</span>
+            <input type="time" class="time-input day-end" data-day="${day.key}" value="${d.end || '18:00'}">
+          </div>
+        </td>
+        <td>
+          <label class="mini-switch">
+            <input type="checkbox" class="day-lunch-toggle" data-day="${day.key}" ${d.hasLunch ? 'checked' : ''}>
+            <span class="mini-slider"></span>
+            <span class="mini-switch-label" id="lunch-label-${day.key}">${d.hasLunch ? 'Ativo' : 'Não'}</span>
+          </label>
+        </td>
+        <td class="${isLunchDisabled ? 'lunch-disabled-cell' : ''}" id="lunch-inputs-${day.key}">
+          <div class="time-range-box">
+            <input type="time" class="time-input lunch-start" data-day="${day.key}" value="${d.lunchStart || '12:00'}">
+            <span class="time-sep">até</span>
+            <input type="time" class="time-input lunch-end" data-day="${day.key}" value="${d.lunchEnd || '13:00'}">
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  // Adiciona listeners para os switches da tabela
+  tbody.querySelectorAll('.day-enabled-toggle').forEach(toggle => {
+    toggle.addEventListener('change', (e) => {
+      const dayKey = e.target.getAttribute('data-day');
+      const isChecked = e.target.checked;
+      const row = document.getElementById(`sched-row-${dayKey}`);
+      const label = document.getElementById(`day-label-${dayKey}`);
+      if (row) {
+        if (isChecked) {
+          row.classList.remove('schedule-row-disabled');
+        } else {
+          row.classList.add('schedule-row-disabled');
+        }
+      }
+      if (label) {
+        label.textContent = isChecked ? 'Aberto' : 'Fechado';
+      }
+    });
+  });
+
+  tbody.querySelectorAll('.day-lunch-toggle').forEach(toggle => {
+    toggle.addEventListener('change', (e) => {
+      const dayKey = e.target.getAttribute('data-day');
+      const isChecked = e.target.checked;
+      const cell = document.getElementById(`lunch-inputs-${dayKey}`);
+      const label = document.getElementById(`lunch-label-${dayKey}`);
+      if (cell) {
+        if (isChecked) {
+          cell.classList.remove('lunch-disabled-cell');
+        } else {
+          cell.classList.add('lunch-disabled-cell');
+        }
+      }
+      if (label) {
+        label.textContent = isChecked ? 'Ativo' : 'Não';
+      }
+    });
+  });
+}
+
+async function loadSchedule() {
+  if (!getAuthToken()) return;
+  try {
+    const res = await fetchWithAuth('/api/business-hours/status');
+    const data = await res.json();
+    const bh = data.businessHours || {};
+    currentScheduleData = bh;
+
+    const masterCheckbox = document.getElementById('sched-enabled');
+    if (masterCheckbox) {
+      masterCheckbox.checked = !!bh.enabled;
+    }
+
+    const msgInput = document.getElementById('sched-outOfHoursMessage');
+    if (msgInput) {
+      msgInput.value = bh.outOfHoursMessage || '';
+    }
+
+    renderScheduleTable(bh.schedule || {});
+    checkStatus();
+  } catch (err) {
+    console.error('Erro ao carregar horário comercial:', err);
+  }
+}
+
+async function handleSaveSchedule() {
+  const masterEnabled = document.getElementById('sched-enabled')?.checked || false;
+  const outOfHoursMessage = document.getElementById('sched-outOfHoursMessage')?.value || '';
+  const feedback = document.getElementById('schedule-save-feedback');
+
+  if (feedback) {
+    feedback.textContent = 'Salvando horários...';
+    feedback.className = 'feedback-msg text-orange';
+  }
+
+  const schedule = {};
+  for (const day of SCHEDULE_DAYS) {
+    const row = document.getElementById(`sched-row-${day.key}`);
+    const enabled = row?.querySelector('.day-enabled-toggle')?.checked ?? true;
+    const start = row?.querySelector('.day-start')?.value || '08:00';
+    const end = row?.querySelector('.day-end')?.value || '18:00';
+    const hasLunch = row?.querySelector('.day-lunch-toggle')?.checked ?? false;
+    const lunchStart = row?.querySelector('.lunch-start')?.value || '12:00';
+    const lunchEnd = row?.querySelector('.lunch-end')?.value || '13:00';
+
+    schedule[day.key] = {
+      enabled,
+      start,
+      end,
+      hasLunch,
+      lunchStart,
+      lunchEnd
+    };
+  }
+
+  const payload = {
+    businessHours: {
+      enabled: masterEnabled,
+      timezone: 'America/Sao_Paulo',
+      outOfHoursMessage,
+      schedule
+    }
+  };
+
+  try {
+    const res = await fetchWithAuth('/api/business-hours', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      if (feedback) {
+        feedback.textContent = '✅ Horário comercial salvo com sucesso!';
+        feedback.className = 'feedback-msg text-green';
+        setTimeout(() => { feedback.textContent = ''; }, 3500);
+      }
+      showToast('Horários de atendimento salvos com sucesso!', 'success');
+      checkStatus();
+    } else {
+      if (feedback) {
+        feedback.textContent = `❌ Erro: ${data.error}`;
+        feedback.className = 'feedback-msg text-red';
+      }
+      showToast(`Erro ao salvar: ${data.error}`, 'error');
+    }
+  } catch (err) {
+    if (feedback) {
+      feedback.textContent = `❌ Erro ao salvar: ${err.message}`;
+      feedback.className = 'feedback-msg text-red';
+    }
+    showToast(`Erro ao salvar: ${err.message}`, 'error');
+  }
+}
+
+document.getElementById('btn-save-schedule')?.addEventListener('click', handleSaveSchedule);
+document.getElementById('btn-save-schedule-top')?.addEventListener('click', handleSaveSchedule);
 
 // 4. Conversas Ativas & Pausa
 async function loadChats() {
@@ -810,10 +1064,13 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     const integrationPane = document.getElementById('pane-integration');
     const promptsPane = document.getElementById('pane-prompts');
+    const schedulePane = document.getElementById('pane-schedule');
     if (integrationPane && integrationPane.classList.contains('active')) {
       handleSaveWaha();
     } else if (promptsPane && promptsPane.classList.contains('active')) {
       document.getElementById('btn-save-config')?.click();
+    } else if (schedulePane && schedulePane.classList.contains('active')) {
+      handleSaveSchedule();
     }
   }
 });
@@ -851,6 +1108,7 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
       passwordInput.value = '';
       checkStatus();
       loadConfig();
+      loadSchedule();
       loadWahaConfig();
     } else {
       errorEl.textContent = data.error || 'Credenciais inválidas. Verifique usuário e senha.';
@@ -890,6 +1148,7 @@ async function initApp() {
       hideLoginModal(data.user?.username || 'admin');
       checkStatus();
       loadConfig();
+      loadSchedule();
       loadWahaConfig();
     } else {
       clearAuthToken();

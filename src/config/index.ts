@@ -4,6 +4,45 @@ import fs from 'fs';
 
 dotenv.config();
 
+export interface DaySchedule {
+  enabled: boolean;
+  start: string;
+  end: string;
+  hasLunch: boolean;
+  lunchStart?: string;
+  lunchEnd?: string;
+}
+
+export interface BusinessHoursConfig {
+  enabled: boolean;
+  timezone: string;
+  outOfHoursMessage: string;
+  schedule: {
+    monday: DaySchedule;
+    tuesday: DaySchedule;
+    wednesday: DaySchedule;
+    thursday: DaySchedule;
+    friday: DaySchedule;
+    saturday: DaySchedule;
+    sunday: DaySchedule;
+  };
+}
+
+export const defaultBusinessHours: BusinessHoursConfig = {
+  enabled: false,
+  timezone: 'America/Sao_Paulo',
+  outOfHoursMessage: 'Olá! Agradecemos sua mensagem. Nosso horário de atendimento é de Segunda a Sexta das 08h às 18h e aos Sábados das 08h às 12h.\n\nNo momento estamos fora do nosso expediente comercial. Deixe sua mensagem ou dúvida por aqui que responderemos assim que retornarmos! 🕒✨',
+  schedule: {
+    monday: { enabled: true, start: '08:00', end: '18:00', hasLunch: true, lunchStart: '12:00', lunchEnd: '13:00' },
+    tuesday: { enabled: true, start: '08:00', end: '18:00', hasLunch: true, lunchStart: '12:00', lunchEnd: '13:00' },
+    wednesday: { enabled: true, start: '08:00', end: '18:00', hasLunch: true, lunchStart: '12:00', lunchEnd: '13:00' },
+    thursday: { enabled: true, start: '08:00', end: '18:00', hasLunch: true, lunchStart: '12:00', lunchEnd: '13:00' },
+    friday: { enabled: true, start: '08:00', end: '18:00', hasLunch: true, lunchStart: '12:00', lunchEnd: '13:00' },
+    saturday: { enabled: true, start: '08:00', end: '12:00', hasLunch: false, lunchStart: '12:00', lunchEnd: '13:00' },
+    sunday: { enabled: false, start: '08:00', end: '12:00', hasLunch: false, lunchStart: '12:00', lunchEnd: '13:00' }
+  }
+};
+
 export interface BotConfig {
   botName: string;
   companyName: string;
@@ -20,6 +59,7 @@ export interface BotConfig {
   pauseDurationHours: number;
   pauseDurationMinutes: number;
   llmProvider: 'gemini' | 'openai';
+  businessHours: BusinessHoursConfig;
   geminiApiKey?: string;
   openaiApiKey?: string;
   openaiModel?: string;
@@ -81,6 +121,14 @@ export function loadBotConfig(): BotConfig {
     pauseDurationHours: hours,
     pauseDurationMinutes: Math.round(hours * 60),
     llmProvider: stored.llmProvider || (process.env.LLM_PROVIDER as 'gemini' | 'openai') || 'gemini',
+    businessHours: {
+      ...defaultBusinessHours,
+      ...(stored.businessHours || {}),
+      schedule: {
+        ...defaultBusinessHours.schedule,
+        ...(stored.businessHours?.schedule || {})
+      }
+    },
     geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
     openaiApiKey: stored.openaiApiKey || process.env.OPENAI_API_KEY || '',
     openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini',
@@ -100,6 +148,17 @@ export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
     newConfig.pauseDurationMinutes = Math.round(newConfig.pauseDurationHours * 60);
   } else if (newConfig.pauseDurationMinutes !== undefined) {
     newConfig.pauseDurationHours = Number((newConfig.pauseDurationMinutes / 60).toFixed(1));
+  }
+
+  if (newConfig.businessHours) {
+    newConfig.businessHours = {
+      ...current.businessHours,
+      ...newConfig.businessHours,
+      schedule: {
+        ...current.businessHours.schedule,
+        ...(newConfig.businessHours.schedule || {})
+      }
+    };
   }
 
   if (newConfig.wahaBaseUrl) {

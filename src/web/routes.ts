@@ -7,6 +7,7 @@ import { geminiService } from '../gemini/client.js';
 import { openAIService } from '../openai/client.js';
 import { wahaClient } from '../waha/client.js';
 import { WahaWebhookEvent } from '../waha/types.js';
+import { checkBusinessHoursStatus } from '../orchestrator/schedule-helper.js';
 
 export const apiRouter = Router();
 
@@ -208,8 +209,45 @@ apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) =
       provider,
       configured: provider === 'openai' ? openAIService.isConfigured() : geminiService.isConfigured(),
       model: provider === 'openai' ? (config.openaiModel || 'gpt-4o-mini') : (config.model || 'gemini-flash-lite-latest')
+    },
+    businessHours: {
+      enabled: !!config.businessHours?.enabled,
+      isOpen: checkBusinessHoursStatus(config).isOpen,
+      reason: checkBusinessHoursStatus(config).reason,
+      currentTime: checkBusinessHoursStatus(config).currentTime,
+      currentDay: checkBusinessHoursStatus(config).currentDayName,
+      timezone: checkBusinessHoursStatus(config).timezone
     }
   });
+});
+
+/**
+ * 3.1 Obter status e configuração de Horário Comercial
+ */
+apiRouter.get('/api/business-hours/status', requireAuth, (_req: Request, res: Response) => {
+  const config = loadBotConfig();
+  const status = checkBusinessHoursStatus(config);
+  res.json({
+    businessHours: config.businessHours,
+    status
+  });
+});
+
+/**
+ * 3.2 Salvar configuração de Horário Comercial
+ */
+apiRouter.post('/api/business-hours', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { businessHours } = req.body;
+    if (!businessHours) {
+      return res.status(400).json({ error: 'Configuração de horário ausente.' });
+    }
+    const updated = saveBotConfig({ businessHours });
+    const status = checkBusinessHoursStatus(updated);
+    res.json({ success: true, message: 'Horário comercial salvo com sucesso!', businessHours: updated.businessHours, status });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /**

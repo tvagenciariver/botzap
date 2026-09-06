@@ -13,6 +13,7 @@ export interface ChatSessionState {
   isPaused: boolean;
   pausedUntil?: number;
   lastMessageAt: number;
+  lastOutOfHoursNoticeAt?: number;
   messages: ChatMessage[];
 }
 
@@ -192,6 +193,19 @@ export class MemoryStore {
     session.isPaused = false;
     session.pausedUntil = undefined;
     this.saveToDisk();
+  }
+
+  canSendOutOfHoursNotice(chatId: string, cooldownHours = 2): boolean {
+    const session = this.getSession(chatId);
+    if (!session.lastOutOfHoursNoticeAt) return true;
+    const diffMs = Date.now() - session.lastOutOfHoursNoticeAt;
+    return diffMs > cooldownHours * 60 * 60 * 1000;
+  }
+
+  recordOutOfHoursNotice(chatId: string): void {
+    const session = this.getSession(chatId);
+    session.lastOutOfHoursNoticeAt = Date.now();
+    this.scheduleSave();
   }
 
   clearHistory(chatId: string): void {

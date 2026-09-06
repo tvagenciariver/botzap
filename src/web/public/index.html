@@ -35,8 +35,13 @@
         </div>
         <div class="status-item">
           <span class="status-dot" id="dot-gemini"></span>
-          <span class="status-label">Gemini Flash:</span>
+          <span class="status-label">IA Ativa:</span>
           <span class="status-val" id="status-gemini">Checando...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-dot" id="dot-schedule"></span>
+          <span class="status-label">Expediente:</span>
+          <span class="status-val" id="status-schedule">Checando...</span>
         </div>
       </div>
 
@@ -47,6 +52,9 @@
         </button>
         <button class="nav-btn" data-tab="prompts">
           <span class="nav-icon">⚙️</span> Agente & Prompts
+        </button>
+        <button class="nav-btn" data-tab="schedule">
+          <span class="nav-icon">🕒</span> Horário Comercial
         </button>
         <button class="nav-btn" data-tab="chats">
           <span class="nav-icon">👥</span> Conversas & Pausa
@@ -269,6 +277,88 @@
                 <span id="save-feedback" class="feedback-msg"></span>
               </div>
             </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: Horário Comercial -->
+      <section class="tab-pane" id="pane-schedule">
+        <!-- Header & Action bar -->
+        <div class="card tab-header-card">
+          <div class="tab-header-left">
+            <div class="tab-header-title">
+              <span class="tab-header-icon">🕒</span>
+              <div>
+                <h2>Horário Comercial & Mensagem de Ausência</h2>
+                <p>Configure os dias e turnos de atendimento da empresa, intervalos de almoço e mensagem automática fora de expediente.</p>
+              </div>
+            </div>
+            <div class="tab-header-meta">
+              <div id="schedule-status-badge" class="badge text-green">
+                <span class="status-dot online"></span> Checando status...
+              </div>
+              <span class="badge text-muted" id="schedule-timezone-badge">Fuso: América/São Paulo</span>
+            </div>
+          </div>
+          <div class="tab-header-actions">
+            <button class="btn btn-primary" id="btn-save-schedule-top">💾 Salvar Horários</button>
+          </div>
+        </div>
+
+        <!-- Master Switch & Ausência Message Card -->
+        <div class="card" style="margin-bottom: 20px;">
+          <div class="card-body">
+            <div class="schedule-master-toggle-row">
+              <div class="schedule-master-info">
+                <strong>Habilitar Horário Comercial</strong>
+                <p>Quando ativado, o bot enviará a mensagem de ausência abaixo caso o cliente mande mensagem fora do horário comercial configurado ou durante o almoço.</p>
+              </div>
+              <label class="switch-control">
+                <input type="checkbox" id="sched-enabled">
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group" style="margin-top: 20px;">
+              <label for="sched-outOfHoursMessage" style="font-weight: 600;">
+                💬 Mensagem Enviada Fora do Horário de Atendimento
+              </label>
+              <textarea id="sched-outOfHoursMessage" rows="4" class="form-control" placeholder="Digite a mensagem de ausência que os clientes receberão..."></textarea>
+              <small class="form-hint">
+                Dica: Informe os horários de funcionamento para que o cliente saiba quando será atendido.
+              </small>
+            </div>
+          </div>
+        </div>
+
+        <!-- Weekly Schedule Table Card -->
+        <div class="card">
+          <div class="card-header">
+            <h3>📅 Grade Semanal de Atendimento</h3>
+            <p>Ative ou desative cada dia da semana, defina os horários de início e término e configure o intervalo de almoço se necessário.</p>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="data-table schedule-table">
+                <thead>
+                  <tr>
+                    <th style="width: 170px;">Dia da Semana</th>
+                    <th style="width: 130px;">Funcionamento</th>
+                    <th>Horário do Expediente</th>
+                    <th style="width: 150px;">Almoço</th>
+                    <th>Intervalo de Almoço</th>
+                  </tr>
+                </thead>
+                <tbody id="schedule-table-body">
+                  <!-- Linhas preenchidas via app.js -->
+                </tbody>
+              </table>
+            </div>
+
+            <div class="form-actions" style="margin-top: 24px;">
+              <button type="button" class="btn btn-primary" id="btn-save-schedule">💾 Salvar Horários</button>
+              <span id="schedule-save-feedback" class="feedback-msg"></span>
+            </div>
           </div>
         </div>
       </section>

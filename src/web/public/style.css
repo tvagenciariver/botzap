@@ -1277,3 +1277,181 @@ textarea.form-control {
   }
 }
 
+/* ==========================================================================
+   Business Hours / Horário Comercial
+   ========================================================================== */
+.schedule-master-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.schedule-master-info strong {
+  font-size: 16px;
+  color: #f8fafc;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.schedule-master-info p {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Modern Toggle Switch */
+.switch-control {
+  position: relative;
+  display: inline-block;
+  width: 52px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.switch-control input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #334155;
+  transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.switch-control input:checked + .switch-slider {
+  background-color: #10b981;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+}
+
+.switch-control input:checked + .switch-slider:before {
+  transform: translateX(24px);
+}
+
+/* Compact Table Switch */
+.mini-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mini-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.mini-slider {
+  width: 38px;
+  height: 20px;
+  background-color: #334155;
+  border-radius: 20px;
+  position: relative;
+  transition: 0.25s ease;
+  display: inline-block;
+}
+
+.mini-slider:before {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 3px;
+  top: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: 0.25s ease;
+}
+
+.mini-switch input:checked + .mini-slider {
+  background-color: #3b82f6;
+}
+
+.mini-switch input:checked + .mini-slider:before {
+  transform: translateX(18px);
+}
+
+.mini-switch-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+/* Schedule Table Inputs */
+.schedule-table td {
+  vertical-align: middle;
+  padding: 14px 16px;
+}
+
+.time-range-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.time-input {
+  background: transparent;
+  border: none;
+  color: #f8fafc;
+  font-family: 'Fira Code', monospace;
+  font-size: 13px;
+  padding: 2px 4px;
+  outline: none;
+  cursor: pointer;
+}
+
+.time-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+  cursor: pointer;
+}
+
+.time-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.schedule-row-disabled td:not(:first-child):not(:nth-child(2)) {
+  opacity: 0.35;
+  pointer-events: none;
+  filter: grayscale(1);
+}
+
+.lunch-disabled-cell {
+  opacity: 0.35;
+  pointer-events: none;
+  filter: grayscale(1);
+}
+
+
