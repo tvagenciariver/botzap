@@ -20,66 +20,70 @@ function getActiveCompanyId() {
   return currentActiveCompanyId || 'all';
 }
 
+function getEffectiveActiveCompanyId() {
+  if (currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*') {
+    return currentUser.assignedAgentId;
+  }
+  return currentActiveCompanyId || 'all';
+}
+
 function updateTopbarCompanyDisplay() {
   const nameEl = document.getElementById('topbar-company-name');
   if (!nameEl) return;
 
-  if (currentActiveCompanyId === 'all') {
+  const effectiveCompany = getEffectiveActiveCompanyId();
+
+  if (effectiveCompany === 'all') {
     nameEl.textContent = 'Todas as Empresas (Visão Global)';
   } else {
     const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
       ? allAgents
       : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
-    const agent = agentsList.find(a => a.id === currentActiveCompanyId);
+    const agent = agentsList.find(a => a.id === effectiveCompany);
     if (agent) {
       nameEl.textContent = agent.companyName || agent.name;
     } else {
-      nameEl.textContent = `Empresa #${currentActiveCompanyId.substring(0, 8)}`;
+      nameEl.textContent = `Empresa #${effectiveCompany.substring(0, 8)}`;
     }
   }
 }
 
 function setActiveCompany(companyId, reload = true) {
-  currentActiveCompanyId = companyId || 'all';
+  // Se for atendente vinculado a uma empresa específica, nunca altera o ID
+  if (currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*') {
+    currentActiveCompanyId = currentUser.assignedAgentId;
+  } else {
+    currentActiveCompanyId = companyId || 'all';
+  }
   localStorage.setItem(ACTIVE_COMPANY_KEY, currentActiveCompanyId);
+
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+    ? allAgents
+    : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
 
   // 1. Atualiza Top Bar
   updateTopbarCompanyDisplay();
 
-  // 2. Sincroniza Filtro de Agendamentos
-  if (typeof currentAppointmentsAgentFilter !== 'undefined') {
-    currentAppointmentsAgentFilter = currentActiveCompanyId;
-  }
-  const aptAgentSelect = document.getElementById('apt-filter-agent');
-  if (aptAgentSelect && aptAgentSelect.value !== currentActiveCompanyId) {
-    aptAgentSelect.value = currentActiveCompanyId;
+  // 2. Sincroniza barra lateral "Agente em Foco" (restringe rigorosamente à empresa ativa)
+  if (typeof populateSidebarAgentSelect === 'function') {
+    populateSidebarAgentSelect(agentsList);
   }
 
-  // 3. Sincroniza Filtro de Exames
-  const examAgentSelect = document.getElementById('exam-filter-agent');
-  if (examAgentSelect && examAgentSelect.value !== currentActiveCompanyId) {
-    examAgentSelect.value = currentActiveCompanyId;
+  // 3. Sincroniza Simulador de Atendimento (restringe rigorosamente à empresa ativa)
+  if (typeof populateSimulatorAgentSelect === 'function') {
+    populateSimulatorAgentSelect(agentsList);
   }
 
-  // 4. Sincroniza selects de modais (caso o usuário crie novo agendamento ou exame)
-  const modalAptAgent = document.getElementById('modal-apt-agent');
-  if (modalAptAgent && currentActiveCompanyId !== 'all') {
-    modalAptAgent.value = currentActiveCompanyId;
-  }
-  const modalExamAgent = document.getElementById('modal-exam-agent');
-  if (modalExamAgent && currentActiveCompanyId !== 'all') {
-    modalExamAgent.value = currentActiveCompanyId;
+  // 4. Sincroniza Filtro de Agendamentos e selects de modais
+  currentAppointmentsAgentFilter = effectiveCompany;
+  if (typeof populateAgentsDropdowns === 'function') {
+    populateAgentsDropdowns(agentsList);
   }
 
-  // 5. Se for um agente específico, sincroniza também barra lateral e simulador
-  if (currentActiveCompanyId !== 'all') {
-    const sidebarSelect = document.getElementById('sidebar-agent-select');
-    if (sidebarSelect && sidebarSelect.value !== currentActiveCompanyId) {
-      sidebarSelect.value = currentActiveCompanyId;
-      if (typeof updateSidebarAgentStatus === 'function') {
-        updateSidebarAgentStatus(currentActiveCompanyId);
-      }
-    }
+  // 5. Sincroniza Filtro e Modal de Exames & Laudos (restringe rigorosamente à empresa ativa)
+  if (typeof populateExamAgentsSelect === 'function') {
+    populateExamAgentsSelect(effectiveCompany !== 'all' ? effectiveCompany : '*');
   }
 
   // 6. Recarrega dados da view ativa se solicitado
@@ -91,10 +95,10 @@ function setActiveCompany(companyId, reload = true) {
       loadAppointments();
     } else if (activeTab === 'exams' && typeof loadExams === 'function') {
       loadExams();
-    } else if (activeTab === 'simulator' && currentActiveCompanyId !== 'all') {
+    } else if (activeTab === 'simulator' && effectiveCompany !== 'all') {
       const simSelect = document.getElementById('sim-agent-select');
-      if (simSelect && simSelect.value !== currentActiveCompanyId) {
-        simSelect.value = currentActiveCompanyId;
+      if (simSelect && simSelect.value !== effectiveCompany) {
+        simSelect.value = effectiveCompany;
         simSelect.dispatchEvent(new Event('change'));
       }
     }
@@ -1602,21 +1606,42 @@ function populateSidebarAgentSelect(agents) {
   const select = document.getElementById('sidebar-agent-select');
   if (!select) return;
 
-  if (!agents || agents.length === 0) {
+  const agentsList = (agents && agents.length > 0)
+    ? agents
+    : ((typeof allAgents !== 'undefined' && allAgents.length > 0) ? allAgents : (allAgentsCache || []));
+
+  if (!agentsList || agentsList.length === 0) {
     select.innerHTML = '<option value="">Nenhum agente cadastrado</option>';
     updateSidebarAgentStatus(null);
     return;
   }
 
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const isCompanyLocked = effectiveCompany !== 'all';
+
+  if (isCompanyLocked) {
+    const activeAgent = agentsList.find(a => a.id === effectiveCompany);
+    if (activeAgent) {
+      select.innerHTML = `<option value="${activeAgent.id}">🏢 ${escapeHtml(activeAgent.companyName || activeAgent.name)} (Bot: ${escapeHtml(activeAgent.name)})</option>`;
+      select.value = activeAgent.id;
+      select.disabled = true;
+      select.title = "Unidade fixada pela empresa ativa ou perfil de acesso. Para alternar, use o botão no topo do painel.";
+      updateSidebarAgentStatus(activeAgent.id);
+      return;
+    }
+  }
+
+  select.disabled = false;
+  select.title = "Selecione o agente para inspecionar";
   const currentVal = select.value;
-  select.innerHTML = agents.map(a => `
+  select.innerHTML = agentsList.map(a => `
     <option value="${a.id}">${escapeHtml(a.name)} (${escapeHtml(a.companyName)})${a.isDefault ? ' ⭐' : ''}</option>
   `).join('');
 
-  if (currentVal && agents.some(a => a.id === currentVal)) {
+  if (currentVal && agentsList.some(a => a.id === currentVal)) {
     select.value = currentVal;
   } else {
-    const def = agents.find(a => a.isDefault) || agents[0];
+    const def = agentsList.find(a => a.isDefault) || agentsList[0];
     select.value = def.id;
   }
 
@@ -1706,17 +1731,43 @@ function populateSimulatorAgentSelect(agents) {
   const select = document.getElementById('sim-agent-select');
   if (!select) return;
 
+  const agentsList = (agents && agents.length > 0)
+    ? agents
+    : ((typeof allAgents !== 'undefined' && allAgents.length > 0) ? allAgents : (allAgentsCache || []));
+
+  if (!agentsList || agentsList.length === 0) {
+    select.innerHTML = '<option value="">Nenhum bot cadastrado</option>';
+    return;
+  }
+
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const isCompanyLocked = effectiveCompany !== 'all';
+
+  if (isCompanyLocked) {
+    const activeAgent = agentsList.find(a => a.id === effectiveCompany);
+    if (activeAgent) {
+      select.innerHTML = `<option value="${activeAgent.id}">${escapeHtml(activeAgent.name)} (${escapeHtml(activeAgent.companyName)})</option>`;
+      select.value = activeAgent.id;
+      select.disabled = true;
+      select.title = "Bot fixado pela empresa ativa selecionada no painel";
+      updateSimulatorHeaderForSelectedAgent();
+      return;
+    }
+  }
+
+  select.disabled = false;
+  select.title = "Selecione o agente para testar no simulador";
   const currentVal = select.value;
-  select.innerHTML = agents.map(a => `
+  select.innerHTML = agentsList.map(a => `
     <option value="${a.id}">
       ${escapeHtml(a.name)} (${escapeHtml(a.companyName)})${a.isDefault ? ' [Padrão]' : ''}
     </option>
   `).join('');
 
-  if (currentVal && agents.some(a => a.id === currentVal)) {
+  if (currentVal && agentsList.some(a => a.id === currentVal)) {
     select.value = currentVal;
-  } else if (agents.length > 0) {
-    const def = agents.find(a => a.isDefault) || agents[0];
+  } else if (agentsList.length > 0) {
+    const def = agentsList.find(a => a.isDefault) || agentsList[0];
     select.value = def.id;
   }
 
@@ -2471,74 +2522,91 @@ function populateAgentsDropdowns(agents) {
   const srvAgentSelect = document.getElementById('service-agent');
   const userAgentSelect = document.getElementById('modal-user-agent');
 
-  const isAttendantScoped = currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*';
+  const agentsList = (agents && agents.length > 0)
+    ? agents
+    : ((typeof allAgents !== 'undefined' && allAgents.length > 0) ? allAgents : (allAgentsCache || []));
+
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const isCompanyLocked = effectiveCompany !== 'all';
 
   if (filterSelect) {
-    if (isAttendantScoped) {
-      const myAgent = agents.find(a => a.id === currentUser.assignedAgentId);
-      filterSelect.innerHTML = `<option value="${currentUser.assignedAgentId}">🏢 ${myAgent ? myAgent.name : 'Minha Unidade'}</option>`;
-      filterSelect.value = currentUser.assignedAgentId;
+    if (isCompanyLocked) {
+      const myAgent = agentsList.find(a => a.id === effectiveCompany);
+      const name = myAgent ? (myAgent.companyName || myAgent.name) : 'Minha Unidade';
+      filterSelect.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(name)}</option>`;
+      filterSelect.value = effectiveCompany;
       filterSelect.disabled = true;
-      currentAppointmentsAgentFilter = currentUser.assignedAgentId;
+      currentAppointmentsAgentFilter = effectiveCompany;
     } else {
       filterSelect.disabled = false;
       const current = filterSelect.value;
       filterSelect.innerHTML = '<option value="all">🌐 Todos os Clientes (Visão Geral)</option>';
-      agents.forEach(a => {
-        filterSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
+      agentsList.forEach(a => {
+        filterSelect.innerHTML += `<option value="${a.id}">🏢 ${escapeHtml(a.name)} (${escapeHtml(a.companyName || 'Empresa')})</option>`;
       });
-      if (currentActiveCompanyId && (currentActiveCompanyId === 'all' || agents.some(a => a.id === currentActiveCompanyId))) {
-        filterSelect.value = currentActiveCompanyId;
-      } else if (current) {
-        filterSelect.value = current;
-      }
+      if (current) filterSelect.value = current;
     }
   }
 
   if (modalSelect) {
-    if (isAttendantScoped) {
-      const myAgent = agents.find(a => a.id === currentUser.assignedAgentId);
-      modalSelect.innerHTML = `<option value="${currentUser.assignedAgentId}">🏢 ${myAgent ? myAgent.name : 'Minha Unidade'}</option>`;
-      modalSelect.value = currentUser.assignedAgentId;
+    if (isCompanyLocked) {
+      const myAgent = agentsList.find(a => a.id === effectiveCompany);
+      const name = myAgent ? (myAgent.companyName || myAgent.name) : 'Minha Unidade';
+      modalSelect.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(name)}</option>`;
+      modalSelect.value = effectiveCompany;
       modalSelect.disabled = true;
     } else {
       modalSelect.disabled = false;
       const current = modalSelect.value;
       modalSelect.innerHTML = '';
-      agents.forEach(a => {
-        modalSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} - ${a.companyName || 'Empresa'}</option>`;
+      agentsList.forEach(a => {
+        modalSelect.innerHTML += `<option value="${a.id}">🏢 ${escapeHtml(a.name)} - ${escapeHtml(a.companyName || 'Empresa')}</option>`;
       });
-      if (currentActiveCompanyId && currentActiveCompanyId !== 'all') {
-        modalSelect.value = currentActiveCompanyId;
-      } else if (current) {
-        modalSelect.value = current;
-      }
+      if (current) modalSelect.value = current;
     }
   }
 
   if (specAgentSelect) {
-    const current = specAgentSelect.value;
-    specAgentSelect.innerHTML = '<option value="*">🌐 Todos os Clientes (Global)</option>';
-    agents.forEach(a => {
-      specAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
-    });
-    if (current) specAgentSelect.value = current;
+    if (isCompanyLocked) {
+      const myAgent = agentsList.find(a => a.id === effectiveCompany);
+      const name = myAgent ? (myAgent.companyName || myAgent.name) : 'Minha Unidade';
+      specAgentSelect.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(name)}</option>`;
+      specAgentSelect.value = effectiveCompany;
+      specAgentSelect.disabled = true;
+    } else {
+      specAgentSelect.disabled = false;
+      const current = specAgentSelect.value;
+      specAgentSelect.innerHTML = '<option value="*">🌐 Todos os Clientes (Global)</option>';
+      agentsList.forEach(a => {
+        specAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${escapeHtml(a.name)} (${escapeHtml(a.companyName || 'Empresa')})</option>`;
+      });
+      if (current) specAgentSelect.value = current;
+    }
   }
 
   if (srvAgentSelect) {
-    const current = srvAgentSelect.value;
-    srvAgentSelect.innerHTML = '<option value="*">🌐 Todos os Clientes (Global)</option>';
-    agents.forEach(a => {
-      srvAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
-    });
-    if (current) srvAgentSelect.value = current;
+    if (isCompanyLocked) {
+      const myAgent = agentsList.find(a => a.id === effectiveCompany);
+      const name = myAgent ? (myAgent.companyName || myAgent.name) : 'Minha Unidade';
+      srvAgentSelect.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(name)}</option>`;
+      srvAgentSelect.value = effectiveCompany;
+      srvAgentSelect.disabled = true;
+    } else {
+      srvAgentSelect.disabled = false;
+      const current = srvAgentSelect.value;
+      srvAgentSelect.innerHTML = '<option value="*">🌐 Todos os Clientes (Global)</option>';
+      agentsList.forEach(a => {
+        srvAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${escapeHtml(a.name)} (${escapeHtml(a.companyName || 'Empresa')})</option>`;
+      });
+      if (current) srvAgentSelect.value = current;
+    }
   }
 
   if (userAgentSelect) {
     const current = userAgentSelect.value;
     userAgentSelect.innerHTML = '<option value="*">🌐 Todas as Agendas (Global)</option>';
-    agents.forEach(a => {
-      userAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
+    agentsList.forEach(a => {
+      userAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${escapeHtml(a.name)} (${escapeHtml(a.companyName || 'Empresa')})</option>`;
     });
     if (current) userAgentSelect.value = current;
   }
@@ -3979,11 +4047,11 @@ function openPrintModal() {
   // 3. Popula Unidades / Agentes
   const agentSelect = document.getElementById('print-filter-agent');
   if (agentSelect) {
-    const isAttendantScoped = currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*';
-    if (isAttendantScoped) {
-      const myAgent = allAgentsCache.find(a => a.id === currentUser.assignedAgentId);
-      agentSelect.innerHTML = `<option value="${currentUser.assignedAgentId}">🏢 ${myAgent ? myAgent.name : 'Minha Unidade'}</option>`;
-      agentSelect.value = currentUser.assignedAgentId;
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    if (effectiveCompany !== 'all') {
+      const myAgent = allAgentsCache.find(a => a.id === effectiveCompany) || allAgents.find(a => a.id === effectiveCompany);
+      agentSelect.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(myAgent ? (myAgent.companyName || myAgent.name) : 'Minha Unidade')}</option>`;
+      agentSelect.value = effectiveCompany;
       agentSelect.disabled = true;
     } else {
       agentSelect.disabled = false;
@@ -4057,7 +4125,8 @@ async function getFilteredAppointmentsForPrint() {
   const role = document.getElementById('print-filter-role')?.value || 'all';
   const specialistId = document.getElementById('print-filter-specialist')?.value || 'all';
   const statusFilter = document.getElementById('print-filter-status')?.value || 'active';
-  const agentId = document.getElementById('print-filter-agent')?.value || 'all';
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const agentId = (effectiveCompany !== 'all') ? effectiveCompany : (document.getElementById('print-filter-agent')?.value || 'all');
 
   // Monta parâmetros para o backend
   const query = new URLSearchParams();
@@ -4712,7 +4781,8 @@ async function loadExams() {
     const referralFilter = document.getElementById('exam-filter-referral')?.value || 'all';
     const partnerFilter = document.getElementById('exam-filter-partner')?.value || 'all';
     const statusFilter = document.getElementById('exam-filter-status')?.value || 'all';
-    const agentFilter = document.getElementById('exam-filter-agent')?.value || 'all';
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const agentFilter = (effectiveCompany !== 'all') ? effectiveCompany : (document.getElementById('exam-filter-agent')?.value || 'all');
     const searchVal = document.getElementById('exam-search-input')?.value || '';
 
     const params = new URLSearchParams();
@@ -4868,7 +4938,8 @@ function openExamDispatchModal(prefill = {}) {
     document.getElementById('modal-exam-patient-phone').value = prefill.clientPhone.replace(/@.*$/, '').replace(/\D/g, '');
   }
 
-  const targetAgent = prefill.agentId || (currentActiveCompanyId !== 'all' ? currentActiveCompanyId : '*');
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const targetAgent = (effectiveCompany !== 'all') ? effectiveCompany : (prefill.agentId || '*');
   populatePartnersDropdowns();
   populateExamAgentsSelect(targetAgent);
   populateAppointmentsPickerForExams(prefill.appointmentId);
@@ -4969,30 +5040,48 @@ function populateExamAgentsSelect(targetAgentId) {
   const filterSel = document.getElementById('exam-filter-agent');
   if (!sel && !filterSel) return;
 
-  let opts = '<option value="*">🌐 Agente Padrão (Global)</option>';
-  let filterOpts = '<option value="all">🌐 Todas as Unidades (Visão Geral)</option>';
-
   const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
     ? allAgents
     : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
 
-  agentsList.forEach(a => {
-    opts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
-    filterOpts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
-  });
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const isCompanyLocked = effectiveCompany !== 'all';
 
   if (sel) {
-    sel.innerHTML = opts;
-    const defaultAgent = targetAgentId || (currentActiveCompanyId !== 'all' ? currentActiveCompanyId : '*');
-    sel.value = defaultAgent;
+    if (isCompanyLocked) {
+      const activeAgent = agentsList.find(a => a.id === effectiveCompany);
+      const companyTitle = activeAgent ? (activeAgent.companyName || activeAgent.name) : 'Unidade Vinculada';
+      sel.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(companyTitle)} (Unidade Vinculada)</option>`;
+      sel.value = effectiveCompany;
+      sel.disabled = true;
+      sel.title = "O envio é realizado exclusivamente pela empresa ativa no painel";
+    } else {
+      let opts = '<option value="*">🌐 Agente Padrão (Global)</option>';
+      agentsList.forEach(a => {
+        opts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
+      });
+      sel.innerHTML = opts;
+      sel.value = targetAgentId || '*';
+      sel.disabled = false;
+      sel.title = "Selecione a unidade emissora do laudo/exame";
+    }
   }
+
   if (filterSel) {
-    const curr = filterSel.value;
-    filterSel.innerHTML = filterOpts;
-    if (currentActiveCompanyId && (currentActiveCompanyId === 'all' || agentsList.some(a => a.id === currentActiveCompanyId))) {
-      filterSel.value = currentActiveCompanyId;
-    } else if (curr) {
-      filterSel.value = curr;
+    if (isCompanyLocked) {
+      const activeAgent = agentsList.find(a => a.id === effectiveCompany);
+      const companyTitle = activeAgent ? (activeAgent.companyName || activeAgent.name) : 'Unidade Vinculada';
+      filterSel.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(companyTitle)}</option>`;
+      filterSel.value = effectiveCompany;
+      filterSel.disabled = true;
+    } else {
+      let filterOpts = '<option value="all">🌐 Todas as Unidades (Visão Geral)</option>';
+      agentsList.forEach(a => {
+        filterOpts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
+      });
+      filterSel.innerHTML = filterOpts;
+      filterSel.value = 'all';
+      filterSel.disabled = false;
     }
   }
 }
@@ -5002,7 +5091,11 @@ function populateAppointmentsPickerForExams(selectedAptId) {
   if (!sel) return;
 
   let opts = '<option value="">✍️ Digitação Manual de Paciente</option>';
-  const list = typeof currentAppointmentsList !== 'undefined' ? currentAppointmentsList : [];
+  const rawList = typeof currentAppointmentsList !== 'undefined' ? currentAppointmentsList : [];
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const list = (effectiveCompany !== 'all')
+    ? rawList.filter(a => a.agentId === effectiveCompany)
+    : rawList;
 
   list.forEach(apt => {
     const label = `${apt.clientName} • ${formatDateBR(apt.date)} (${apt.startTime}) • ${apt.specialistName}`;
@@ -5137,7 +5230,8 @@ async function handleExamDispatchSubmit(e) {
   const fileName = document.getElementById('modal-exam-file-name')?.value;
   const fileMimeType = document.getElementById('modal-exam-file-mimetype')?.value;
   const caption = document.getElementById('modal-exam-caption')?.value.trim();
-  const agentId = document.getElementById('modal-exam-agent')?.value || '*';
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const agentId = (effectiveCompany !== 'all') ? effectiveCompany : (document.getElementById('modal-exam-agent')?.value || '*');
   const appointmentId = document.getElementById('modal-exam-appointment-id')?.value || undefined;
 
   if (!patientName) {
@@ -5318,13 +5412,25 @@ function openPrintExamsModal() {
 
   const agentSelect = document.getElementById('print-exams-filter-agent');
   if (agentSelect) {
-    let opts = '<option value="all" selected>🌐 Todas as Unidades (Visão Geral)</option>';
-    if (typeof allAgents !== 'undefined') {
-      allAgents.forEach(a => {
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+      ? allAgents
+      : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+
+    if (effectiveCompany !== 'all') {
+      const activeAgent = agentsList.find(a => a.id === effectiveCompany);
+      const companyTitle = activeAgent ? (activeAgent.companyName || activeAgent.name) : 'Minha Unidade';
+      agentSelect.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(companyTitle)}</option>`;
+      agentSelect.value = effectiveCompany;
+      agentSelect.disabled = true;
+    } else {
+      agentSelect.disabled = false;
+      let opts = '<option value="all" selected>🌐 Todas as Unidades (Visão Geral)</option>';
+      agentsList.forEach(a => {
         opts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
       });
+      agentSelect.innerHTML = opts;
     }
-    agentSelect.innerHTML = opts;
   }
 
   const startInput = document.getElementById('print-exams-start-date');
@@ -5347,7 +5453,8 @@ function getFilteredExamsForReport() {
   const partnerId = document.getElementById('print-exams-filter-partner')?.value || 'all';
   const referralType = document.getElementById('print-exams-filter-referral')?.value || 'all';
   const status = document.getElementById('print-exams-filter-status')?.value || 'all';
-  const agentId = document.getElementById('print-exams-filter-agent')?.value || 'all';
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const agentId = (effectiveCompany !== 'all') ? effectiveCompany : (document.getElementById('print-exams-filter-agent')?.value || 'all');
 
   const todayStr = getTodayString();
   let startDate = '';

@@ -208,6 +208,14 @@ body {
   border-color: #818cf8;
 }
 
+.sidebar-agent-select:disabled {
+  background-color: rgba(15, 23, 42, 0.75);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.25);
+  cursor: default;
+  opacity: 0.95;
+}
+
 .agent-badge-bh-open {
   background: rgba(16, 185, 129, 0.15) !important;
   border-color: rgba(16, 185, 129, 0.4) !important;
