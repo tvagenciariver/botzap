@@ -53,6 +53,46 @@ export class BookingAgent implements IAgent {
   }
 
   /**
+   * Localiza agendamento pendente de confirmação ou cancelamento por resposta a lembrete
+   */
+  private findReminderAppointment(chatId: string): Appointment | undefined {
+    const all = appointmentManager.listAppointments();
+    const active = all.filter(a =>
+      a.status === 'confirmed' ||
+      a.status === 'scheduled' ||
+      a.status === 'presence_confirmed'
+    );
+
+    const isMatch = (apt: Appointment) => {
+      if (apt.clientChatId === chatId) return true;
+      const aptClean = (apt.clientChatId || '').split('@')[0].replace(/\D/g, '');
+      const inClean = chatId.split('@')[0].replace(/\D/g, '');
+      if (aptClean && inClean && (aptClean === inClean || inClean.endsWith(aptClean) || aptClean.endsWith(inClean))) {
+        return true;
+      }
+      const phoneClean = (apt.clientPhone || '').replace(/\D/g, '');
+      if (phoneClean && inClean && (phoneClean === inClean || inClean.endsWith(phoneClean) || phoneClean.endsWith(inClean))) {
+        return true;
+      }
+      return false;
+    };
+
+    // Prioridade 1: Agendamentos com lembrete D-1 já enviado e ainda pendentes de resposta
+    const withReminder = active.filter(a => a.reminderSent && (a.status === 'confirmed' || a.status === 'scheduled') && isMatch(a));
+    if (withReminder.length > 0) {
+      return withReminder[0];
+    }
+
+    // Prioridade 2: Qualquer agendamento ativo correspondente ao contato
+    const anyActive = active.filter(a => isMatch(a));
+    if (anyActive.length > 0) {
+      return anyActive[0];
+    }
+
+    return undefined;
+  }
+
+  /**
    * Decide se este agente deve tratar a mensagem.
    */
   async canHandle(context: AgentContext): Promise<boolean> {
@@ -64,18 +104,13 @@ export class BookingAgent implements IAgent {
       return true;
     }
 
-    // 2. Se o usuário recebeu lembrete D-1 e está respondendo com "1" ou "2" (ou confirmações afins)
-    const tomorrowStr = appointmentManager.getTomorrowDateString();
-    const myTomorrowApts = appointmentManager.listAppointments({
-      date: tomorrowStr
-    }).filter(a =>
-      a.clientChatId === chatId &&
-      (a.status === 'confirmed' || a.status === 'scheduled') &&
-      a.reminderSent
-    );
+    // 2. Se o usuário respondeu à mensagem de confirmação/desistência de lembrete (opção 1 ou 2)
+    const isConfirmChoice = ['1', 'sim', 'confirmo', 'confirmado', 'vou', 'com certeza', 'confirmar', '1 - sim', '1. sim'].some(c => text === c || text.startsWith('1'));
+    const isCancelChoice = ['2', 'não', 'nao', 'cancelo', 'desisto', 'não poderei', 'nao poderei', 'não vou', 'nao vou', 'cancelar', 'desistir', '2 - não', '2. não', '2 - desistir', '2 desistir'].some(c => text === c || text.startsWith('2') || text.includes('desist') || text.includes('cancel'));
 
-    if (myTomorrowApts.length > 0) {
-      if (['1', 'sim', 'confirmo', 'confirmado', 'vou', 'com certeza', '2', 'não', 'nao', 'cancelo', 'desisto', 'não poderei', 'nao poderei'].includes(text)) {
+    if (isConfirmChoice || isCancelChoice) {
+      const apt = this.findReminderAppointment(chatId);
+      if (apt) {
         return true;
       }
     }
@@ -127,37 +162,32 @@ export class BookingAgent implements IAgent {
       }
     }
 
-    // 1. Verifica se é resposta ao Lembrete D-1 (Confirmar ou Desistir da consulta de amanhã)
-    const tomorrowStr = appointmentManager.getTomorrowDateString();
-    const myTomorrowApts = appointmentManager.listAppointments({
-      date: tomorrowStr
-    }).filter(a =>
-      a.clientChatId === chatId &&
-      (a.status === 'confirmed' || a.status === 'scheduled') &&
-      a.reminderSent
-    );
+    // 1. Verifica se é resposta ao Lembrete D-1 (Confirmar ou Desistir da consulta)
+    const isConfirmChoice = ['1', 'sim', 'confirmo', 'confirmado', 'vou', 'com certeza', 'confirmar', '1 - sim', '1. sim'].some(c => lowerText === c || lowerText.startsWith('1') || lowerText.includes('confirm'));
+    const isCancelChoice = ['2', 'não', 'nao', 'cancelo', 'desisto', 'não poderei', 'nao poderei', 'não vou', 'nao vou', 'cancelar', 'desistir', '2 - não', '2. não', '2 - desistir', '2 desistir'].some(c => lowerText === c || lowerText.startsWith('2') || lowerText.includes('desist') || lowerText.includes('cancel'));
 
-    if (myTomorrowApts.length > 0) {
-      const apt = myTomorrowApts[0];
+    if (isConfirmChoice || isCancelChoice) {
+      const apt = this.findReminderAppointment(chatId);
+      if (apt) {
+        if (isConfirmChoice) {
+          appointmentManager.updateAppointment(apt.id, { status: 'presence_confirmed' });
+          return {
+            handled: true,
+            agentName: this.name,
+            replyText: `🎉 *Presença Confirmada!*\n\nMuito obrigado, *${apt.clientName}*! Seu horário com *${apt.specialistName}* para o dia ${notificationService.formatDateBR(apt.date)} às *${apt.startTime}* está 100% garantido.\n\nNos vemos na *${companyName}*! Tenha um excelente dia! 😊`
+          };
+        }
 
-      if (['1', 'sim', 'confirmo', 'confirmado', 'vou', 'com certeza', 'confirmar'].includes(lowerText)) {
-        appointmentManager.updateAppointment(apt.id, { status: 'presence_confirmed' });
-        return {
-          handled: true,
-          agentName: this.name,
-          replyText: `🎉 *Presença Confirmada!*\n\nMuito obrigado, *${apt.clientName}*! Seu horário com *${apt.specialistName}* amanhã (${notificationService.formatDateBR(apt.date)} às *${apt.startTime}*) está 100% garantido.\n\nNos vemos amanhã na *${companyName}*! Tenha um ótimo dia!`
-        };
-      }
+        if (isCancelChoice) {
+          appointmentManager.cancelAppointment(apt.id, true);
+          notificationService.notifySpecialistCancellation(apt);
 
-      if (['2', 'não', 'nao', 'cancelo', 'desisto', 'não poderei', 'nao poderei', 'não vou', 'nao vou'].includes(lowerText)) {
-        appointmentManager.cancelAppointment(apt.id, true);
-        notificationService.notifySpecialistCancellation(apt);
-
-        return {
-          handled: true,
-          agentName: this.name,
-          replyText: `Entendido, *${apt.clientName}*. A sua vaga com *${apt.specialistName}* para amanhã às ${apt.startTime} foi cancelada e liberada para outros pacientes.\n\nAgradecemos imensamente por nos avisar com antecedência! Se quiser remarcar para outro dia, é só digitar *agendar*. 🙏`
-        };
+          return {
+            handled: true,
+            agentName: this.name,
+            replyText: `Entendido, *${apt.clientName}*. A sua consulta com *${apt.specialistName}* para ${notificationService.formatDateBR(apt.date)} às ${apt.startTime} foi cancelada e o horário liberado para outros pacientes.\n\nAgradecemos imensamente por nos avisar com antecedência! Se quiser remarcar para outro dia ou horário, é só digitar *agendar*. 🙏`
+          };
+        }
       }
     }
 

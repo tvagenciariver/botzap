@@ -816,7 +816,12 @@ apiRouter.post('/api/appointments/:id/notify', requireAuth, async (req: Request,
     }
 
     const sent = await notificationService.notifySpecialistNewBooking(apt);
-    res.json({ success: true, sent });
+    if (sent) {
+      res.json({ success: true, sent: true });
+    } else {
+      const errorMsg = notificationService.getLastError() || 'Especialista sem telefone válido ou falha na conexão WAHA.';
+      res.status(400).json({ success: false, sent: false, error: errorMsg });
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

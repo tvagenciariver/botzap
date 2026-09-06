@@ -150,15 +150,36 @@ export class AgentOrchestrator {
       return;
     }
 
-    // 4. Se o bot estiver pausado para este chatId e agente, ignora
+    // 4. Se o bot estiver pausado para este chatId e agente, verifica se é interação de agendamento/lembrete
     if (memoryStore.isChatPaused(chatId, agent.id)) {
-      console.log(`[Orchestrator] Bot [${agent.name}] pausado para ${chatId}, ignorando processamento.`);
-      this.addLog({
-        type: 'info',
-        chatId,
-        message: `Mensagem recebida mas bot [${agent.name}] está pausado para este contato: "${body}"`
-      });
-      return;
+      const bookingAgent = this.agents.find(a => a.name === 'BookingAgent');
+      let canHandleBooking = false;
+      if (bookingAgent) {
+        canHandleBooking = await bookingAgent.canHandle({
+          chatId,
+          userMessage: body || '',
+          session: sessionName,
+          agent
+        });
+      }
+
+      if (canHandleBooking) {
+        memoryStore.resumeChat(chatId, agent.id);
+        console.log(`[Orchestrator] Contato ${chatId} interagiu com o agendamento/lembrete. Pausa removida automaticamente.`);
+        this.addLog({
+          type: 'info',
+          chatId,
+          message: `Contato ${chatId} respondeu à agenda/lembrete. Pausa cancelada automaticamente.`
+        });
+      } else {
+        console.log(`[Orchestrator] Bot [${agent.name}] pausado para ${chatId}, ignorando processamento.`);
+        this.addLog({
+          type: 'info',
+          chatId,
+          message: `Mensagem recebida mas bot [${agent.name}] está pausado para este contato: "${body}"`
+        });
+        return;
+      }
     }
 
     // 5. Verifica se há texto válido

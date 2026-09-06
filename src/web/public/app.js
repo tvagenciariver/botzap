@@ -2063,10 +2063,100 @@ async function loadAppointments() {
       }
     }
 
+    lastAppointmentsSignature = JSON.stringify(appointmentsState.map(a => `${a.id}:${a.status}:${a.date}:${a.startTime}:${a.updatedAt}:${a.reminderSent}:${a.notifiedSpecialist}`));
     renderAppointments();
   } catch (err) {
     console.error('[Appointments] Erro ao carregar:', err);
   }
+}
+
+// ============================================================================
+// SINCRONIZAÇÃO EM TEMPO REAL DA AGENDA (REALTIME SEM F5)
+// ============================================================================
+
+let appointmentsRealtimeTimer = null;
+let lastAppointmentsSignature = '';
+
+function isAnyModalOpen() {
+  const modals = [
+    document.getElementById('modal-appointment-overlay'),
+    document.getElementById('modal-specs-overlay'),
+    document.getElementById('modal-print-overlay'),
+    document.getElementById('modal-user-overlay')
+  ];
+  return modals.some(m => m && m.style.display && m.style.display !== 'none');
+}
+
+async function syncAppointmentsRealtime() {
+  if (!getAuthToken()) return;
+
+  // Não atualiza se o operador estiver preenchendo um formulário em modal
+  if (isAnyModalOpen()) return;
+
+  try {
+    const query = new URLSearchParams();
+    if (currentAppointmentsDateFilter !== 'all' && currentAppointmentsDateValue) {
+      query.set('date', currentAppointmentsDateValue);
+    }
+    if (currentAppointmentsAgentFilter !== 'all') {
+      query.set('agentId', currentAppointmentsAgentFilter);
+    }
+    if (currentAppointmentsSpecialistFilter !== 'all') {
+      query.set('specialistId', currentAppointmentsSpecialistFilter);
+    }
+    if (currentAppointmentsStatusFilter !== 'all') {
+      query.set('status', currentAppointmentsStatusFilter);
+    }
+
+    const [aptsRes, sumRes, encRes] = await Promise.all([
+      fetchWithAuth(`/api/appointments?${query.toString()}`),
+      fetchWithAuth(`/api/appointments/summary?date=${currentAppointmentsDateValue}&agentId=${currentAppointmentsAgentFilter}`),
+      fetchWithAuth(`/api/appointments/encaixes?agentId=${currentAppointmentsAgentFilter}`)
+    ]);
+
+    if (aptsRes.ok) {
+      const data = await aptsRes.json();
+      const newApts = data.appointments || [];
+      const newSignature = JSON.stringify(newApts.map(a => `${a.id}:${a.status}:${a.date}:${a.startTime}:${a.updatedAt}:${a.reminderSent}:${a.notifiedSpecialist}`));
+
+      // Se houver qualquer alteração na agenda (novo agendamento, cancelamento pelo WhatsApp, confirmação D-1)
+      if (newSignature !== lastAppointmentsSignature) {
+        lastAppointmentsSignature = newSignature;
+        appointmentsState = newApts;
+        renderAppointments();
+
+        // Efeito visual sutil de pulso no badge Ao Vivo
+        const badge = document.getElementById('badge-appointments-realtime');
+        if (badge) {
+          badge.classList.add('pulse-highlight');
+          setTimeout(() => badge.classList.remove('pulse-highlight'), 1200);
+        }
+      }
+    }
+
+    if (sumRes.ok) {
+      const data = await sumRes.json();
+      renderKPIs(data.summary);
+    }
+
+    if (encRes.ok) {
+      const data = await encRes.json();
+      encaixesState = data.encaixes || [];
+      renderEncaixeBanner();
+    }
+  } catch (err) {
+    // Silencioso em caso de oscilação momentânea de rede
+  }
+}
+
+function startAppointmentsRealtimeSync() {
+  if (appointmentsRealtimeTimer) clearInterval(appointmentsRealtimeTimer);
+  appointmentsRealtimeTimer = setInterval(() => {
+    const pane = document.getElementById('pane-appointments');
+    if (pane && pane.classList.contains('active')) {
+      syncAppointmentsRealtime();
+    }
+  }, 4000); // Polling em tempo real a cada 4 segundos
 }
 
 /**
@@ -2608,7 +2698,7 @@ async function reNotifySpecialist(id) {
       showToast('Notificação enviada com sucesso no WhatsApp do especialista!', 'success');
       loadAppointments();
     } else {
-      showToast('Especialista sem telefone cadastrado ou falha no envio.', 'warning');
+      showToast(data.error || 'Especialista sem telefone cadastrado ou falha no envio WhatsApp.', 'warning');
     }
   } catch (err) {
     showToast(`Erro ao notificar: ${err.message}`, 'error');
@@ -3306,7 +3396,8 @@ async function initApp() {
         loadAgents();
       }
       loadAgentsForSimulator();
-      loadAppointments();
+      await loadAppointments();
+      startAppointmentsRealtimeSync();
       if (data.user?.role === 'attendant') {
         switchToTab('appointments');
       }
