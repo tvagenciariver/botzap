@@ -4810,9 +4810,27 @@ async function loadExams() {
   }
 }
 
+function formatCpf(cpf) {
+  if (!cpf) return '';
+  const digits = String(cpf).replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+  if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9, 11)}`;
+}
+
+function maskCpf(cpf) {
+  if (!cpf) return '';
+  const digits = String(cpf).replace(/\D/g, '');
+  if (digits.length < 3) return digits;
+  const first3 = digits.substring(0, 3);
+  return `${first3}.***.***-**`;
+}
+
 function updateExamKPIs(exams) {
   const totalEl = document.getElementById('kpi-exams-total');
   const successEl = document.getElementById('kpi-exams-success');
+  const awaitingCpfEl = document.getElementById('kpi-exams-awaiting-cpf');
   const partnerEl = document.getElementById('kpi-exams-partner');
   const particularEl = document.getElementById('kpi-exams-particular');
   const failedEl = document.getElementById('kpi-exams-failed');
@@ -4820,12 +4838,14 @@ function updateExamKPIs(exams) {
 
   const total = exams.length;
   const success = exams.filter(e => e.status === 'sent').length;
+  const awaitingCpf = exams.filter(e => e.status === 'awaiting_cpf').length;
   const partnerCount = exams.filter(e => e.referralType === 'partner').length;
   const particularCount = exams.filter(e => e.referralType !== 'partner').length;
   const failed = exams.filter(e => e.status === 'failed').length;
 
   if (totalEl) totalEl.textContent = total;
   if (successEl) successEl.textContent = success;
+  if (awaitingCpfEl) awaitingCpfEl.textContent = awaitingCpf;
   if (partnerEl) partnerEl.textContent = partnerCount;
   if (particularEl) particularEl.textContent = particularCount;
   if (failedEl) failedEl.textContent = failed;
@@ -4853,8 +4873,10 @@ function renderExams(exams) {
     }
 
     let statusPill = '';
-    if (exam.status === 'sent') {
-      statusPill = `<span class="badge badge-emerald" style="font-size: 11px;">✅ Entregue</span>`;
+    if (exam.status === 'awaiting_cpf') {
+      statusPill = `<span class="badge badge-amber" style="font-size: 11px;" title="Aguardando paciente digitar os 3 primeiros dígitos do CPF no WhatsApp para liberar o envio">🟡 Aguardando CPF</span>`;
+    } else if (exam.status === 'sent') {
+      statusPill = `<span class="badge badge-emerald" style="font-size: 11px;">✅ Entregue ${exam.cpfVerified ? '<span title="CPF validado com sucesso">🔒</span>' : ''}</span>`;
     } else if (exam.status === 'partial') {
       statusPill = `<span class="badge badge-amber" style="font-size: 11px;">⚠️ Parcial</span>`;
     } else {
@@ -4877,6 +4899,7 @@ function renderExams(exams) {
         </td>
         <td>
           <strong>${escapeHtml(exam.patientName)}</strong>
+          ${exam.patientCpf ? `<br><small class="text-muted" title="3 primeiros dígitos para segurança LGPD">🔒 CPF: <strong>${maskCpf(exam.patientCpf)}</strong></small>` : ''}
           ${exam.caption ? `<br><small class="text-muted" title="${escapeHtml(exam.caption)}">💬 "${escapeHtml(exam.caption.substring(0, 45))}..."</small>` : ''}
         </td>
         <td>
@@ -4937,6 +4960,10 @@ function openExamDispatchModal(prefill = {}) {
   if (prefill.clientPhone) {
     document.getElementById('modal-exam-patient-phone').value = prefill.clientPhone.replace(/@.*$/, '').replace(/\D/g, '');
   }
+  const cpfInput = document.getElementById('modal-exam-patient-cpf');
+  if (cpfInput) {
+    cpfInput.value = prefill.clientCpf ? formatCpf(prefill.clientCpf) : '';
+  }
 
   const effectiveCompany = getEffectiveActiveCompanyId();
   const targetAgent = (effectiveCompany !== 'all') ? effectiveCompany : (prefill.agentId || '*');
@@ -4977,6 +5004,24 @@ function syncExamTargetCardClasses() {
       card.classList.remove('selected');
     }
   });
+  updateExamCpfRequirement();
+}
+
+function updateExamCpfRequirement() {
+  const target = document.querySelector('input[name="modal-exam-target"]:checked')?.value || 'patient';
+  const cpfRequired = document.getElementById('modal-exam-cpf-required');
+  const cpfHint = document.getElementById('modal-exam-cpf-hint');
+  const cpfInput = document.getElementById('modal-exam-patient-cpf');
+
+  if (target === 'partner') {
+    if (cpfRequired) cpfRequired.textContent = ' (Opcional)';
+    if (cpfHint) cpfHint.textContent = 'Dispensa validação (envio direto à parceira)';
+    if (cpfInput) cpfInput.required = false;
+  } else {
+    if (cpfRequired) cpfRequired.textContent = ' *';
+    if (cpfHint) cpfHint.textContent = '🔒 Desafio LGPD (3 dígitos)';
+    if (cpfInput) cpfInput.required = true;
+  }
 }
 
 function updateExamTargetOptions(isPartner) {
@@ -5004,6 +5049,7 @@ function openExamDispatchModalForAppointment(aptId) {
       appointmentId: apt.id,
       clientName: apt.clientName,
       clientPhone: apt.clientPhone,
+      clientCpf: apt.clientCpf || '',
       referralType: apt.referralType || (apt.partnerId ? 'partner' : 'particular'),
       partnerId: apt.partnerId || '',
       agentId: apt.agentId || '*'
@@ -5018,6 +5064,7 @@ function openExamDispatchModalForAppointment(aptId) {
             appointmentId: a.id,
             clientName: a.clientName,
             clientPhone: a.clientPhone,
+            clientCpf: a.clientCpf || '',
             referralType: a.referralType || (a.partnerId ? 'partner' : 'particular'),
             partnerId: a.partnerId || '',
             agentId: a.agentId || '*'
@@ -5113,6 +5160,8 @@ function populateAppointmentsPickerForExams(selectedAptId) {
     document.getElementById('modal-exam-appointment-id').value = found.id;
     document.getElementById('modal-exam-patient-name').value = found.clientName;
     document.getElementById('modal-exam-patient-phone').value = found.clientPhone.replace(/@.*$/, '').replace(/\D/g, '');
+    const cpfEl = document.getElementById('modal-exam-patient-cpf');
+    if (cpfEl) cpfEl.value = found.clientCpf ? formatCpf(found.clientCpf) : '';
 
     const isPartner = found.referralType === 'partner';
     const partRadio = document.getElementById('exam-ref-particular');
@@ -5223,6 +5272,7 @@ async function handleExamDispatchSubmit(e) {
 
   const patientName = document.getElementById('modal-exam-patient-name')?.value.trim();
   const patientPhone = document.getElementById('modal-exam-patient-phone')?.value.trim();
+  const patientCpf = document.getElementById('modal-exam-patient-cpf')?.value.trim();
   const referralType = document.querySelector('input[name="modal-exam-referral-type"]:checked')?.value || 'particular';
   const partnerId = referralType === 'partner' ? document.getElementById('modal-exam-partner-select')?.value : undefined;
   const target = document.querySelector('input[name="modal-exam-target"]:checked')?.value || 'patient';
@@ -5241,6 +5291,13 @@ async function handleExamDispatchSubmit(e) {
   if (!patientPhone) {
     showToast('Informe o WhatsApp do paciente.', 'warning');
     return;
+  }
+  if (target !== 'partner') {
+    const cleanCpf = (patientCpf || '').replace(/\D/g, '');
+    if (!cleanCpf || cleanCpf.length < 3) {
+      showToast('Informe o CPF do paciente (pelo menos os 3 primeiros dígitos) para a validação de segurança LGPD.', 'warning');
+      return;
+    }
   }
   if (referralType === 'partner' && !partnerId) {
     showToast('Selecione a empresa/clínica conveniada.', 'warning');
@@ -5267,6 +5324,7 @@ async function handleExamDispatchSubmit(e) {
         agentId,
         patientName,
         patientPhone,
+        patientCpf,
         referralType,
         partnerId,
         target,
@@ -5283,7 +5341,9 @@ async function handleExamDispatchSubmit(e) {
     }
 
     const exam = data.exam;
-    if (exam.status === 'sent') {
+    if (exam.status === 'awaiting_cpf') {
+      showToast('Desafio de segurança LGPD enviado ao WhatsApp do paciente! Aguardando os 3 dígitos do CPF. 🟡', 'info');
+    } else if (exam.status === 'sent') {
       showToast('Exame e laudo enviados com sucesso pelo WhatsApp! ✅', 'success');
     } else if (exam.status === 'partial') {
       showToast('Exame enviado parcialmente. Verifique as tentativas.', 'warning');
@@ -5314,6 +5374,19 @@ function openResendExamModal(examId) {
   document.getElementById('resend-patient-name').textContent = exam.patientName;
   document.getElementById('resend-patient-phone').textContent = formatPhoneDisplay(exam.patientPhone);
   document.getElementById('resend-file-name').textContent = exam.originalName;
+
+  const cpfInfoEl = document.getElementById('resend-patient-cpf');
+  const cpfBadgeEl = document.getElementById('resend-cpf-badge');
+  if (cpfInfoEl) cpfInfoEl.textContent = exam.patientCpf ? maskCpf(exam.patientCpf) : 'Não informado';
+  if (cpfBadgeEl) {
+    if (exam.cpfVerified) {
+      cpfBadgeEl.className = 'badge badge-sm badge-emerald';
+      cpfBadgeEl.textContent = '✅ CPF Confirmado (Liberado)';
+    } else {
+      cpfBadgeEl.className = 'badge badge-sm badge-amber';
+      cpfBadgeEl.textContent = '🟡 Aguardando Confirmação (3 dígitos)';
+    }
+  }
 
   const partnerInfo = document.getElementById('resend-partner-info');
   const optPartner = document.getElementById('resend-opt-partner');
@@ -5565,8 +5638,18 @@ function generateAndPrintExamsReport() {
       if (exam.target === 'both') targetText = 'Ambos (Paciente + Clínica)';
       else if (exam.target === 'partner') targetText = 'Clínica Parceira';
 
-      const partnerText = exam.referralType === 'partner' ? (exam.partnerName || 'Convênio') : 'Particular';
-      const statusText = exam.status === 'sent' ? 'Entregue (OK)' : (exam.status === 'partial' ? 'Parcial' : 'Falha');
+      let statusText = 'Falha';
+      let badgeClass = 'badge-danger';
+      if (exam.status === 'awaiting_cpf') {
+        statusText = 'Aguardando CPF';
+        badgeClass = 'badge-warning';
+      } else if (exam.status === 'sent') {
+        statusText = exam.cpfVerified ? 'Entregue (CPF OK)' : 'Entregue';
+        badgeClass = 'badge-success';
+      } else if (exam.status === 'partial') {
+        statusText = 'Parcial';
+        badgeClass = 'badge-warning';
+      }
       const protocol = exam.attempts && exam.attempts[0]?.messageId ? exam.attempts[0].messageId.substring(0, 18) + '...' : 'WPP-' + exam.id;
 
       rowsHtml += `
@@ -5576,6 +5659,7 @@ function generateAndPrintExamsReport() {
           <td>
             <strong>${escapeHtml(exam.patientName)}</strong><br>
             <span style="font-size: 11px; color: #4b5563;">📱 ${formatPhoneDisplay(exam.patientPhone)}</span>
+            ${exam.patientCpf ? `<br><span style="font-size: 10px; color: #6b7280;">🔒 CPF: ${maskCpf(exam.patientCpf)}</span>` : ''}
           </td>
           <td>
             <strong>${escapeHtml(partnerText)}</strong>
@@ -5586,7 +5670,7 @@ function generateAndPrintExamsReport() {
           </td>
           <td style="font-size: 10px; font-family: monospace; color: #4b5563;">${protocol}</td>
           <td>
-            <span class="status-badge ${exam.status === 'sent' ? 'badge-success' : 'badge-danger'}">
+            <span class="status-badge ${badgeClass}">
               ${statusText}
             </span>
           </td>
@@ -5726,6 +5810,11 @@ function generateAndPrintExamsReport() {
       background: #fee2e2;
       color: #b91c1c;
       border: 1px solid #fecaca;
+    }
+    .badge-warning {
+      background: #fef3c7;
+      color: #b45309;
+      border: 1px solid #fde68a;
     }
     .report-footer {
       margin-top: 30px;
@@ -5936,6 +6025,11 @@ document.getElementById('modal-exam-dispatch-overlay')?.addEventListener('click'
 });
 document.getElementById('modal-exam-dispatch-form')?.addEventListener('submit', handleExamDispatchSubmit);
 
+// Máscara automática de formatação para o CPF do paciente (LGPD)
+document.getElementById('modal-exam-patient-cpf')?.addEventListener('input', (e) => {
+  e.target.value = formatCpf(e.target.value);
+});
+
 document.querySelectorAll('input[name="modal-exam-referral-type"]').forEach(r => {
   r.addEventListener('change', (e) => {
     const isPartner = e.target.value === 'partner';
@@ -5945,7 +6039,7 @@ document.querySelectorAll('input[name="modal-exam-referral-type"]').forEach(r =>
   });
 });
 
-// Listener para alternar visual dos cards de destinatário no modal de exames
+// Listener para alternar visual dos cards de destinatário no modal de exames e atualizar exigência de CPF
 document.querySelectorAll('input[name="modal-exam-target"]').forEach(r => {
   r.addEventListener('change', syncExamTargetCardClasses);
 });

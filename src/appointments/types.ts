@@ -50,6 +50,7 @@ export interface Appointment {
   clientChatId: string; // Ex: "5511987654321@c.us"
   clientPhone: string;
   clientName: string;
+  clientCpf?: string; // CPF do paciente para LGPD / validação
 
   date: string; // "YYYY-MM-DD"
   startTime: string; // "14:00"
@@ -108,6 +109,9 @@ export interface ExamDispatch {
   patientName: string;
   patientPhone: string;
   patientChatId: string;
+  patientCpf?: string; // Armazenado limpo (apenas números) para camada LGPD
+  cpfVerified?: boolean; // Se o paciente já validou os 3 primeiros dígitos
+  cpfVerifiedAt?: string;
   referralType: 'particular' | 'partner';
   partnerId?: string;
   partnerName?: string;
@@ -119,7 +123,7 @@ export interface ExamDispatch {
   fileMimeType: string;
   fileSize: number; // Em bytes
   caption: string;
-  status: 'sent' | 'partial' | 'failed';
+  status: 'sent' | 'partial' | 'failed' | 'awaiting_cpf';
   sentBy: string; // Nome ou username do operador
   sentAt: string;
   attempts: ExamDispatchAttempt[];

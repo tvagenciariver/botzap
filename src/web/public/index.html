@@ -418,6 +418,11 @@
             <div class="kpi-bar" style="background: #06b6d4;"></div>
           </div>
           <div class="kpi-card">
+            <div class="kpi-val text-amber" id="kpi-exams-awaiting-cpf">0</div>
+            <div class="kpi-lbl">Aguardando CPF (LGPD)</div>
+            <div class="kpi-bar" style="background: #f59e0b;"></div>
+          </div>
+          <div class="kpi-card">
             <div class="kpi-val text-rose" id="kpi-exams-failed">0</div>
             <div class="kpi-lbl">Falhas de Envio</div>
             <div class="kpi-bar" style="background: #f43f5e;"></div>
@@ -430,7 +435,7 @@
             <!-- Busca de Exames -->
             <div class="search-box" style="flex: 1; min-width: 250px;">
               <span class="search-icon">🔍</span>
-              <input type="text" id="exam-search-input" class="form-control" placeholder="Buscar por paciente, WhatsApp, clínica parceira ou arquivo...">
+              <input type="text" id="exam-search-input" class="form-control" placeholder="Buscar por paciente, WhatsApp, CPF, clínica parceira ou arquivo...">
             </div>
 
             <!-- Filtro de Tipo de Encaminhamento -->
@@ -456,7 +461,8 @@
               <label for="exam-filter-status">Status Envio:</label>
               <select id="exam-filter-status" class="form-control form-control-sm">
                 <option value="all">Todos os Status</option>
-                <option value="sent">✅ Enviado com Sucesso</option>
+                <option value="sent">✅ Entregue com Sucesso</option>
+                <option value="awaiting_cpf">🟡 Aguardando CPF (LGPD)</option>
                 <option value="partial">⚠️ Parcialmente Enviado</option>
                 <option value="failed">❌ Falha no Envio</option>
               </select>
@@ -1900,14 +1906,19 @@
 
           <!-- Dados do Paciente -->
           <div class="form-row">
-            <div class="form-group col-6">
+            <div class="form-group col-4">
               <label for="modal-exam-patient-name">Nome do Paciente <span class="text-danger">*</span></label>
               <input type="text" id="modal-exam-patient-name" class="form-control" placeholder="Ex: Maria da Silva" required>
             </div>
-            <div class="form-group col-6">
+            <div class="form-group col-4">
               <label for="modal-exam-patient-phone">WhatsApp do Paciente <span class="text-danger">*</span></label>
-              <input type="text" id="modal-exam-patient-phone" class="form-control" placeholder="Ex: 87999998888 ou 5587988177877" required>
-              <small class="form-hint">DDD + Número (com ou sem 55)</small>
+              <input type="text" id="modal-exam-patient-phone" class="form-control" placeholder="Ex: 87999998888" required>
+              <small class="form-hint">DDD + Número</small>
+            </div>
+            <div class="form-group col-4" id="modal-exam-patient-cpf-wrap">
+              <label for="modal-exam-patient-cpf">CPF do Paciente <span class="text-danger" id="modal-exam-cpf-required">*</span></label>
+              <input type="text" id="modal-exam-patient-cpf" class="form-control" placeholder="000.000.000-00" maxlength="14" autocomplete="off">
+              <small class="form-hint" id="modal-exam-cpf-hint">🔒 Desafio LGPD (3 dígitos)</small>
             </div>
           </div>
 
@@ -1944,7 +1955,7 @@
                 <input type="radio" name="modal-exam-target" value="patient" checked>
                 <div>
                   <strong>👤 Somente Paciente</strong>
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Envia diretamente no WhatsApp do paciente.</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Envia desafio de confirmação dos 3 dígitos do CPF.</div>
                 </div>
               </label>
 
@@ -1953,7 +1964,7 @@
                 <input type="radio" name="modal-exam-target" value="partner">
                 <div>
                   <strong>🏢 Somente Clínica Parceira</strong>
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Envia para a clínica parceira repassar.</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Direto p/ WhatsApp da empresa conveniada (sem CPF).</div>
                 </div>
               </label>
 
@@ -1961,7 +1972,7 @@
                 <input type="radio" name="modal-exam-target" value="both">
                 <div>
                   <strong>👥 Para Ambos</strong>
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Envia para Paciente + Clínica Parceira.</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Direto p/ Parceiro + Desafio CPF p/ Paciente.</div>
                 </div>
               </label>
             </div>
@@ -2143,6 +2154,7 @@
           <div class="card p-3 mb-3" style="background: rgba(255,255,255,0.02);">
             <div style="font-size: 13px;">
               <div><strong>Paciente:</strong> <span id="resend-patient-name">-</span> (<span id="resend-patient-phone">-</span>)</div>
+              <div id="resend-cpf-info" style="margin-top: 4px;"><strong>CPF / Segurança LGPD:</strong> <span id="resend-patient-cpf">-</span> <span id="resend-cpf-badge" class="badge badge-sm badge-amber" style="font-size: 10.5px;">Aguardando CPF</span></div>
               <div id="resend-partner-info" style="margin-top: 4px;"><strong>Convênio:</strong> <span id="resend-partner-name">-</span></div>
               <div style="margin-top: 4px;"><strong>Arquivo:</strong> <span id="resend-file-name">-</span></div>
             </div>

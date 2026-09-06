@@ -2,6 +2,7 @@ import { IAgent, AgentContext, AgentResponse } from './agents/base.js';
 import { BusinessHoursAgent } from './agents/business-hours.js';
 import { HandoffAgent } from './agents/handoff.js';
 import { BookingAgent } from './agents/booking.js';
+import { ExamDeliveryAgent } from './agents/exam-delivery.js';
 import { AttendantAgent } from './agents/attendant.js';
 import { messageDebouncer } from './debouncer.js';
 import { botTracker } from './bot-tracker.js';
@@ -32,11 +33,13 @@ export class AgentOrchestrator {
     // Ordem de prioridade dos agentes:
     // 1. BusinessHoursAgent (verifica se está fora do horário comercial)
     // 2. HandoffAgent (checa se o cliente quer atendente humano)
-    // 3. BookingAgent (Agendamentos, anti-conflitos e confirmação D-1)
-    // 4. AttendantAgent (IA: Google Gemini / OpenAI)
+    // 3. ExamDeliveryAgent (Validação dos 3 primeiros dígitos do CPF e entrega de exames LGPD)
+    // 4. BookingAgent (Agendamentos, anti-conflitos e confirmação D-1)
+    // 5. AttendantAgent (IA: Google Gemini / OpenAI)
     this.agents = [
       new BusinessHoursAgent(),
       new HandoffAgent(),
+      new ExamDeliveryAgent(),
       new BookingAgent(),
       new AttendantAgent()
     ];
@@ -150,26 +153,36 @@ export class AgentOrchestrator {
       return;
     }
 
-    // 4. Se o bot estiver pausado para este chatId e agente, verifica se é interação de agendamento/lembrete
+    // 4. Se o bot estiver pausado para este chatId e agente, verifica se é interação de agendamento/lembrete ou validação de exame LGPD
     if (memoryStore.isChatPaused(chatId, agent.id)) {
       const bookingAgent = this.agents.find(a => a.name === 'BookingAgent');
+      const examAgent = this.agents.find(a => a.name === 'ExamDeliveryAgent');
+
       let canHandleBooking = false;
+      let canHandleExam = false;
+
+      const testCtx = {
+        chatId,
+        userMessage: body || '',
+        session: sessionName,
+        agent
+      };
+
       if (bookingAgent) {
-        canHandleBooking = await bookingAgent.canHandle({
-          chatId,
-          userMessage: body || '',
-          session: sessionName,
-          agent
-        });
+        canHandleBooking = await bookingAgent.canHandle(testCtx);
+      }
+      if (examAgent) {
+        canHandleExam = await examAgent.canHandle(testCtx);
       }
 
-      if (canHandleBooking) {
+      if (canHandleBooking || canHandleExam) {
         memoryStore.resumeChat(chatId, agent.id);
-        console.log(`[Orchestrator] Contato ${chatId} interagiu com o agendamento/lembrete. Pausa removida automaticamente.`);
+        const reason = canHandleExam ? 'validação de exame (CPF)' : 'agenda/lembrete';
+        console.log(`[Orchestrator] Contato ${chatId} interagiu com ${reason}. Pausa removida automaticamente.`);
         this.addLog({
           type: 'info',
           chatId,
-          message: `Contato ${chatId} respondeu à agenda/lembrete. Pausa cancelada automaticamente.`
+          message: `Contato ${chatId} respondeu a ${reason}. Pausa cancelada automaticamente.`
         });
       } else {
         console.log(`[Orchestrator] Bot [${agent.name}] pausado para ${chatId}, ignorando processamento.`);
