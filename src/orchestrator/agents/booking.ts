@@ -1,6 +1,6 @@
 import { IAgent, AgentContext, AgentResponse } from './base.js';
 import { appointmentManager } from '../../appointments/appointment-manager.js';
-import { notificationService } from '../../appointments/notification-service.js';
+import { notificationService, matchPhoneOrChatId } from '../../appointments/notification-service.js';
 import { Specialist, ServiceItem, Appointment } from '../../appointments/types.js';
 
 interface BookingSessionState {
@@ -64,17 +64,7 @@ export class BookingAgent implements IAgent {
     );
 
     const isMatch = (apt: Appointment) => {
-      if (apt.clientChatId === chatId) return true;
-      const aptClean = (apt.clientChatId || '').split('@')[0].replace(/\D/g, '');
-      const inClean = chatId.split('@')[0].replace(/\D/g, '');
-      if (aptClean && inClean && (aptClean === inClean || inClean.endsWith(aptClean) || aptClean.endsWith(inClean))) {
-        return true;
-      }
-      const phoneClean = (apt.clientPhone || '').replace(/\D/g, '');
-      if (phoneClean && inClean && (phoneClean === inClean || inClean.endsWith(phoneClean) || phoneClean.endsWith(inClean))) {
-        return true;
-      }
-      return false;
+      return matchPhoneOrChatId(apt.clientChatId, chatId) || matchPhoneOrChatId(apt.clientPhone, chatId);
     };
 
     // Prioridade 1: Agendamentos com lembrete D-1 já enviado e ainda pendentes de resposta

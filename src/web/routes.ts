@@ -837,6 +837,10 @@ apiRouter.post('/api/appointments/send-reminders', requireAuth, async (req: Requ
       agentId = req.user.assignedAgentId;
     }
     const result = await notificationService.sendRemindersForTomorrow(agentId);
+    if (result.total > 0 && result.sent === 0) {
+      const errorMsg = result.lastError || notificationService.getLastError() || 'Nenhum lembrete pôde ser entregue pela WAHA.';
+      return res.status(400).json({ success: false, ...result, error: errorMsg });
+    }
     res.json({ success: true, ...result });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -855,7 +859,12 @@ apiRouter.post('/api/appointments/:id/send-reminder', requireAuth, async (req: R
     }
 
     const sent = await notificationService.sendDMinusOneReminder(apt);
-    res.json({ success: true, sent });
+    if (sent) {
+      res.json({ success: true, sent: true });
+    } else {
+      const errorMsg = notificationService.getLastError() || 'Não foi possível enviar o lembrete via WAHA.';
+      res.status(400).json({ success: false, sent: false, error: errorMsg });
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

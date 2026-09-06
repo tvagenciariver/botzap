@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Specialist, ServiceItem, Appointment, AppointmentStatus } from './types.js';
+import { matchPhoneOrChatId } from './phone-utils.js';
 
 export class AppointmentManager {
   private appointmentsFile: string;
@@ -233,7 +234,7 @@ export class AppointmentManager {
 
   getAppointmentsByChatId(chatId: string): Appointment[] {
     return this.appointments.filter(a => 
-      a.clientChatId === chatId && 
+      (matchPhoneOrChatId(a.clientChatId, chatId) || matchPhoneOrChatId(a.clientPhone, chatId)) && 
       a.status !== 'cancelled' && 
       a.status !== 'cancelled_by_patient'
     ).sort((a, b) => a.date.localeCompare(b.date));

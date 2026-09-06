@@ -1,6 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
 import { env, loadBotConfig } from '../config/index.js';
 import { WahaSendTextRequest, WahaSessionStatus } from './types.js';
+import { getAlternateBrazilianChatId } from '../appointments/phone-utils.js';
+export { getAlternateBrazilianChatId };
 
 export class WahaClient {
   private client!: AxiosInstance;
@@ -15,7 +17,8 @@ export class WahaClient {
    */
   reloadConfig(): void {
     const config = loadBotConfig();
-    this.defaultSession = config.wahaSession || env.wahaSession || 'default';
+    const rawSession = config.wahaSession || env.wahaSession || 'default';
+    this.defaultSession = (rawSession && rawSession !== '*') ? rawSession : 'default';
     const baseUrl = config.wahaBaseUrl || env.wahaBaseUrl || 'http://localhost:3000';
     const apiKey = config.wahaApiKey !== undefined ? config.wahaApiKey : env.wahaApiKey;
 
@@ -49,25 +52,73 @@ export class WahaClient {
   }
 
   /**
-   * Envia mensagem de texto para um contato ou grupo no WhatsApp
+   * Extrai mensagem de erro legível e detalhada da resposta da WAHA
+   */
+  extractErrorMessage(error: any): string {
+    if (error?.response?.data) {
+      const data = error.response.data;
+      if (typeof data === 'string') return data;
+      if (data.message && data.error) return `${data.error}: ${data.message}`;
+      if (data.message) return data.message;
+      if (data.error) return typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+      if (data.detail) return typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+      try {
+        return JSON.stringify(data);
+      } catch {
+        // ignore
+      }
+    }
+    return error?.message || 'Erro de comunicação com a WAHA';
+  }
+
+  /**
+   * Envia mensagem de texto para um contato ou grupo no WhatsApp.
+   * Conta com fallback automático inteligente para números brasileiros:
+   * Se falhar o envio para 13 dígitos (com 9), tenta automaticamente para 12 dígitos (sem 9), e vice-versa.
    */
   async sendText(chatId: string, text: string, options?: Partial<WahaSendTextRequest>): Promise<any> {
-    const session = options?.session || this.defaultSession;
+    const rawSession = options?.session || this.defaultSession;
+    const session = (rawSession && rawSession !== '*') ? rawSession : (this.defaultSession || 'default');
+
     const body: WahaSendTextRequest = {
       session,
       chatId,
       text,
-      linkPreview: options?.linkPreview ?? true,
-      reply_to: options?.reply_to
+      linkPreview: options?.linkPreview ?? false
     };
+
+    if (options?.reply_to) {
+      body.reply_to = options.reply_to;
+    }
 
     try {
       const response = await this.client.post('/api/sendText', body);
       return response.data;
     } catch (error: any) {
-      const msg = error.response?.data?.message || error.message;
-      console.error(`[WAHA] Erro ao enviar texto para ${chatId}:`, msg);
-      throw error;
+      const firstErrMsg = this.extractErrorMessage(error);
+      const altChatId = getAlternateBrazilianChatId(chatId);
+
+      // Se for número brasileiro e o envio inicial falhou, tenta o formato alternativo (com/sem 9)
+      if (altChatId) {
+        console.warn(`[WAHA] Primeiro envio para ${chatId} falhou (${firstErrMsg}). Tentando formato alternativo do 9º dígito: ${altChatId}...`);
+        try {
+          const altBody = { ...body, chatId: altChatId };
+          const altResponse = await this.client.post('/api/sendText', altBody);
+          console.log(`[WAHA] ✅ Sucesso no envio para o número alternativo ${altChatId}!`);
+          return altResponse.data;
+        } catch (altError: any) {
+          const altErrMsg = this.extractErrorMessage(altError);
+          console.error(`[WAHA] Falha também no número alternativo ${altChatId}: ${altErrMsg}`);
+          const detailedError = new Error(`Erro WAHA para ${chatId} (${firstErrMsg}) e alternativa ${altChatId} (${altErrMsg})`);
+          (detailedError as any).response = error.response || altError.response;
+          throw detailedError;
+        }
+      }
+
+      console.error(`[WAHA] Erro ao enviar texto para ${chatId}:`, firstErrMsg);
+      const detailedError = new Error(`Erro WAHA ao enviar para ${chatId}: ${firstErrMsg}`);
+      (detailedError as any).response = error.response;
+      throw detailedError;
     }
   }
 

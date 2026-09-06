@@ -2718,7 +2718,7 @@ async function sendIndividualReminder(id) {
       showToast('Lembrete D-1 enviado ao WhatsApp do paciente!', 'success');
       loadAppointments();
     } else {
-      showToast('Não foi possível enviar o lembrete.', 'warning');
+      showToast(data.error || 'Não foi possível enviar o lembrete.', 'warning');
     }
   } catch (err) {
     showToast(`Erro ao enviar lembrete: ${err.message}`, 'error');

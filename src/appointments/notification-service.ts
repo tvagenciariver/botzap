@@ -5,6 +5,9 @@ import { agentManager } from '../config/agent-manager.js';
 import { env } from '../config/index.js';
 import { botTracker } from '../orchestrator/bot-tracker.js';
 import { memoryStore } from '../gemini/memory.js';
+import { formatToWhatsAppChatId, matchPhoneOrChatId, getAlternateBrazilianChatId } from './phone-utils.js';
+
+export { formatToWhatsAppChatId, matchPhoneOrChatId, getAlternateBrazilianChatId };
 
 export class NotificationService {
   private lastError: string = '';
@@ -18,21 +21,7 @@ export class NotificationService {
    * Garante o DDI 55 do Brasil para números com 10 ou 11 dígitos.
    */
   formatToWhatsAppChatId(phoneStr: string): string {
-    if (!phoneStr) return '';
-    let digits = phoneStr.replace(/\D/g, '');
-    if (!digits) return '';
-
-    // Remove zero inicial se houver (ex: 011999998888 -> 11999998888)
-    if (digits.startsWith('0') && (digits.length === 11 || digits.length === 12)) {
-      digits = digits.substring(1);
-    }
-
-    // Se for número brasileiro com 10 ou 11 dígitos (DDD + número) sem o DDI 55
-    if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) {
-      digits = '55' + digits;
-    }
-
-    return `${digits}@c.us`;
+    return formatToWhatsAppChatId(phoneStr);
   }
 
   /**
@@ -63,7 +52,8 @@ export class NotificationService {
     const agent = agentManager.getAgent(appointment.agentId) || agentManager.getDefaultAgent();
     const companyName = agent.companyName || 'Nossa Clínica';
     const targetChatId = this.formatToWhatsAppChatId(spec.phone);
-    const session = (agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession;
+    const rawSession = (agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession;
+    const session = (rawSession && rawSession !== '*') ? rawSession : 'default';
 
     if (!targetChatId) {
       this.lastError = `Telefone "${spec.phone}" do especialista é inválido.`;
@@ -93,8 +83,8 @@ export class NotificationService {
       console.log(`[NotificationService] Alerta enviado ao especialista ${spec.name} (${targetChatId}).`);
       return true;
     } catch (err: any) {
-      const errorMsg = err.response?.data?.message || err.message || 'Falha ao enviar mensagem pela WAHA.';
-      this.lastError = `Erro WAHA ao notificar ${spec.name} (${targetChatId}): ${errorMsg}`;
+      const errorMsg = err.message || 'Falha ao enviar mensagem pela WAHA.';
+      this.lastError = `Erro ao notificar ${spec.name} (${targetChatId}): ${errorMsg}`;
       console.error(`[NotificationService] ${this.lastError}`);
       return false;
     }
@@ -115,7 +105,8 @@ export class NotificationService {
     const agent = agentManager.getAgent(appointment.agentId) || agentManager.getDefaultAgent();
     const companyName = agent.companyName || 'Nossa Clínica';
     const targetChatId = this.formatToWhatsAppChatId(spec.phone);
-    const session = (agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession;
+    const rawSession = (agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession;
+    const session = (rawSession && rawSession !== '*') ? rawSession : 'default';
 
     const message = `⚠️ *Aviso de Cancelamento de Consulta*\n\n` +
       `🏢 *Clínica:* ${companyName}\n` +
@@ -132,7 +123,7 @@ export class NotificationService {
       console.log(`[NotificationService] Alerta de cancelamento enviado ao especialista ${spec.name}.`);
       return true;
     } catch (err: any) {
-      this.lastError = err.response?.data?.message || err.message;
+      this.lastError = err.message || 'Falha ao avisar especialista sobre cancelamento.';
       console.error(`[NotificationService] Falha ao alertar especialista sobre cancelamento:`, this.lastError);
       return false;
     }
@@ -146,10 +137,25 @@ export class NotificationService {
 
     const agent = agentManager.getAgent(appointment.agentId) || agentManager.getDefaultAgent();
     const companyName = agent.companyName || 'Nossa Clínica';
-    const session = (agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession;
+    const rawSession = (agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession;
+    const session = (rawSession && rawSession !== '*') ? rawSession : 'default';
 
-    // Garante que o chat está ativo para poder responder
-    memoryStore.resumeChat(appointment.clientChatId, agent.id);
+    // Se o clientChatId for @lid ou vazio, prioriza o telefone formatado do paciente
+    let targetChatId = appointment.clientChatId;
+    if (!targetChatId || targetChatId.includes('@lid') || !targetChatId.endsWith('@c.us')) {
+      const formattedPhone = this.formatToWhatsAppChatId(appointment.clientPhone);
+      if (formattedPhone) {
+        targetChatId = formattedPhone;
+      }
+    }
+
+    // Garante que o chat está ativo para poder responder (despausa em caso de pausa prévia)
+    if (targetChatId) {
+      memoryStore.resumeChat(targetChatId, agent.id);
+    }
+    if (appointment.clientChatId && appointment.clientChatId !== targetChatId) {
+      memoryStore.resumeChat(appointment.clientChatId, agent.id);
+    }
 
     const message = `Olá, *${appointment.clientName}*! 👋\n\n` +
       `Aqui é da equipe da *${companyName}*.\n` +
@@ -160,19 +166,40 @@ export class NotificationService {
       `_Digite o número *1* para confirmar ou *2* para cancelar._`;
 
     try {
-      const sendRes = await wahaClient.sendText(appointment.clientChatId, message, { session });
+      const sendRes = await wahaClient.sendText(targetChatId, message, { session });
       // Rastreia mensagem para que o eco da WAHA não congele/pause o bot para este cliente
-      botTracker.recordBotMessage(appointment.clientChatId, message, sendRes?.id);
+      botTracker.recordBotMessage(targetChatId, message, sendRes?.id);
+      if (appointment.clientChatId && appointment.clientChatId !== targetChatId) {
+        botTracker.recordBotMessage(appointment.clientChatId, message, sendRes?.id);
+      }
 
       appointmentManager.updateAppointment(appointment.id, {
         reminderSent: true,
         reminderSentAt: new Date().toISOString()
       });
-      console.log(`[NotificationService] Lembrete D-1 enviado com sucesso para ${appointment.clientName} (${appointment.clientChatId}).`);
+      console.log(`[NotificationService] Lembrete D-1 enviado com sucesso para ${appointment.clientName} (${targetChatId}).`);
       return true;
     } catch (err: any) {
-      this.lastError = err.response?.data?.message || err.message;
-      console.error(`[NotificationService] Falha ao enviar lembrete D-1 para ${appointment.clientChatId}:`, this.lastError);
+      // Se falhou e ainda temos o clientPhone formatado diferente
+      const formattedPhone = this.formatToWhatsAppChatId(appointment.clientPhone);
+      if (formattedPhone && formattedPhone !== targetChatId) {
+        try {
+          console.warn(`[NotificationService] Tentando reenvio de lembrete D-1 para telefone formatado: ${formattedPhone}...`);
+          const sendRes2 = await wahaClient.sendText(formattedPhone, message, { session });
+          botTracker.recordBotMessage(formattedPhone, message, sendRes2?.id);
+          appointmentManager.updateAppointment(appointment.id, {
+            reminderSent: true,
+            reminderSentAt: new Date().toISOString()
+          });
+          console.log(`[NotificationService] Lembrete D-1 enviado com sucesso para ${appointment.clientName} (${formattedPhone}).`);
+          return true;
+        } catch (phoneErr: any) {
+          console.error(`[NotificationService] Falha também no telefone formatado ${formattedPhone}:`, phoneErr.message);
+        }
+      }
+
+      this.lastError = err.message || 'Falha ao enviar lembrete D-1 pela WAHA.';
+      console.error(`[NotificationService] Falha ao enviar lembrete D-1 para ${appointment.clientName} (${targetChatId}):`, this.lastError);
       return false;
     }
   }
@@ -180,7 +207,7 @@ export class NotificationService {
   /**
    * Dispara lembretes D-1 em lote para todos os pacientes com agendamento amanhã
    */
-  async sendRemindersForTomorrow(agentId?: string): Promise<{ sent: number; total: number }> {
+  async sendRemindersForTomorrow(agentId?: string): Promise<{ sent: number; total: number; lastError?: string }> {
     const tomorrowStr = appointmentManager.getTomorrowDateString();
     const appointments = appointmentManager.listAppointments({
       date: tomorrowStr,
@@ -200,7 +227,8 @@ export class NotificationService {
 
     return {
       sent: sentCount,
-      total: appointments.length
+      total: appointments.length,
+      lastError: this.lastError || undefined
     };
   }
 }
