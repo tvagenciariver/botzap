@@ -92,6 +92,25 @@ export class AgentOrchestrator {
       chatId = to || payload._data?.to || payload._data?.id?.remote || from;
     }
 
+    // Se o chatId veio no formato @lid (Linked Device), traduz para o chatId do telefone real (@c.us)
+    if (chatId && chatId.endsWith('@lid')) {
+      const realPhone = payload._data?.author ||
+        payload._data?.key?.participant ||
+        payload._data?.id?.participant ||
+        payload._data?.participant ||
+        payload.replyTo?.participant ||
+        payload._data?.from;
+      if (realPhone && (realPhone.endsWith('@c.us') || realPhone.endsWith('@s.whatsapp.net'))) {
+        console.log(`[Orchestrator] Mapeado chatId LID ${chatId} para telefone real: ${realPhone}`);
+        chatId = realPhone;
+      }
+    }
+
+    // Normaliza @s.whatsapp.net para @c.us
+    if (chatId && chatId.endsWith('@s.whatsapp.net')) {
+      chatId = chatId.replace('@s.whatsapp.net', '@c.us');
+    }
+
     // 1. Descartar mensagens antigas ou sincronizadas do histórico (stale messages ao reconectar WAHA)
     if (payload.timestamp) {
       const msgTimeMs = payload.timestamp > 1e11 ? payload.timestamp : payload.timestamp * 1000;

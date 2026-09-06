@@ -51,6 +51,17 @@ export function getAlternateBrazilianChatId(chatId: string): string | null {
 }
 
 /**
+ * Identifica se um chatId pertence ao Simulador de Chat do painel web
+ */
+export function isSimulatorChatId(chatId?: string): boolean {
+  if (!chatId) return false;
+  return chatId.startsWith('simulador_') ||
+    chatId.startsWith('sim_') ||
+    chatId === 'simulacao@c.us' ||
+    chatId === 'simulator';
+}
+
+/**
  * Compara dois números de telefone ou chatIds do WhatsApp de forma inteligente,
  * lidando com sufixos (@c.us, @lid), DDI 55, DDD e a variação do 9º dígito móvel brasileiro.
  */
@@ -58,10 +69,16 @@ export function matchPhoneOrChatId(a?: string, b?: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
 
-  const cleanA = a.split('@')[0].replace(/\D/g, '');
-  const cleanB = b.split('@')[0].replace(/\D/g, '');
+  let cleanA = a.split('@')[0].replace(/\D/g, '');
+  let cleanB = b.split('@')[0].replace(/\D/g, '');
 
   if (!cleanA || !cleanB) return false;
+  if (cleanA === cleanB) return true;
+
+  // Remove zero à esquerda no DDD se houver (ex: 087988177877 -> 87988177877)
+  if (cleanA.startsWith('0') && cleanA.length >= 11) cleanA = cleanA.substring(1);
+  if (cleanB.startsWith('0') && cleanB.length >= 11) cleanB = cleanB.substring(1);
+
   if (cleanA === cleanB) return true;
 
   // Se um terminar com o outro (ex: 5587988177877 termina com 87988177877)

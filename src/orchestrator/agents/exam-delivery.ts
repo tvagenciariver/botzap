@@ -1,5 +1,8 @@
-﻿import { IAgent, AgentContext, AgentResponse } from './base.js';
+import { IAgent, AgentContext, AgentResponse } from './base.js';
 import { examService } from '../../appointments/exam-service.js';
+import { memoryStore } from '../../gemini/memory.js';
+import { loadBotConfig } from '../../config/index.js';
+import { getAlternateBrazilianChatId } from '../../appointments/phone-utils.js';
 
 export class ExamDeliveryAgent implements IAgent {
   name = 'ExamDeliveryAgent';
@@ -19,6 +22,32 @@ export class ExamDeliveryAgent implements IAgent {
       context.userMessage,
       context.session
     );
+
+    if (verification.transferredToHuman) {
+      const config = loadBotConfig();
+      const pauseMinutes = context.agent
+        ? ((context.agent.pauseDurationHours ? context.agent.pauseDurationHours * 60 : context.agent.pauseDurationMinutes) || 360)
+        : ((config.pauseDurationHours ? config.pauseDurationHours * 60 : config.pauseDurationMinutes) || 360);
+
+      // Pausa o bot para este contato para transbordo humano
+      memoryStore.pauseChat(context.chatId, pauseMinutes, context.agent?.id);
+      const altChatId = getAlternateBrazilianChatId(context.chatId);
+      if (altChatId) {
+        memoryStore.pauseChat(altChatId, pauseMinutes, context.agent?.id);
+      }
+
+      memoryStore.addMessage(context.chatId, 'user', context.userMessage, context.contactName);
+      memoryStore.addMessage(context.chatId, 'model', verification.replyText, context.contactName);
+
+      console.log(`[ExamDeliveryAgent] Bot pausado para ${context.chatId} por ${pauseMinutes}m (3 tentativas incorretas de CPF).`);
+
+      return {
+        handled: true,
+        replyText: verification.replyText,
+        action: 'transferred_human',
+        agentName: this.name
+      };
+    }
 
     if (verification.replyText) {
       return {

@@ -4,7 +4,8 @@ import { ExamDispatch, ExamDispatchAttempt, ExamDispatchTarget } from './types.j
 import { partnerManager } from './partner-manager.js';
 import { wahaClient } from '../waha/client.js';
 import { botTracker } from '../orchestrator/bot-tracker.js';
-import { formatToWhatsAppChatId, matchPhoneOrChatId } from './phone-utils.js';
+import { formatToWhatsAppChatId, matchPhoneOrChatId, isSimulatorChatId, getAlternateBrazilianChatId } from './phone-utils.js';
+import { memoryStore } from '../gemini/memory.js';
 import { agentManager } from '../config/agent-manager.js';
 import { env } from '../config/index.js';
 
@@ -223,13 +224,8 @@ export class ExamService {
       const partnerAttempt = attempts.find(a => a.target === 'partner');
       status = (partnerAttempt && partnerAttempt.success) ? 'sent' : 'failed';
     } else {
-      // Se envolve paciente, fica aguardando a confirmação do CPF
-      const patientAttempt = attempts.find(a => a.target === 'patient');
-      if (patientAttempt && patientAttempt.success) {
-        status = 'awaiting_cpf';
-      } else {
-        status = 'failed';
-      }
+      // Se envolve paciente, fica sempre aguardando a confirmação do CPF para liberação do arquivo
+      status = 'awaiting_cpf';
     }
 
     const examRecord: ExamDispatch = {
@@ -241,6 +237,7 @@ export class ExamService {
       patientChatId,
       patientCpf: cleanCpf || undefined,
       cpfVerified: false,
+      failedCpfAttempts: 0,
       referralType,
       partnerId: data.partnerId,
       partnerName,
@@ -267,11 +264,30 @@ export class ExamService {
   }
 
   /**
-   * Localiza exames com status 'awaiting_cpf' pendentes de confirmação para este contato
+   * Localiza exames com status pendente de confirmação de CPF para este contato
    */
   getPendingExamsForChat(chatId: string): ExamDispatch[] {
+    this.loadFromDisk();
+
+    // 1. Suporte especial ao Simulador do painel web
+    if (isSimulatorChatId(chatId)) {
+      const simulatorPending = this.exams.filter(exam =>
+        !exam.cpfVerified &&
+        (exam.target === 'patient' || exam.target === 'both') &&
+        (exam.failedCpfAttempts || 0) < 3
+      );
+      return simulatorPending.slice(0, 1);
+    }
+
+    // 2. Busca por correspondência inteligente de telefone/chatId
     return this.exams.filter(exam => {
-      if (exam.status !== 'awaiting_cpf') return false;
+      // Se já verificou CPF, não está pendente
+      if (exam.cpfVerified) return false;
+      // Se o envio é exclusivo para parceiro, dispensa CPF
+      if (exam.target === 'partner') return false;
+      // Se já atingiu 3 tentativas e foi transferido para humano, não processa automaticamente pelo bot
+      if ((exam.failedCpfAttempts || 0) >= 3) return false;
+
       return matchPhoneOrChatId(exam.patientChatId, chatId) || matchPhoneOrChatId(exam.patientPhone, chatId);
     });
   }
@@ -283,10 +299,17 @@ export class ExamService {
     chatId: string,
     inputMessage: string,
     sessionName?: string
-  ): Promise<{ success: boolean; replyText: string; deliveredExams: ExamDispatch[] }> {
+  ): Promise<{
+    success: boolean;
+    replyText: string;
+    action?: 'none' | 'transferred_human';
+    transferredToHuman?: boolean;
+    deliveredExams: ExamDispatch[];
+  }> {
+    this.loadFromDisk();
     const pendingExams = this.getPendingExamsForChat(chatId);
     if (pendingExams.length === 0) {
-      return { success: false, replyText: '', deliveredExams: [] };
+      return { success: false, replyText: '', action: 'none', deliveredExams: [] };
     }
 
     const inputDigits = inputMessage.replace(/\D/g, '');
@@ -294,11 +317,11 @@ export class ExamService {
     // Se digitou menos de 3 dígitos numéricos
     if (inputDigits.length < 3) {
       const hintMsg =
-        `⚠️ *Confirmação de Segurança (LGPD)*\n\n` +
-        `Para liberar o seu resultado com total sigilo médico, por favor, *digite os 3 primeiros dígitos do seu CPF*.\n` +
+        `⚠️ *Confirmação de Segurança (LGPD & Sigilo Médico)*\n\n` +
+        `Para liberar o seu resultado com total sigilo médico, por favor, digite os *3 primeiros dígitos do seu CPF*.\n` +
         `_(Exemplo: se o seu CPF começa com 123.456..., digite apenas *123*)_.\n\n` +
         `_Caso precise de outro atendimento, digite *humano* para falar com nossa equipe._`;
-      return { success: false, replyText: hintMsg, deliveredExams: [] };
+      return { success: false, replyText: hintMsg, action: 'none', deliveredExams: [] };
     }
 
     // Compara com os 3 primeiros dígitos do CPF cadastrado no exame
@@ -307,17 +330,52 @@ export class ExamService {
       return expected3 && (inputDigits.startsWith(expected3) || inputDigits === expected3);
     });
 
-    // Se os dígitos informados NÃO conferem
+    // Se os dígitos informados NÃO conferem:
     if (matchedExams.length === 0) {
+      let maxAttempts = 0;
+      for (const exam of pendingExams) {
+        exam.failedCpfAttempts = (exam.failedCpfAttempts || 0) + 1;
+        if (exam.failedCpfAttempts > maxAttempts) {
+          maxAttempts = exam.failedCpfAttempts;
+        }
+      }
+      this.saveToDisk();
+
+      // Se errou 3 vezes: Transbordo para atendimento humanizado
+      if (maxAttempts >= 3) {
+        const exceededMsg =
+          `⚠️ *Limite de tentativas excedido.*\n\n` +
+          `Identificamos 3 tentativas incorretas na validação do CPF. Para garantir a segurança dos seus dados de saúde e o cumprimento da LGPD, estamos transferindo seu atendimento para a nossa equipe humana.\n\n` +
+          `_Por favor, aguarde um instante que um atendente irá falar com você!_ 👩‍⚕️🤝`;
+
+        return {
+          success: false,
+          replyText: exceededMsg,
+          action: 'transferred_human',
+          transferredToHuman: true,
+          deliveredExams: []
+        };
+      }
+
+      // Tentativas 1 ou 2: avisa e solicita tentar novamente
+      const remaining = 3 - maxAttempts;
       const mismatchMsg =
         `⚠️ *Os dígitos informados não conferem com o CPF cadastrado.*\n\n` +
-        `Por favor, confira e digite novamente os *3 primeiros dígitos do CPF* do titular do exame para que possamos liberar seu documento com segurança.\n\n` +
-        `_Caso queira falar diretamente com nossa recepção, digite *humano*._`;
-      return { success: false, replyText: mismatchMsg, deliveredExams: [] };
+        `*Tentativa ${maxAttempts} de 3*. Por favor, confira e digite novamente apenas os *3 primeiros dígitos do CPF* do titular do exame para liberarmos seu laudo com segurança.\n\n` +
+        `_(Você ainda tem ${remaining} tentativa(s) antes do encaminhamento para atendimento humano)._\n` +
+        `_Se preferir falar agora com a nossa recepção, digite *humano*._`;
+
+      return {
+        success: false,
+        replyText: mismatchMsg,
+        action: 'none',
+        deliveredExams: []
+      };
     }
 
     // Sucesso! Entrega os arquivos de todos os exames validados
     for (const exam of matchedExams) {
+      exam.failedCpfAttempts = 0; // zera tentativas
       const agent = agentManager.getAgent(exam.agentId) || agentManager.getDefaultAgent();
       const companyName = agent.companyName || 'Nossa Clínica';
       const session = (sessionName && sessionName !== 'simulator' && sessionName !== '*')
@@ -339,7 +397,7 @@ export class ExamService {
               `🏥 *${companyName}*\n\n` +
               `_Documento emitido com segurança e privacidade._`;
 
-          if (sessionName !== 'simulator') {
+          if (sessionName !== 'simulator' && !isSimulatorChatId(chatId)) {
             const sendRes = await wahaClient.sendFile(
               exam.patientChatId,
               {
@@ -384,6 +442,7 @@ export class ExamService {
     return {
       success: true,
       replyText,
+      action: 'none',
       deliveredExams: matchedExams
     };
   }
@@ -392,6 +451,7 @@ export class ExamService {
    * Reenvia um exame já existente para o paciente, parceiro ou ambos
    */
   async reSendExam(examId: string, customTarget?: ExamDispatchTarget, customCaption?: string): Promise<ExamDispatch> {
+    this.loadFromDisk();
     const exam = this.exams.find(e => e.id === examId);
     if (!exam) {
       throw new Error(`Exame com ID "${examId}" não localizado.`);
@@ -399,6 +459,18 @@ export class ExamService {
 
     if (!fs.existsSync(exam.fileStoredPath)) {
       throw new Error(`Arquivo físico do exame não encontrado em disco.`);
+    }
+
+    // Reseta tentativas de CPF para nova oportunidade de validação do paciente
+    exam.failedCpfAttempts = 0;
+
+    // Despausa o contato no bot caso estivesse bloqueado por 3 tentativas erradas
+    if (exam.patientChatId) {
+      memoryStore.resumeChat(exam.patientChatId, exam.agentId);
+      const altChatId = getAlternateBrazilianChatId(exam.patientChatId);
+      if (altChatId) {
+        memoryStore.resumeChat(altChatId, exam.agentId);
+      }
     }
 
     const fileBuffer = fs.readFileSync(exam.fileStoredPath);

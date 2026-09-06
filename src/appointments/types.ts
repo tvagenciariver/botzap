@@ -112,6 +112,7 @@ export interface ExamDispatch {
   patientCpf?: string; // Armazenado limpo (apenas números) para camada LGPD
   cpfVerified?: boolean; // Se o paciente já validou os 3 primeiros dígitos
   cpfVerifiedAt?: string;
+  failedCpfAttempts?: number; // Contador de tentativas incorretas de validação (limite: 3)
   referralType: 'particular' | 'partner';
   partnerId?: string;
   partnerName?: string;

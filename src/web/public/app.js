@@ -4874,7 +4874,13 @@ function renderExams(exams) {
 
     let statusPill = '';
     if (exam.status === 'awaiting_cpf') {
-      statusPill = `<span class="badge badge-amber" style="font-size: 11px;" title="Aguardando paciente digitar os 3 primeiros dígitos do CPF no WhatsApp para liberar o envio">🟡 Aguardando CPF</span>`;
+      if ((exam.failedCpfAttempts || 0) >= 3) {
+        statusPill = `<span class="badge badge-rose" style="font-size: 11px;" title="Paciente errou 3 vezes o CPF. Atendimento transferido para equipe humana.">⛔ Bloqueado (3 erros CPF)</span>`;
+      } else if ((exam.failedCpfAttempts || 0) > 0) {
+        statusPill = `<span class="badge badge-amber" style="font-size: 11px;" title="Paciente errou ${exam.failedCpfAttempts} de 3 tentativas">🟡 Aguardando CPF (${exam.failedCpfAttempts}/3 erros)</span>`;
+      } else {
+        statusPill = `<span class="badge badge-amber" style="font-size: 11px;" title="Aguardando paciente digitar os 3 primeiros dígitos do CPF no WhatsApp para liberar o envio">🟡 Aguardando CPF</span>`;
+      }
     } else if (exam.status === 'sent') {
       statusPill = `<span class="badge badge-emerald" style="font-size: 11px;">✅ Entregue ${exam.cpfVerified ? '<span title="CPF validado com sucesso">🔒</span>' : ''}</span>`;
     } else if (exam.status === 'partial') {
@@ -5382,6 +5388,12 @@ function openResendExamModal(examId) {
     if (exam.cpfVerified) {
       cpfBadgeEl.className = 'badge badge-sm badge-emerald';
       cpfBadgeEl.textContent = '✅ CPF Confirmado (Liberado)';
+    } else if ((exam.failedCpfAttempts || 0) >= 3) {
+      cpfBadgeEl.className = 'badge badge-sm badge-rose';
+      cpfBadgeEl.textContent = '⛔ Bloqueado (3 erros - Reenviar reativa)';
+    } else if ((exam.failedCpfAttempts || 0) > 0) {
+      cpfBadgeEl.className = 'badge badge-sm badge-amber';
+      cpfBadgeEl.textContent = `🟡 Aguardando Confirmação (${exam.failedCpfAttempts}/3 erros)`;
     } else {
       cpfBadgeEl.className = 'badge badge-sm badge-amber';
       cpfBadgeEl.textContent = '🟡 Aguardando Confirmação (3 dígitos)';
