@@ -1914,6 +1914,37 @@ function formatDateBR(dateStr) {
   return `${d}/${m}/${y}`;
 }
 
+function formatPhoneDisplay(phone) {
+  if (!phone) return '--';
+  let clean = String(phone).trim().replace(/@.*$/, '');
+  const digits = clean.replace(/\D/g, '');
+  if (digits.length === 13 && digits.startsWith('55')) {
+    const ddd = digits.substring(2, 4);
+    const part1 = digits.substring(4, 9);
+    const part2 = digits.substring(9, 13);
+    return `(${ddd}) ${part1}-${part2}`;
+  }
+  if (digits.length === 12 && digits.startsWith('55')) {
+    const ddd = digits.substring(2, 4);
+    const part1 = digits.substring(4, 8);
+    const part2 = digits.substring(8, 12);
+    return `(${ddd}) ${part1}-${part2}`;
+  }
+  if (digits.length === 11) {
+    const ddd = digits.substring(0, 2);
+    const part1 = digits.substring(2, 7);
+    const part2 = digits.substring(7, 11);
+    return `(${ddd}) ${part1}-${part2}`;
+  }
+  if (digits.length === 10) {
+    const ddd = digits.substring(0, 2);
+    const part1 = digits.substring(2, 6);
+    const part2 = digits.substring(6, 10);
+    return `(${ddd}) ${part1}-${part2}`;
+  }
+  return clean;
+}
+
 function getStatusPill(status) {
   switch (status) {
     case 'scheduled':
@@ -2357,12 +2388,12 @@ async function loadSpecialistTimelineSlots(specialist, targetDate, specApts) {
               <div class="slot-patient-name" title="${apt.clientName}">👤 ${apt.clientName}</div>
               <div class="slot-service-name">🩺 ${apt.serviceName}</div>
               <div class="slot-patient-phone">
-                <span>📱 ${apt.clientPhone}</span>
+                <span>📱 ${formatPhoneDisplay(apt.clientPhone)}</span>
                 ${apt.reminderSent ? '<span title="Lembrete D-1 enviado">🔔</span>' : ''}
               </div>
               <div class="slot-card-actions">
                 <div class="slot-actions-btns">
-                  <a href="https://wa.me/${apt.clientPhone.replace(/\D/g, '')}" target="_blank" class="slot-action-btn btn-act-whatsapp" title="Conversar no WhatsApp">💬</a>
+                  <a href="https://wa.me/${(apt.clientPhone || '').replace(/@.*$/, '').replace(/\D/g, '')}" target="_blank" class="slot-action-btn btn-act-whatsapp" title="Conversar no WhatsApp">💬</a>
                   <button class="slot-action-btn" onclick="reNotifySpecialist('${apt.id}')" title="Reenviar notificação no WhatsApp do especialista">🔔 Médico</button>
                   <button class="slot-action-btn" onclick="sendIndividualReminder('${apt.id}')" title="Enviar Lembrete D-1 ao Paciente">📩 D-1</button>
                 </div>
@@ -2441,12 +2472,12 @@ function renderKanbanView(apts) {
             <div class="kanban-card-meta">
               <span>👨‍⚕️ ${apt.specialistName} (${apt.specialistRole})</span>
               <span>🩺 ${apt.serviceName}</span>
-              <span>📱 ${apt.clientPhone}</span>
+              <span>📱 ${formatPhoneDisplay(apt.clientPhone)}</span>
               ${apt.notes ? `<span class="text-muted">📝 "${apt.notes}"</span>` : ''}
             </div>
             <div class="kanban-card-actions">
               <div class="d-flex gap-1">
-                <a href="https://wa.me/${apt.clientPhone.replace(/\D/g, '')}" target="_blank" class="slot-action-btn btn-act-whatsapp" title="Abrir WhatsApp">💬</a>
+                <a href="https://wa.me/${(apt.clientPhone || '').replace(/@.*$/, '').replace(/\D/g, '')}" target="_blank" class="slot-action-btn btn-act-whatsapp" title="Abrir WhatsApp">💬</a>
                 <button class="slot-action-btn" onclick="reNotifySpecialist('${apt.id}')" title="Avisar Médico">👨‍⚕️</button>
               </div>
               <select class="kanban-card-status-select" onchange="updateAppointmentStatus('${apt.id}', this.value)">
@@ -2498,8 +2529,8 @@ function renderTableView(apts) {
           ${apt.notes ? `<br><small class="text-muted">${apt.notes}</small>` : ''}
         </td>
         <td>
-          <a href="https://wa.me/${apt.clientPhone.replace(/\D/g, '')}" target="_blank" class="text-emerald" style="text-decoration: none;">
-            📱 ${apt.clientPhone}
+          <a href="https://wa.me/${(apt.clientPhone || '').replace(/@.*$/, '').replace(/\D/g, '')}" target="_blank" class="text-emerald" style="text-decoration: none;">
+            📱 ${formatPhoneDisplay(apt.clientPhone)}
           </a>
         </td>
         <td>
@@ -2847,15 +2878,74 @@ document.querySelectorAll('.modal-tab-btn').forEach(btn => {
 // Toggle formulário novo especialista
 document.getElementById('btn-show-add-specialist')?.addEventListener('click', () => {
   const wrap = document.getElementById('form-new-specialist-wrap');
-  if (wrap) wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+  const title = document.getElementById('form-spec-title');
+  const idInput = document.getElementById('spec-id');
+  const form = document.getElementById('form-specialist');
+
+  if (wrap) {
+    if (wrap.style.display === 'none' || !wrap.style.display) {
+      if (form) form.reset();
+      if (idInput) idInput.value = '';
+      if (title) title.textContent = 'Cadastrar Novo Especialista';
+      wrap.style.display = 'block';
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+      wrap.style.display = 'none';
+    }
+  }
 });
 
 document.getElementById('btn-cancel-specialist')?.addEventListener('click', () => {
   const wrap = document.getElementById('form-new-specialist-wrap');
+  const idInput = document.getElementById('spec-id');
+  const title = document.getElementById('form-spec-title');
   if (wrap) wrap.style.display = 'none';
+  if (idInput) idInput.value = '';
+  if (title) title.textContent = 'Cadastrar Novo Especialista';
 });
 
-// Salvar Especialista
+// Editar Especialista (Abre formulário preenchido)
+window.editSpecialist = function(id) {
+  const spec = specialistsState.find(s => s.id === id);
+  if (!spec) return;
+
+  const wrap = document.getElementById('form-new-specialist-wrap');
+  const title = document.getElementById('form-spec-title');
+  const idInput = document.getElementById('spec-id');
+  const agentSelect = document.getElementById('spec-agent');
+  const nameInput = document.getElementById('spec-name');
+  const roleInput = document.getElementById('spec-role');
+  const phoneInput = document.getElementById('spec-phone');
+  const startInput = document.getElementById('spec-hours-start');
+  const endInput = document.getElementById('spec-hours-end');
+  const breakStartInput = document.getElementById('spec-break-start');
+  const breakEndInput = document.getElementById('spec-break-end');
+  const durationSelect = document.getElementById('spec-duration');
+
+  if (title) title.textContent = `Editar Especialista: ${spec.name}`;
+  if (idInput) idInput.value = spec.id;
+  if (agentSelect) agentSelect.value = spec.agentId || '*';
+  if (nameInput) nameInput.value = spec.name || '';
+  if (roleInput) roleInput.value = spec.role || '';
+  if (phoneInput) phoneInput.value = spec.phone || '';
+  if (startInput) startInput.value = spec.workHoursStart || '08:00';
+  if (endInput) endInput.value = spec.workHoursEnd || '18:00';
+  if (breakStartInput) breakStartInput.value = spec.breakStart || '12:00';
+  if (breakEndInput) breakEndInput.value = spec.breakEnd || '13:00';
+  if (durationSelect) durationSelect.value = String(spec.slotDurationMinutes || 30);
+
+  const days = spec.workingDays || ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+  document.querySelectorAll('input[name="spec-days"]').forEach(cb => {
+    cb.checked = days.includes(cb.value);
+  });
+
+  if (wrap) {
+    wrap.style.display = 'block';
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+};
+
+// Salvar Especialista (Criar ou Editar)
 document.getElementById('form-specialist')?.addEventListener('submit', async (e) => {
   e.preventDefault();
 
@@ -2888,8 +2978,10 @@ document.getElementById('form-specialist')?.addEventListener('submit', async (e)
 
     if (!res.ok) throw new Error('Falha ao salvar especialista.');
 
-    showToast('Especialista salvo com sucesso!', 'success');
+    showToast(id ? 'Especialista atualizado com sucesso!' : 'Especialista cadastrado com sucesso!', 'success');
     document.getElementById('form-specialist').reset();
+    document.getElementById('spec-id').value = '';
+    document.getElementById('form-spec-title').textContent = 'Cadastrar Novo Especialista';
     document.getElementById('form-new-specialist-wrap').style.display = 'none';
     await loadAppointments();
     renderSpecialistsTable();
@@ -2924,7 +3016,10 @@ function renderSpecialistsTable() {
         <td>${s.slotDurationMinutes} min</td>
         <td><span class="badge ${s.active ? 'badge-success' : 'badge-danger'}">${s.active ? 'Ativo' : 'Inativo'}</span></td>
         <td style="text-align: right;">
-          <button class="btn btn-sm btn-danger-outline" onclick="deleteSpecialist('${s.id}')">Excluir</button>
+          <div class="d-flex justify-end gap-1">
+            <button class="btn btn-sm btn-outline" onclick="editSpecialist('${s.id}')">✏️ Editar</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="deleteSpecialist('${s.id}')">Excluir</button>
+          </div>
         </td>
       </tr>
     `;
@@ -2949,18 +3044,62 @@ async function deleteSpecialist(id) {
 // Toggle formulário novo serviço
 document.getElementById('btn-show-add-service')?.addEventListener('click', () => {
   const wrap = document.getElementById('form-new-service-wrap');
-  if (wrap) wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+  const title = document.getElementById('form-service-title');
+  const idInput = document.getElementById('service-id');
+  const form = document.getElementById('form-service');
+
+  if (wrap) {
+    if (wrap.style.display === 'none' || !wrap.style.display) {
+      if (form) form.reset();
+      if (idInput) idInput.value = '';
+      if (title) title.textContent = 'Cadastrar Novo Procedimento';
+      wrap.style.display = 'block';
+    } else {
+      wrap.style.display = 'none';
+    }
+  }
 });
 
 document.getElementById('btn-cancel-service')?.addEventListener('click', () => {
   const wrap = document.getElementById('form-new-service-wrap');
+  const idInput = document.getElementById('service-id');
+  const title = document.getElementById('form-service-title');
   if (wrap) wrap.style.display = 'none';
+  if (idInput) idInput.value = '';
+  if (title) title.textContent = 'Cadastrar Novo Procedimento';
 });
 
-// Salvar Serviço
+// Editar Serviço (Abre formulário preenchido)
+window.editService = function(id) {
+  const srv = servicesState.find(s => s.id === id);
+  if (!srv) return;
+
+  const wrap = document.getElementById('form-new-service-wrap');
+  const title = document.getElementById('form-service-title');
+  const idInput = document.getElementById('service-id');
+  const agentSelect = document.getElementById('service-agent');
+  const nameInput = document.getElementById('service-name');
+  const durationInput = document.getElementById('service-duration');
+  const priceInput = document.getElementById('service-price');
+
+  if (title) title.textContent = `Editar Procedimento: ${srv.name}`;
+  if (idInput) idInput.value = srv.id;
+  if (agentSelect) agentSelect.value = srv.agentId || '*';
+  if (nameInput) nameInput.value = srv.name || '';
+  if (durationInput) durationInput.value = String(srv.durationMinutes || 30);
+  if (priceInput) priceInput.value = srv.price !== undefined ? String(srv.price) : '';
+
+  if (wrap) {
+    wrap.style.display = 'block';
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+};
+
+// Salvar Serviço (Criar ou Editar)
 document.getElementById('form-service')?.addEventListener('submit', async (e) => {
   e.preventDefault();
 
+  const id = document.getElementById('service-id')?.value;
   const payload = {
     agentId: document.getElementById('service-agent')?.value || '*',
     name: document.getElementById('service-name')?.value.trim(),
@@ -2970,16 +3109,21 @@ document.getElementById('form-service')?.addEventListener('submit', async (e) =>
   };
 
   try {
-    const res = await fetchWithAuth('/api/services', {
-      method: 'POST',
+    const url = id ? `/api/services/${id}` : '/api/services';
+    const method = id ? 'PUT' : 'POST';
+
+    const res = await fetchWithAuth(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
     if (!res.ok) throw new Error('Falha ao salvar serviço.');
 
-    showToast('Procedimento cadastrado com sucesso!', 'success');
+    showToast(id ? 'Procedimento atualizado com sucesso!' : 'Procedimento cadastrado com sucesso!', 'success');
     document.getElementById('form-service').reset();
+    document.getElementById('service-id').value = '';
+    document.getElementById('form-service-title').textContent = 'Cadastrar Novo Procedimento';
     document.getElementById('form-new-service-wrap').style.display = 'none';
     await loadAppointments();
     renderServicesTable();
@@ -3012,7 +3156,10 @@ function renderServicesTable() {
         <td>${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Não definido'}</td>
         <td><span class="badge ${srv.active ? 'badge-success' : 'badge-danger'}">${srv.active ? 'Ativo' : 'Inativo'}</span></td>
         <td style="text-align: right;">
-          <button class="btn btn-sm btn-danger-outline" onclick="deleteService('${srv.id}')">Excluir</button>
+          <div class="d-flex justify-end gap-1">
+            <button class="btn btn-sm btn-outline" onclick="editService('${srv.id}')">✏️ Editar</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="deleteService('${srv.id}')">Excluir</button>
+          </div>
         </td>
       </tr>
     `;
@@ -3406,5 +3553,561 @@ document.getElementById('modal-user-form')?.addEventListener('submit', saveUser)
 document.getElementById('modal-user-overlay')?.addEventListener('click', (e) => {
   if (e.target.id === 'modal-user-overlay') closeUserModal();
 });
+
+// ============================================================================
+// IMPRESSÃO & RELATÓRIOS OFICIAIS DE AGENDAMENTOS (A4 / PDF)
+// ============================================================================
+
+function openPrintModal() {
+  const overlay = document.getElementById('modal-print-overlay');
+  if (!overlay) return;
+
+  // 1. Popula Especialidades a partir de specialistsState
+  const roleSelect = document.getElementById('print-filter-role');
+  if (roleSelect) {
+    const roles = Array.from(new Set(specialistsState.map(s => (s.role || '').trim()).filter(Boolean))).sort();
+    let rHtml = '<option value="all" selected>🩺 Todas as Especialidades</option>';
+    roles.forEach(r => {
+      rHtml += `<option value="${r}">${r}</option>`;
+    });
+    roleSelect.innerHTML = rHtml;
+  }
+
+  // 2. Popula Especialistas
+  populatePrintSpecialistsDropdown();
+
+  // 3. Popula Unidades / Agentes
+  const agentSelect = document.getElementById('print-filter-agent');
+  if (agentSelect) {
+    const isAttendantScoped = currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*';
+    if (isAttendantScoped) {
+      const myAgent = allAgentsCache.find(a => a.id === currentUser.assignedAgentId);
+      agentSelect.innerHTML = `<option value="${currentUser.assignedAgentId}">🏢 ${myAgent ? myAgent.name : 'Minha Unidade'}</option>`;
+      agentSelect.value = currentUser.assignedAgentId;
+      agentSelect.disabled = true;
+    } else {
+      agentSelect.disabled = false;
+      let aHtml = '<option value="all" selected>🌐 Todas as Unidades (Visão Geral)</option>';
+      allAgentsCache.forEach(a => {
+        aHtml += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
+      });
+      agentSelect.innerHTML = aHtml;
+      if (currentAppointmentsAgentFilter && currentAppointmentsAgentFilter !== 'all') {
+        agentSelect.value = currentAppointmentsAgentFilter;
+      }
+    }
+  }
+
+  // 4. Sincroniza Data inicial com base no filtro da tela
+  const dateTypeSelect = document.getElementById('print-filter-date-type');
+  const dateValInput = document.getElementById('print-filter-date-val');
+  const dateValWrap = document.getElementById('print-custom-date-wrap');
+
+  if (dateTypeSelect) {
+    if (currentAppointmentsDateFilter === 'tomorrow') {
+      dateTypeSelect.value = 'tomorrow';
+      if (dateValWrap) dateValWrap.style.display = 'none';
+    } else if (currentAppointmentsDateFilter === 'all') {
+      dateTypeSelect.value = 'all';
+      if (dateValWrap) dateValWrap.style.display = 'none';
+    } else if (currentAppointmentsDateFilter === 'custom') {
+      dateTypeSelect.value = 'custom';
+      if (dateValInput) dateValInput.value = currentAppointmentsDateValue || getTodayString();
+      if (dateValWrap) dateValWrap.style.display = 'block';
+    } else {
+      dateTypeSelect.value = 'today';
+      if (dateValWrap) dateValWrap.style.display = 'none';
+    }
+  }
+
+  if (dateValInput && !dateValInput.value) {
+    dateValInput.value = getTodayString();
+  }
+
+  // Exibe o modal e calcula o preview count
+  overlay.style.display = 'flex';
+  updatePrintPreviewCount();
+}
+
+function closePrintModal() {
+  const overlay = document.getElementById('modal-print-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function populatePrintSpecialistsDropdown() {
+  const specSelect = document.getElementById('print-filter-specialist');
+  const selectedRole = document.getElementById('print-filter-role')?.value || 'all';
+  if (!specSelect) return;
+
+  let specs = specialistsState.filter(s => s.active);
+  if (selectedRole !== 'all') {
+    specs = specs.filter(s => s.role === selectedRole);
+  }
+
+  let html = '<option value="all" selected>👨‍⚕️ Todos os Especialistas</option>';
+  specs.forEach(s => {
+    html += `<option value="${s.id}">${s.name} (${s.role})</option>`;
+  });
+  specSelect.innerHTML = html;
+}
+
+async function getFilteredAppointmentsForPrint() {
+  const dateType = document.getElementById('print-filter-date-type')?.value || 'today';
+  const customDate = document.getElementById('print-filter-date-val')?.value;
+  const role = document.getElementById('print-filter-role')?.value || 'all';
+  const specialistId = document.getElementById('print-filter-specialist')?.value || 'all';
+  const statusFilter = document.getElementById('print-filter-status')?.value || 'active';
+  const agentId = document.getElementById('print-filter-agent')?.value || 'all';
+
+  // Monta parâmetros para o backend
+  const query = new URLSearchParams();
+  if (dateType === 'today') {
+    query.set('date', getTodayString());
+  } else if (dateType === 'tomorrow') {
+    query.set('date', getTomorrowString());
+  } else if (dateType === 'custom' && customDate) {
+    query.set('date', customDate);
+  }
+
+  if (agentId !== 'all') {
+    query.set('agentId', agentId);
+  }
+
+  if (specialistId !== 'all') {
+    query.set('specialistId', specialistId);
+  }
+
+  try {
+    const res = await fetchWithAuth(`/api/appointments?${query.toString()}`);
+    if (!res.ok) throw new Error('Falha ao buscar agendamentos para impressão.');
+    const data = await res.json();
+    let list = data.appointments || [];
+
+    // Filtra por especialidade se selecionada
+    if (role !== 'all') {
+      list = list.filter(apt => {
+        if (apt.specialistRole && apt.specialistRole.toLowerCase() === role.toLowerCase()) return true;
+        const spec = specialistsState.find(s => s.id === apt.specialistId);
+        return spec && spec.role && spec.role.toLowerCase() === role.toLowerCase();
+      });
+    }
+
+    // Filtra por status
+    if (statusFilter === 'active') {
+      const activeStatuses = ['scheduled', 'confirmed', 'presence_confirmed', 'waiting', 'in_progress'];
+      list = list.filter(apt => activeStatuses.includes(apt.status));
+    } else if (statusFilter === 'confirmed_only') {
+      const confirmedStatuses = ['scheduled', 'confirmed', 'presence_confirmed'];
+      list = list.filter(apt => confirmedStatuses.includes(apt.status));
+    } else if (statusFilter === 'completed') {
+      list = list.filter(apt => apt.status === 'completed');
+    } else if (statusFilter === 'cancelled') {
+      const cancelledStatuses = ['cancelled', 'cancelled_by_patient', 'no_show'];
+      list = list.filter(apt => cancelledStatuses.includes(apt.status));
+    }
+
+    // Ordenação por data ascendente e horário ascendente
+    list.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return (a.startTime || '').localeCompare(b.startTime || '');
+    });
+
+    return list;
+  } catch (err) {
+    console.error('Erro ao filtrar agendamentos para impressão:', err);
+    return [];
+  }
+}
+
+async function updatePrintPreviewCount() {
+  const countEl = document.getElementById('print-preview-count');
+  if (!countEl) return;
+  countEl.textContent = 'Calculando... ⏳';
+
+  const list = await getFilteredAppointmentsForPrint();
+  countEl.textContent = `${list.length} paciente${list.length === 1 ? '' : 's'} selecionado${list.length === 1 ? '' : 's'}`;
+}
+
+async function generateAndPrintReport() {
+  const executeBtn = document.getElementById('btn-execute-print');
+  if (executeBtn) {
+    executeBtn.disabled = true;
+    executeBtn.textContent = 'Gerando Relatório... ⏳';
+  }
+
+  try {
+    const list = await getFilteredAppointmentsForPrint();
+    if (list.length === 0) {
+      if (!confirm('Nenhum agendamento encontrado para os filtros selecionados. Deseja visualizar a folha de relatório mesmo assim?')) {
+        return;
+      }
+    }
+
+    // Identifica filtros para o cabeçalho do documento
+    const dateType = document.getElementById('print-filter-date-type')?.value;
+    const customDate = document.getElementById('print-filter-date-val')?.value;
+    const role = document.getElementById('print-filter-role')?.value;
+    const specialistId = document.getElementById('print-filter-specialist')?.value;
+    const statusFilter = document.getElementById('print-filter-status')?.value;
+    const agentId = document.getElementById('print-filter-agent')?.value;
+
+    let periodLabel = 'Todas as Datas';
+    if (dateType === 'today') periodLabel = `Hoje (${formatDateBR(getTodayString())})`;
+    else if (dateType === 'tomorrow') periodLabel = `Amanhã (${formatDateBR(getTomorrowString())})`;
+    else if (dateType === 'custom' && customDate) periodLabel = formatDateBR(customDate);
+
+    let specialtyLabel = role === 'all' || !role ? 'Todas as Especialidades' : role;
+    let specialistLabel = 'Todos os Especialistas';
+    if (specialistId !== 'all') {
+      const spec = specialistsState.find(s => s.id === specialistId);
+      if (spec) specialistLabel = `${spec.name} (${spec.role})`;
+    }
+
+    let unitLabel = 'Todas as Unidades (Visão Geral)';
+    if (agentId !== 'all') {
+      const ag = allAgentsCache.find(a => a.id === agentId);
+      if (ag) unitLabel = `${ag.name} - ${ag.companyName || 'Empresa'}`;
+    }
+
+    let statusLabel = 'Ativos / Válidos';
+    if (statusFilter === 'confirmed_only') statusLabel = 'Apenas Confirmados & Presença';
+    else if (statusFilter === 'completed') statusLabel = 'Apenas Concluídos';
+    else if (statusFilter === 'cancelled') statusLabel = 'Cancelados / Desistências';
+    else if (statusFilter === 'all') statusLabel = 'Todos os Status';
+
+    const now = new Date();
+    const emitDate = `${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    const emittedBy = currentUser?.name || currentUser?.username || 'Recepção';
+
+    // Monta linhas da tabela
+    let rowsHtml = '';
+    if (list.length === 0) {
+      rowsHtml = `<tr><td colspan="8" style="text-align:center; padding: 25px; color: #6b7280;">Nenhum agendamento registrado para os filtros selecionados.</td></tr>`;
+    } else {
+      list.forEach((apt, idx) => {
+        let statusBadge = 'Confirmado';
+        if (apt.status === 'presence_confirmed') statusBadge = 'Presença D-1 ✅';
+        else if (apt.status === 'waiting') statusBadge = 'Recepção / Espera';
+        else if (apt.status === 'in_progress') statusBadge = 'Em Atendimento';
+        else if (apt.status === 'completed') statusBadge = 'Concluído';
+        else if (apt.status === 'cancelled' || apt.status === 'cancelled_by_patient') statusBadge = 'Cancelado';
+
+        const phoneDisplay = formatPhoneDisplay(apt.clientPhone);
+        const dateFormatted = formatDateBR(apt.date);
+
+        rowsHtml += `
+          <tr>
+            <td style="text-align: center; font-weight: bold; width: 32px;">${idx + 1}</td>
+            <td style="white-space: nowrap; width: 95px;">
+              <div style="font-weight: 700; font-size: 13px; color: #111827;">${apt.startTime || '--:--'}</div>
+              <div style="font-size: 10px; color: #6b7280;">${dateFormatted}</div>
+            </td>
+            <td style="width: 200px;">
+              <div style="font-weight: 600; font-size: 13px; color: #111827;">${apt.clientName || 'Paciente'}</div>
+              ${apt.notes ? `<div style="font-size: 10px; color: #4b5563; font-style: italic;">Obs: ${apt.notes}</div>` : ''}
+            </td>
+            <td style="white-space: nowrap; width: 125px; font-family: monospace; font-size: 12px;">
+              ${phoneDisplay}
+            </td>
+            <td>
+              <div style="font-weight: 500;">${apt.serviceName || 'Consulta'}</div>
+            </td>
+            <td>
+              <div style="font-weight: 600;">${apt.specialistName || 'Profissional'}</div>
+              <div style="font-size: 10px; color: #6b7280;">${apt.specialistRole || 'Especialista'}</div>
+            </td>
+            <td style="text-align: center; white-space: nowrap; width: 95px;">
+              <span style="font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: #f3f4f6; border: 1px solid #d1d5db;">
+                ${statusBadge}
+              </span>
+            </td>
+            <td style="width: 130px; text-align: center;">
+              <div style="border-bottom: 1px dashed #9ca3af; height: 22px; margin-top: 4px;"></div>
+            </td>
+          </tr>
+        `;
+      });
+    }
+
+    const printHtml = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Lista de Agendamentos - ${periodLabel}</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 10mm 12mm 10mm 12mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      color: #1f2937;
+      background: #ffffff;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+    .clinic-info h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+      color: #1e3a8a;
+      letter-spacing: -0.5px;
+      text-transform: uppercase;
+    }
+    .clinic-info p {
+      margin: 2px 0 0 0;
+      font-size: 12px;
+      color: #4b5563;
+      font-weight: 500;
+    }
+    .meta-info {
+      text-align: right;
+      font-size: 10.5px;
+      color: #6b7280;
+    }
+    .meta-info strong {
+      color: #1f2937;
+    }
+    .filters-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 6px 12px;
+      margin-bottom: 12px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      font-size: 11px;
+    }
+    .filter-item strong {
+      display: block;
+      color: #64748b;
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .filter-item span {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    table.report-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 14px;
+    }
+    table.report-table th {
+      background: #1e293b;
+      color: #ffffff;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      padding: 6px 8px;
+      border: 1px solid #1e293b;
+      text-align: left;
+    }
+    table.report-table td {
+      padding: 6px 8px;
+      border: 1px solid #e5e7eb;
+      vertical-align: middle;
+      font-size: 11px;
+    }
+    table.report-table tr:nth-child(even) td {
+      background: #f9fafb;
+    }
+    .report-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 10.5px;
+      color: #6b7280;
+    }
+    .signature-area {
+      text-align: center;
+      width: 250px;
+    }
+    .signature-line {
+      border-bottom: 1px solid #111827;
+      margin-bottom: 4px;
+      height: 30px;
+    }
+    .signature-title {
+      font-size: 10px;
+      color: #4b5563;
+      font-weight: 600;
+    }
+    .no-print-bar {
+      background: #1e293b;
+      color: white;
+      padding: 10px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+    .btn-print {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 4px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    @media print {
+      .no-print-bar {
+        display: none !important;
+      }
+      body {
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print-bar">
+    <span>🖨️ Pré-visualização de Impressão Oficial • Pressione <strong>Imprimir</strong> ou <code>Ctrl+P</code></span>
+    <button class="btn-print" onclick="window.print()">Imprimir / Salvar PDF</button>
+  </div>
+
+  <div style="padding: 14px 16px;">
+    <div class="report-header">
+      <div class="clinic-info">
+        <h1>Relatório Oficial de Agendamentos</h1>
+        <p>Unidade: <strong>${unitLabel}</strong></p>
+      </div>
+      <div class="meta-info">
+        <div>Emissão: <strong>${emitDate}</strong></div>
+        <div>Responsável: <strong>${emittedBy}</strong></div>
+        <div>Total de Pacientes: <strong>${list.length}</strong></div>
+      </div>
+    </div>
+
+    <div class="filters-box">
+      <div class="filter-item">
+        <strong>Período</strong>
+        <span>${periodLabel}</span>
+      </div>
+      <div class="filter-item">
+        <strong>Especialidade</strong>
+        <span>${specialtyLabel}</span>
+      </div>
+      <div class="filter-item">
+        <strong>Profissional</strong>
+        <span>${specialistLabel}</span>
+      </div>
+      <div class="filter-item">
+        <strong>Filtro de Status</strong>
+        <span>${statusLabel}</span>
+      </div>
+    </div>
+
+    <table class="report-table">
+      <thead>
+        <tr>
+          <th style="text-align: center; width: 30px;">#</th>
+          <th style="width: 95px;">Horário</th>
+          <th style="width: 200px;">Paciente</th>
+          <th style="width: 120px;">WhatsApp</th>
+          <th>Procedimento</th>
+          <th>Especialista</th>
+          <th style="text-align: center; width: 95px;">Status</th>
+          <th style="text-align: center; width: 130px;">Visto / Assinatura</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+      </tbody>
+    </table>
+
+    <div class="report-footer">
+      <div>
+        <div><strong>Total de Atendimentos Listados:</strong> ${list.length} paciente(s)</div>
+        <div style="margin-top: 3px; font-size: 9.5px; color: #9ca3af;">Sistema Multiagente de Agendamento Inteligente & IA WhatsApp</div>
+      </div>
+      <div class="signature-area">
+        <div class="signature-line"></div>
+        <div class="signature-title">Visto da Recepção / Coordenação</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        window.print();
+      }, 400);
+    });
+  <\/script>
+</body>
+</html>`;
+
+    const printWin = window.open('', '_blank', 'width=960,height=750');
+    if (!printWin) {
+      showToast('O navegador bloqueou o pop-up de impressão. Permita pop-ups para este site.', 'warning');
+      return;
+    }
+
+    printWin.document.open();
+    printWin.document.write(printHtml);
+    printWin.document.close();
+
+    closePrintModal();
+    showToast('Relatório de impressão gerado com sucesso!', 'success');
+  } catch (err) {
+    showToast(`Erro ao gerar relatório: ${err.message}`, 'error');
+  } finally {
+    if (executeBtn) {
+      executeBtn.disabled = false;
+      executeBtn.textContent = '🖨️ Visualizar & Imprimir (PDF)';
+    }
+  }
+}
+
+// Event Listeners da Impressão de Agendamentos
+document.getElementById('btn-print-appointments')?.addEventListener('click', openPrintModal);
+document.getElementById('btn-close-print-modal')?.addEventListener('click', closePrintModal);
+document.getElementById('btn-cancel-print')?.addEventListener('click', closePrintModal);
+document.getElementById('modal-print-overlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-print-overlay') closePrintModal();
+});
+
+document.getElementById('print-filter-date-type')?.addEventListener('change', (e) => {
+  const wrap = document.getElementById('print-custom-date-wrap');
+  if (wrap) wrap.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  updatePrintPreviewCount();
+});
+
+document.getElementById('print-filter-date-val')?.addEventListener('change', updatePrintPreviewCount);
+
+document.getElementById('print-filter-role')?.addEventListener('change', () => {
+  populatePrintSpecialistsDropdown();
+  updatePrintPreviewCount();
+});
+
+document.getElementById('print-filter-specialist')?.addEventListener('change', updatePrintPreviewCount);
+document.getElementById('print-filter-status')?.addEventListener('change', updatePrintPreviewCount);
+document.getElementById('print-filter-agent')?.addEventListener('change', updatePrintPreviewCount);
+
+document.getElementById('btn-execute-print')?.addEventListener('click', generateAndPrintReport);
 
 

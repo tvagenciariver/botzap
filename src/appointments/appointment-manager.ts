@@ -276,6 +276,12 @@ export class AppointmentManager {
     // Calcula horário de término
     const endTime = this.addMinutesToTime(data.startTime, duration);
 
+    // Sanitiza o telefone do cliente para nunca exibir @lid ou jids internos
+    let cleanClientPhone = (data.clientPhone || '').trim();
+    if (cleanClientPhone.includes('@lid') || cleanClientPhone.includes('@c.us') || cleanClientPhone.includes('@s.whatsapp.net')) {
+      cleanClientPhone = cleanClientPhone.replace(/@.*$/, '');
+    }
+
     const newApt: Appointment = {
       id: 'apt_' + Math.random().toString(36).substring(2, 9),
       agentId: data.agentId,
@@ -285,7 +291,7 @@ export class AppointmentManager {
       serviceId: data.serviceId,
       serviceName,
       clientChatId: data.clientChatId,
-      clientPhone: data.clientPhone,
+      clientPhone: cleanClientPhone,
       clientName: data.clientName.trim(),
       date: data.date,
       startTime: data.startTime,

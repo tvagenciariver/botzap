@@ -4,12 +4,13 @@ import { notificationService } from '../../appointments/notification-service.js'
 import { Specialist, ServiceItem, Appointment } from '../../appointments/types.js';
 
 interface BookingSessionState {
-  step: 'select_specialist' | 'select_service' | 'select_date' | 'select_slot' | 'confirm_name' | 'confirm_cancellation';
+  step: 'select_specialist' | 'select_service' | 'select_date' | 'select_slot' | 'confirm_name' | 'confirm_phone' | 'confirm_cancellation';
   specialistId?: string;
   serviceId?: string;
   dateStr?: string;
   slot?: string;
   clientName?: string;
+  clientPhone?: string;
   cancellationAptId?: string;
   offeredDates?: { label: string; date: string }[];
   offeredSlots?: string[];
@@ -239,7 +240,10 @@ export class BookingAgent implements IAgent {
         return this.handleSelectSlotStep(chatId, session, text, context.contactName);
 
       case 'confirm_name':
-        return this.handleConfirmNameStep(chatId, session, text, agentId, companyName);
+        return this.handleConfirmNameStep(chatId, session, text);
+
+      case 'confirm_phone':
+        return this.handleConfirmPhoneStep(chatId, session, text, agentId, companyName);
 
       default:
         this.clearSession(chatId);
@@ -620,19 +624,16 @@ export class BookingAgent implements IAgent {
   }
 
   /**
-   * Tratamento da confirmação de nome e persistência final
+   * Tratamento da confirmação de nome do paciente
    */
-  private async handleConfirmNameStep(
+  private handleConfirmNameStep(
     chatId: string,
     session: BookingSessionState,
-    text: string,
-    agentId: string,
-    companyName: string
-  ): Promise<AgentResponse> {
+    text: string
+  ): AgentResponse {
     let clientName = text.trim();
 
     if (clientName === '1' || clientName.toLowerCase() === 'sim') {
-      // Nome do próprio WhatsApp se válido
       clientName = 'Paciente WhatsApp';
     }
 
@@ -640,31 +641,69 @@ export class BookingAgent implements IAgent {
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Por favor, informe o nome completo do paciente para concluirmos seu agendamento:`
+        replyText: `Por favor, informe o *Nome Completo do Paciente* para continuarmos:`
       };
     }
 
-    const { specialistId, serviceId, dateStr, slot } = session;
+    // Salva o nome e avança para solicitar o WhatsApp de contato do paciente
+    this.setSession(chatId, {
+      step: 'confirm_phone',
+      clientName
+    });
 
-    if (!specialistId || !dateStr || !slot) {
+    return {
+      handled: true,
+      agentName: this.name,
+      replyText: `Muito bem, *${clientName}*! 👍\n\nAgora, por favor, digite o seu *número de WhatsApp com DDD* (ex: *11999998888* ou *(11) 99999-8888*):\n\n_Usaremos este número para enviar o comprovante do agendamento e o lembrete de presença na véspera._`
+    };
+  }
+
+  /**
+   * Tratamento da confirmação do telefone/WhatsApp e persistência final
+   */
+  private async handleConfirmPhoneStep(
+    chatId: string,
+    session: BookingSessionState,
+    text: string,
+    agentId: string,
+    companyName: string
+  ): Promise<AgentResponse> {
+    const rawInput = text.trim();
+    const digits = rawInput.replace(/\D/g, '');
+
+    if (digits.length < 8) {
+      return {
+        handled: true,
+        agentName: this.name,
+        replyText: `Por favor, digite um número de WhatsApp válido com DDD (ex: *11999998888*):`
+      };
+    }
+
+    let cleanPhone = digits;
+    // Se digitou celular brasileiro padrão (10 ou 11 dígitos, ex: 11999998888), acrescenta 55
+    if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) {
+      cleanPhone = `55${digits}`;
+    }
+
+    const { specialistId, serviceId, dateStr, slot, clientName } = session;
+
+    if (!specialistId || !dateStr || !slot || !clientName) {
       this.clearSession(chatId);
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Ocorreu um erro com os dados da sessão. Digite *agendar* para tentar novamente.`
+        replyText: `Ocorreu um erro com os dados da sessão. Digite *agendar* para recomeçar.`
       };
     }
 
     // Cria o agendamento com validação anti-colisão
     try {
-      const clientPhone = chatId.replace('@c.us', '').replace('@s.whatsapp.net', '');
-
       const appointment = appointmentManager.createAppointment({
         agentId,
         specialistId,
         serviceId,
         clientChatId: chatId,
-        clientPhone,
+        clientPhone: cleanPhone,
         clientName,
         date: dateStr,
         startTime: slot,
@@ -679,10 +718,13 @@ export class BookingAgent implements IAgent {
         console.error('[BookingAgent] Falha ao notificar especialista assincronamente:', err);
       });
 
+      const formattedPhone = this.formatDisplayPhone(cleanPhone);
+
       const responseText = `🎉 *AGENDAMENTO CONFIRMADO COM SUCESSO!*\n\n` +
         `🏢 *${companyName}*\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `👤 *Paciente:* ${appointment.clientName}\n` +
+        `📱 *WhatsApp:* ${formattedPhone}\n` +
         `👨‍⚕️ *Especialista:* ${appointment.specialistName} (${appointment.specialistRole})\n` +
         `🩺 *Procedimento:* ${appointment.serviceName}\n` +
         `📅 *Data:* ${notificationService.formatDateBR(appointment.date)}\n` +
@@ -707,6 +749,23 @@ export class BookingAgent implements IAgent {
         replyText: `Desculpe, esse horário foi reservado por outra pessoa há poucos instantes ou está indisponível.\n\nPor favor, digite *agendar* para escolher um novo horário.`
       };
     }
+  }
+
+  private formatDisplayPhone(phone: string): string {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 13 && digits.startsWith('55')) {
+      const ddd = digits.substring(2, 4);
+      const part1 = digits.substring(4, 9);
+      const part2 = digits.substring(9, 13);
+      return `+55 (${ddd}) ${part1}-${part2}`;
+    }
+    if (digits.length === 11) {
+      const ddd = digits.substring(0, 2);
+      const part1 = digits.substring(2, 7);
+      const part2 = digits.substring(7, 11);
+      return `(${ddd}) ${part1}-${part2}`;
+    }
+    return phone;
   }
 
   /**

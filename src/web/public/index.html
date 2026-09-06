@@ -176,6 +176,9 @@
             </div>
           </div>
           <div class="tab-header-actions">
+            <button class="btn btn-outline" id="btn-print-appointments" title="Imprimir lista e ficha de agendamentos com filtros por especialidade e médico">
+              🖨️ Imprimir Lista
+            </button>
             <button class="btn btn-outline" id="btn-trigger-reminders" title="Enviar lembrete D-1 pelo WhatsApp para quem tem consulta amanhã">
               🔔 Disparar Lembretes D-1
             </button>
@@ -1599,6 +1602,89 @@
           <button type="submit" class="btn btn-primary btn-glow" id="btn-save-user">💾 Salvar Membro</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Imprimir Lista de Agendamentos -->
+  <div id="modal-print-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🖨️</span>
+          <div>
+            <h3>Imprimir Lista de Agendamentos</h3>
+            <p>Selecione os critérios para gerar o relatório impresso oficial ou salvar em PDF.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-print-modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="print-filter-date-type">Data / Período</label>
+            <select id="print-filter-date-type" class="form-control">
+              <option value="today" selected>📅 Consultas de Hoje</option>
+              <option value="tomorrow">📅 Consultas de Amanhã</option>
+              <option value="custom">📅 Data Específica...</option>
+              <option value="all">🌐 Todos os Agendamentos</option>
+            </select>
+          </div>
+          <div class="form-group col-6" id="print-custom-date-wrap" style="display: none;">
+            <label for="print-filter-date-val">Escolha a Data</label>
+            <input type="date" id="print-filter-date-val" class="form-control">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="print-filter-role">Filtrar por Especialidade</label>
+            <select id="print-filter-role" class="form-control">
+              <option value="all" selected>🩺 Todas as Especialidades</option>
+            </select>
+          </div>
+          <div class="form-group col-6">
+            <label for="print-filter-specialist">Profissional / Especialista</label>
+            <select id="print-filter-specialist" class="form-control">
+              <option value="all" selected>👨‍⚕️ Todos os Especialistas</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="print-filter-status">Status das Consultas</label>
+            <select id="print-filter-status" class="form-control">
+              <option value="active" selected>✅ Válidos (Confirmados, Presença D-1, Espera, Em Atendimento)</option>
+              <option value="confirmed_only">🔵 Apenas Confirmados & Presença D-1</option>
+              <option value="completed">🟣 Apenas Concluídos</option>
+              <option value="cancelled">❌ Cancelados / Desistências</option>
+              <option value="all">📋 Todos os Status</option>
+            </select>
+          </div>
+          <div class="form-group col-6">
+            <label for="print-filter-agent">Unidade / Cliente</label>
+            <select id="print-filter-agent" class="form-control">
+              <option value="all" selected>🌐 Todas as Unidades (Visão Geral)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="card card-inner p-3 mt-2" style="background: rgba(59, 130, 246, 0.05); border: 1px dashed var(--primary);">
+          <div class="d-flex justify-between align-center">
+            <div>
+              <strong id="print-preview-count">0 pacientes selecionados</strong>
+              <div style="font-size: 12px; color: var(--text-muted);">Relatório diagramado e otimizado para papel A4 com cabeçalho, dados de contato e visto médico.</div>
+            </div>
+            <span style="font-size: 28px;">📄</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="btn-cancel-print">Cancelar</button>
+        <button type="button" class="btn btn-primary btn-glow" id="btn-execute-print">🖨️ Visualizar & Imprimir (PDF)</button>
+      </div>
     </div>
   </div>
 
