@@ -104,9 +104,9 @@ apiRouter.get('/api/auth/me', (req: Request, res: Response) => {
 });
 
 /**
- * 1. Webhook principal da WAHA
+ * 1. Webhook principal da WAHA (universal para todos os clientes ou com sessão na URL)
  */
-apiRouter.post('/webhook/waha', async (req: Request, res: Response) => {
+apiRouter.post(['/webhook/waha', '/webhook/waha/:session'], async (req: Request, res: Response) => {
   const event: WahaWebhookEvent = req.body;
 
   // Responde imediatamente à WAHA com status 200
@@ -116,13 +116,18 @@ apiRouter.post('/webhook/waha', async (req: Request, res: Response) => {
   try {
     if (event.event === 'message' || event.event === 'message.any') {
       if (event.payload) {
-        await orchestrator.processIncomingWahaMessage(event.payload, event.session || env.wahaSession);
+        const sessionName = req.params.session
+          || (req.query.session as string)
+          || event.session
+          || (event.payload as any)?.session
+          || (event.payload as any)?._data?.session
+          || env.wahaSession;
+
+        await orchestrator.processIncomingWahaMessage(event.payload, sessionName);
       }
-    } else {
-      console.log(`[WAHA Webhook] Evento ignorado: ${event.event}`);
     }
-  } catch (error: any) {
-    console.error('[WAHA Webhook] Erro ao processar webhook:', error.message);
+  } catch (err: any) {
+    console.error('[WAHA Webhook] Erro ao processar:', err.message);
   }
 });
 
