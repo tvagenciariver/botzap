@@ -104,7 +104,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 
     const titles = {
       simulator: 'Simulador de Atendimento (WhatsApp)',
-      prompts: 'Configuração do Agente & Prompts',
+      agents: 'Gerenciador de Agentes & Clientes (Multi-Agentes)',
+      prompts: 'Configuração Geral & Agente Padrão',
       schedule: 'Horário Comercial & Mensagem de Ausência',
       chats: 'Conversas Ativas & Pausa do Bot',
       logs: 'Logs em Tempo Real do Orquestrador',
@@ -113,6 +114,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     document.getElementById('page-title').textContent = titles[targetTab] || 'BotZap';
 
     if (getAuthToken()) {
+      if (targetTab === 'simulator') loadAgentsForSimulator();
+      if (targetTab === 'agents') loadAgents();
       if (targetTab === 'chats') loadChats();
       if (targetTab === 'logs') loadLogs();
       if (targetTab === 'prompts') loadConfig();
@@ -286,7 +289,8 @@ chatForm?.addEventListener('submit', async (e) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chatId: currentChatId,
-        message: text
+        message: text,
+        agentId: document.getElementById('sim-agent-select')?.value || undefined
       })
     });
 
@@ -1123,6 +1127,529 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
   }
 });
 
+// ==========================================================================
+// 3.2 Gerenciamento de Agentes & Clientes (Multi-Agentes)
+// ==========================================================================
+let allAgents = [];
+
+async function loadAgents() {
+  if (!getAuthToken()) return;
+  try {
+    const res = await fetchWithAuth('/api/agents');
+    const data = await res.json();
+    allAgents = data.agents || [];
+
+    const badgeTotal = document.getElementById('badge-total-agents');
+    if (badgeTotal) {
+      badgeTotal.textContent = `${allAgents.length} ${allAgents.length === 1 ? 'Agente cadastrado' : 'Agentes cadastrados'}`;
+    }
+
+    renderAgentsGrid(allAgents);
+    populateSimulatorAgentSelect(allAgents);
+  } catch (err) {
+    console.error('Erro ao carregar agentes:', err);
+    showToast(`Erro ao carregar agentes: ${err.message}`, 'error');
+  }
+}
+
+function renderAgentsGrid(agents) {
+  const grid = document.getElementById('agents-grid');
+  if (!grid) return;
+
+  if (!agents || agents.length === 0) {
+    grid.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 50px 20px; background: var(--bg-card); border-radius: 14px; border: 1px dashed var(--border);">
+        <div style="font-size: 40px; margin-bottom: 12px;">🤖</div>
+        <h3 style="margin-bottom: 8px; color: var(--text-main);">Nenhum agente encontrado</h3>
+        <p style="color: var(--text-muted); margin-bottom: 20px;">Crie seu primeiro agente para personalizar o atendimento de um cliente.</p>
+        <button class="btn btn-primary" onclick="openNewAgentModal()">➕ Criar Primeiro Agente</button>
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = agents.map(agent => {
+    const isDefault = agent.isDefault;
+    const isActive = agent.active;
+    const provider = agent.llmProvider || 'openai';
+    const model = provider === 'openai' ? (agent.openaiModel || 'gpt-4o-mini') : (agent.model || 'gemini-flash-lite');
+    const sessionLabel = agent.wahaSession ? (agent.wahaSession === '*' ? 'Todas (*)' : agent.wahaSession) : 'Não vinculada';
+    const hasSchedule = !!agent.businessHours?.enabled;
+
+    return `
+      <div class="agent-card ${isActive ? '' : 'inactive'}" id="agent-card-${agent.id}">
+        <div>
+          <div class="agent-card-header">
+            <div class="agent-card-title-group">
+              <div class="agent-card-avatar">${provider === 'openai' ? '🟢' : '🔵'}</div>
+              <div>
+                <h3 class="agent-card-name">${escapeHtml(agent.name)}</h3>
+                <div class="agent-card-company">🏢 ${escapeHtml(agent.companyName)}</div>
+              </div>
+            </div>
+            <div>
+              ${isDefault ? '<span class="agent-badge-item agent-badge-default">⭐ Padrão</span>' : ''}
+              ${isActive ? '<span class="badge text-green" style="font-size: 11px;">Ativo</span>' : '<span class="badge text-muted" style="font-size: 11px;">Pausado</span>'}
+            </div>
+          </div>
+
+          <div class="agent-card-badges">
+            <span class="agent-badge-item">📱 Sessão: <strong>${escapeHtml(sessionLabel)}</strong></span>
+            <span class="agent-badge-item ${provider === 'openai' ? 'agent-badge-provider-openai' : 'agent-badge-provider-gemini'}">
+              🧠 ${provider === 'openai' ? 'OpenAI ' : 'Gemini '} ${escapeHtml(model)}
+            </span>
+            <span class="agent-badge-item">
+              🕒 ${hasSchedule ? 'Expediente Ativo' : 'Atendimento 24/7'}
+            </span>
+          </div>
+
+          <div class="agent-card-desc">
+            ${escapeHtml(agent.description || agent.systemInstruction || 'Sem observações.')}
+          </div>
+        </div>
+
+        <div class="agent-card-actions">
+          <button class="btn btn-outline btn-sm" onclick="openEditAgentModal('${agent.id}')" title="Editar Agente">
+            ✏️ Editar
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="switchToSimulatorWithAgent('${agent.id}')" title="Testar no Simulador">
+            💬 Testar
+          </button>
+          <button class="btn btn-outline btn-sm" onclick="duplicateAgent('${agent.id}')" title="Duplicar">
+            📋 Copiar
+          </button>
+          ${!isDefault ? `
+            <button class="btn btn-outline btn-sm text-red" onclick="deleteAgent('${agent.id}', '${escapeHtml(agent.name)}')" title="Excluir">
+              🗑️
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// Filtro de busca na lista de agentes
+document.getElementById('agents-search-input')?.addEventListener('input', (e) => {
+  const query = e.target.value.toLowerCase().trim();
+  if (!query) {
+    renderAgentsGrid(allAgents);
+    return;
+  }
+  const filtered = allAgents.filter(a =>
+    a.name.toLowerCase().includes(query) ||
+    a.companyName.toLowerCase().includes(query) ||
+    (a.wahaSession && a.wahaSession.toLowerCase().includes(query)) ||
+    (a.llmProvider && a.llmProvider.toLowerCase().includes(query)) ||
+    (a.description && a.description.toLowerCase().includes(query))
+  );
+  renderAgentsGrid(filtered);
+});
+
+// Popula o seletor de agentes do Simulador
+function populateSimulatorAgentSelect(agents) {
+  const select = document.getElementById('sim-agent-select');
+  if (!select) return;
+
+  const currentVal = select.value;
+  select.innerHTML = agents.map(a => `
+    <option value="${a.id}">
+      ${escapeHtml(a.name)} (${escapeHtml(a.companyName)})${a.isDefault ? ' [Padrão]' : ''}
+    </option>
+  `).join('');
+
+  if (currentVal && agents.some(a => a.id === currentVal)) {
+    select.value = currentVal;
+  } else if (agents.length > 0) {
+    const def = agents.find(a => a.isDefault) || agents[0];
+    select.value = def.id;
+  }
+
+  updateSimulatorHeaderForSelectedAgent();
+}
+
+function updateSimulatorHeaderForSelectedAgent() {
+  const select = document.getElementById('sim-agent-select');
+  if (!select || !select.value) return;
+
+  const agent = allAgents.find(a => a.id === select.value);
+  if (agent) {
+    const botNameEl = document.getElementById('sim-bot-name');
+    const badgeEl = document.getElementById('sim-agent-badge');
+    if (botNameEl) botNameEl.textContent = agent.name;
+    if (badgeEl) {
+      const prov = agent.llmProvider === 'openai' ? 'OpenAI' : 'Gemini';
+      const model = agent.llmProvider === 'openai' ? (agent.openaiModel || 'gpt-4o-mini') : (agent.model || 'flash');
+      badgeEl.textContent = `${agent.companyName} • ${prov} (${model})`;
+    }
+  }
+}
+
+document.getElementById('sim-agent-select')?.addEventListener('change', () => {
+  updateSimulatorHeaderForSelectedAgent();
+  currentChatId = 'simulador_' + Math.random().toString(36).substring(2, 7) + '@c.us';
+  const chatMessages = document.getElementById('chat-messages');
+  if (chatMessages) {
+    const select = document.getElementById('sim-agent-select');
+    const agent = allAgents.find(a => a.id === select?.value);
+    chatMessages.innerHTML = '';
+    appendMessage(`Simulador alternado para o agente <strong>${agent ? agent.name : ''}</strong> (${agent ? agent.companyName : ''}). Olá! Como posso ajudar você hoje? 👋`, false);
+  }
+});
+
+function switchToSimulatorWithAgent(agentId) {
+  const simNavBtn = document.querySelector('.nav-btn[data-tab="simulator"]');
+  if (simNavBtn) simNavBtn.click();
+
+  const select = document.getElementById('sim-agent-select');
+  if (select) {
+    select.value = agentId;
+    select.dispatchEvent(new Event('change'));
+  }
+}
+
+async function loadAgentsForSimulator() {
+  if (allAgents.length === 0) {
+    await loadAgents();
+  } else {
+    populateSimulatorAgentSelect(allAgents);
+  }
+}
+
+// ==========================================================================
+// MODAL DE AGENTE (CRIAÇÃO / EDIÇÃO)
+// ==========================================================================
+
+// Alternância de abas internas do modal
+document.querySelectorAll('.modal-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.modal-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.modal-tab-pane').forEach(p => p.classList.remove('active'));
+
+    btn.classList.add('active');
+    const tabName = btn.getAttribute('data-modaltab');
+    const targetPane = document.getElementById(`modal-pane-${tabName}`);
+    if (targetPane) targetPane.classList.add('active');
+  });
+});
+
+// Alternância visual de OpenAI / Gemini no modal
+function setModalLLMProviderUI(provider) {
+  const openaiBox = document.getElementById('modal-openai-box');
+  const geminiBox = document.getElementById('modal-gemini-box');
+  if (provider === 'openai') {
+    if (openaiBox) openaiBox.style.display = 'block';
+    if (geminiBox) geminiBox.style.display = 'none';
+  } else {
+    if (openaiBox) openaiBox.style.display = 'none';
+    if (geminiBox) geminiBox.style.display = 'block';
+  }
+}
+
+document.getElementById('modal-agent-llmProvider')?.addEventListener('change', (e) => {
+  setModalLLMProviderUI(e.target.value);
+});
+
+// Renderização da tabela de horários dentro do modal
+function renderModalScheduleTable(schedule = {}) {
+  const tbody = document.getElementById('modal-schedule-tbody');
+  if (!tbody) return;
+
+  tbody.innerHTML = SCHEDULE_DAYS.map(day => {
+    const d = schedule[day.key] || {
+      enabled: day.key !== 'sunday',
+      start: '08:00',
+      end: day.key === 'saturday' ? '12:00' : '18:00',
+      hasLunch: day.key !== 'saturday' && day.key !== 'sunday',
+      lunchStart: '12:00',
+      lunchEnd: '13:00'
+    };
+
+    const isDayDisabled = !d.enabled;
+    const isLunchDisabled = !d.hasLunch;
+
+    return `
+      <tr class="${isDayDisabled ? 'schedule-row-disabled' : ''}" id="modal-sched-row-${day.key}">
+        <td><strong>${day.label}</strong></td>
+        <td>
+          <label class="mini-switch">
+            <input type="checkbox" class="modal-day-enabled" data-day="${day.key}" ${d.enabled ? 'checked' : ''}>
+            <span class="mini-slider"></span>
+          </label>
+        </td>
+        <td>
+          <div class="time-range-box">
+            <input type="time" class="time-input modal-day-start" data-day="${day.key}" value="${d.start || '08:00'}">
+            <span class="time-sep">até</span>
+            <input type="time" class="time-input modal-day-end" data-day="${day.key}" value="${d.end || '18:00'}">
+          </div>
+        </td>
+        <td>
+          <label class="mini-switch">
+            <input type="checkbox" class="modal-day-lunch" data-day="${day.key}" ${d.hasLunch ? 'checked' : ''}>
+            <span class="mini-slider"></span>
+          </label>
+        </td>
+        <td class="${isLunchDisabled ? 'lunch-disabled-cell' : ''}" id="modal-lunch-inputs-${day.key}">
+          <div class="time-range-box">
+            <input type="time" class="time-input modal-lunch-start" data-day="${day.key}" value="${d.lunchStart || '12:00'}">
+            <span class="time-sep">até</span>
+            <input type="time" class="time-input modal-lunch-end" data-day="${day.key}" value="${d.lunchEnd || '13:00'}">
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('.modal-day-enabled').forEach(toggle => {
+    toggle.addEventListener('change', (e) => {
+      const dayKey = e.target.getAttribute('data-day');
+      const row = document.getElementById(`modal-sched-row-${dayKey}`);
+      if (row) {
+        if (e.target.checked) row.classList.remove('schedule-row-disabled');
+        else row.classList.add('schedule-row-disabled');
+      }
+    });
+  });
+
+  tbody.querySelectorAll('.modal-day-lunch').forEach(toggle => {
+    toggle.addEventListener('change', (e) => {
+      const dayKey = e.target.getAttribute('data-day');
+      const cell = document.getElementById(`modal-lunch-inputs-${dayKey}`);
+      if (cell) {
+        if (e.target.checked) cell.classList.remove('lunch-disabled-cell');
+        else cell.classList.add('lunch-disabled-cell');
+      }
+    });
+  });
+}
+
+function openNewAgentModal() {
+  document.getElementById('modal-agent-id').value = '';
+  document.getElementById('agent-modal-title').textContent = '➕ Criar Novo Agente / Cliente';
+  document.getElementById('agent-modal-subtitle').textContent = 'Defina os dados, IA e horários exclusivos deste cliente.';
+
+  // Default values
+  document.getElementById('modal-agent-name').value = '';
+  document.getElementById('modal-agent-company').value = '';
+  document.getElementById('modal-agent-session').value = '';
+  document.getElementById('modal-agent-description').value = '';
+  document.getElementById('modal-agent-active').checked = true;
+  document.getElementById('modal-agent-isDefault').checked = false;
+
+  document.getElementById('modal-agent-llmProvider').value = 'openai';
+  setModalLLMProviderUI('openai');
+
+  document.getElementById('modal-agent-openaiApiKey').value = '';
+  document.getElementById('modal-agent-openaiModel').value = 'gpt-4o-mini';
+  document.getElementById('modal-agent-geminiApiKey').value = '';
+  document.getElementById('modal-agent-model').value = 'gemini-flash-lite-latest';
+  document.getElementById('modal-agent-temperature').value = 0.4;
+
+  document.getElementById('modal-agent-systemInstruction').value =
+    'Você é o assistente virtual da {companyName} no WhatsApp.\nSeja atencioso, cortês, humanizado e conciso. Responda às dúvidas com clareza.';
+  document.getElementById('modal-agent-businessInfo').value = '';
+
+  document.getElementById('modal-agent-handoffKeywords').value = 'atendente, humano, falar com pessoa, suporte';
+  document.getElementById('modal-agent-handoffMessage').value = 'Entendido! Estou transferindo seu atendimento para nossa equipe humana.';
+  document.getElementById('modal-agent-pauseHours').value = 6;
+  document.getElementById('modal-agent-debounce').value = 2.5;
+  document.getElementById('modal-agent-typing').checked = true;
+  document.getElementById('modal-agent-seen').checked = true;
+
+  document.getElementById('modal-sched-enabled').checked = false;
+  document.getElementById('modal-sched-outOfHoursMessage').value =
+    'Olá! Nosso horário de atendimento encerrou. Deixe sua dúvida que responderemos assim que retornarmos! 🕒';
+
+  renderModalScheduleTable({});
+
+  // Reset to first tab
+  document.querySelector('.modal-tab-btn[data-modaltab="general"]')?.click();
+  document.getElementById('agent-modal-overlay').style.display = 'flex';
+}
+
+async function openEditAgentModal(agentId) {
+  try {
+    const res = await fetchWithAuth(`/api/agents/${agentId}`);
+    const data = await res.json();
+    const agent = data.agent;
+    if (!agent) throw new Error('Agente não encontrado.');
+
+    document.getElementById('modal-agent-id').value = agent.id;
+    document.getElementById('agent-modal-title').textContent = `✏️ Editar Agente: ${agent.name}`;
+    document.getElementById('agent-modal-subtitle').textContent = `Empresa: ${agent.companyName} | ID: ${agent.id}`;
+
+    document.getElementById('modal-agent-name').value = agent.name || '';
+    document.getElementById('modal-agent-company').value = agent.companyName || '';
+    document.getElementById('modal-agent-session').value = agent.wahaSession || '';
+    document.getElementById('modal-agent-description').value = agent.description || '';
+    document.getElementById('modal-agent-active').checked = agent.active !== false;
+    document.getElementById('modal-agent-isDefault').checked = !!agent.isDefault;
+
+    const prov = agent.llmProvider || 'openai';
+    document.getElementById('modal-agent-llmProvider').value = prov;
+    setModalLLMProviderUI(prov);
+
+    document.getElementById('modal-agent-openaiApiKey').value = agent.openaiApiKey || '';
+    document.getElementById('modal-agent-openaiModel').value = agent.openaiModel || 'gpt-4o-mini';
+    document.getElementById('modal-agent-geminiApiKey').value = agent.geminiApiKey || '';
+    document.getElementById('modal-agent-model').value = agent.model || 'gemini-flash-lite-latest';
+    document.getElementById('modal-agent-temperature').value = agent.temperature ?? 0.4;
+
+    document.getElementById('modal-agent-systemInstruction').value = agent.systemInstruction || '';
+    document.getElementById('modal-agent-businessInfo').value = agent.businessInfo || '';
+
+    document.getElementById('modal-agent-handoffKeywords').value = Array.isArray(agent.handoffKeywords) ? agent.handoffKeywords.join(', ') : (agent.handoffKeywords || '');
+    document.getElementById('modal-agent-handoffMessage').value = agent.handoffMessage || '';
+    document.getElementById('modal-agent-pauseHours').value = agent.pauseDurationHours || (agent.pauseDurationMinutes ? (agent.pauseDurationMinutes / 60) : 6);
+    document.getElementById('modal-agent-debounce').value = agent.debounceSeconds ?? 2.5;
+    document.getElementById('modal-agent-typing').checked = agent.enableTypingSimulation !== false;
+    document.getElementById('modal-agent-seen').checked = agent.enableSendSeen !== false;
+
+    const bh = agent.businessHours || {};
+    document.getElementById('modal-sched-enabled').checked = !!bh.enabled;
+    document.getElementById('modal-sched-outOfHoursMessage').value = bh.outOfHoursMessage || '';
+
+    renderModalScheduleTable(bh.schedule || {});
+
+    document.querySelector('.modal-tab-btn[data-modaltab="general"]')?.click();
+    document.getElementById('agent-modal-overlay').style.display = 'flex';
+  } catch (err) {
+    showToast(`Erro ao carregar agente: ${err.message}`, 'error');
+  }
+}
+
+function closeAgentModal() {
+  const overlay = document.getElementById('agent-modal-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+document.getElementById('btn-create-agent')?.addEventListener('click', openNewAgentModal);
+document.getElementById('btn-close-agent-modal')?.addEventListener('click', closeAgentModal);
+document.getElementById('btn-cancel-agent-modal')?.addEventListener('click', closeAgentModal);
+
+// Salvar Agente no Modal
+document.getElementById('agent-modal-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('modal-agent-id').value.trim();
+  const saveBtn = document.getElementById('btn-save-agent-modal');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Salvando...';
+  }
+
+  try {
+    // Coleta dias da semana
+    const schedule = {};
+    for (const day of SCHEDULE_DAYS) {
+      const row = document.getElementById(`modal-sched-row-${day.key}`);
+      const enabled = row?.querySelector('.modal-day-enabled')?.checked ?? true;
+      const start = row?.querySelector('.modal-day-start')?.value || '08:00';
+      const end = row?.querySelector('.modal-day-end')?.value || '18:00';
+      const hasLunch = row?.querySelector('.modal-day-lunch')?.checked ?? false;
+      const lunchStart = row?.querySelector('.modal-lunch-start')?.value || '12:00';
+      const lunchEnd = row?.querySelector('.modal-lunch-end')?.value || '13:00';
+
+      schedule[day.key] = { enabled, start, end, hasLunch, lunchStart, lunchEnd };
+    }
+
+    const keywordsRaw = document.getElementById('modal-agent-handoffKeywords').value;
+    const keywords = keywordsRaw.split(',').map(k => k.trim()).filter(k => k.length > 0);
+
+    const payload = {
+      name: document.getElementById('modal-agent-name').value.trim(),
+      companyName: document.getElementById('modal-agent-company').value.trim(),
+      wahaSession: document.getElementById('modal-agent-session').value.trim() || '*',
+      description: document.getElementById('modal-agent-description').value.trim(),
+      active: document.getElementById('modal-agent-active').checked,
+      isDefault: document.getElementById('modal-agent-isDefault').checked,
+      llmProvider: document.getElementById('modal-agent-llmProvider').value,
+      openaiApiKey: document.getElementById('modal-agent-openaiApiKey').value.trim(),
+      openaiModel: document.getElementById('modal-agent-openaiModel').value,
+      geminiApiKey: document.getElementById('modal-agent-geminiApiKey').value.trim(),
+      model: document.getElementById('modal-agent-model').value,
+      temperature: parseFloat(document.getElementById('modal-agent-temperature').value) || 0.4,
+      systemInstruction: document.getElementById('modal-agent-systemInstruction').value.trim(),
+      businessInfo: document.getElementById('modal-agent-businessInfo').value.trim(),
+      handoffKeywords: keywords,
+      handoffMessage: document.getElementById('modal-agent-handoffMessage').value.trim(),
+      pauseDurationHours: parseFloat(document.getElementById('modal-agent-pauseHours').value) || 6,
+      debounceSeconds: parseFloat(document.getElementById('modal-agent-debounce').value) || 2.5,
+      enableTypingSimulation: document.getElementById('modal-agent-typing').checked,
+      enableSendSeen: document.getElementById('modal-agent-seen').checked,
+      businessHours: {
+        enabled: document.getElementById('modal-sched-enabled').checked,
+        outOfHoursMessage: document.getElementById('modal-sched-outOfHoursMessage').value.trim(),
+        schedule
+      }
+    };
+
+    const url = id ? `/api/agents/${id}` : '/api/agents';
+    const method = id ? 'PUT' : 'POST';
+
+    const res = await fetchWithAuth(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao salvar agente.');
+    }
+
+    showToast(id ? 'Agente atualizado com sucesso!' : 'Novo agente criado com sucesso!', 'success');
+    closeAgentModal();
+    await loadAgents();
+    checkStatus();
+  } catch (err) {
+    showToast(`Erro ao salvar: ${err.message}`, 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Salvar Agente';
+    }
+  }
+});
+
+async function duplicateAgent(id) {
+  try {
+    const res = await fetchWithAuth(`/api/agents/${id}/duplicate`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao duplicar.');
+    showToast(`Agente duplicado com sucesso: "${data.agent?.name}"`, 'success');
+    await loadAgents();
+  } catch (err) {
+    showToast(`Erro ao duplicar agente: ${err.message}`, 'error');
+  }
+}
+
+async function deleteAgent(id, name) {
+  if (!confirm(`Tem certeza que deseja excluir o agente "${name}"?\nEsta ação não poderá ser desfeita.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetchWithAuth(`/api/agents/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao excluir.');
+    showToast(`Agente "${name}" excluído com sucesso.`, 'success');
+    await loadAgents();
+  } catch (err) {
+    showToast(`Erro ao excluir agente: ${err.message}`, 'error');
+  }
+}
+
 document.getElementById('btn-logout')?.addEventListener('click', async () => {
   try {
     await fetchWithAuth('/api/auth/logout', { method: 'POST' });
@@ -1150,6 +1677,8 @@ async function initApp() {
       loadConfig();
       loadSchedule();
       loadWahaConfig();
+      loadAgents();
+      loadAgentsForSimulator();
     } else {
       clearAuthToken();
       showLoginModal();

@@ -7,6 +7,7 @@ import { botTracker } from './bot-tracker.js';
 import { memoryStore } from '../gemini/memory.js';
 import { wahaClient } from '../waha/client.js';
 import { loadBotConfig, env } from '../config/index.js';
+import { agentManager } from '../config/agent-manager.js';
 import { WahaMessagePayload } from '../waha/types.js';
 
 export interface LogEntry {
@@ -115,6 +116,13 @@ export class AgentOrchestrator {
       return;
     }
 
+    // Resolve o perfil do agente correspondente a esta sessão da WAHA
+    const agent = agentManager.getAgentBySession(sessionName);
+    if (!agent || !agent.active) {
+      console.log(`[Orchestrator] Sessão "${sessionName}" sem agente ativo associado. Ignorando.`);
+      return;
+    }
+
     // 4. Se a mensagem foi enviada pelo próprio número (fromMe === true)
     // Isso acontece quando um ATENDENTE HUMANO no Chatwoot ou no celular responde ao cliente!
     if (fromMe) {
@@ -124,29 +132,28 @@ export class AgentOrchestrator {
         return;
       }
 
-      const config = loadBotConfig();
-      const pauseMinutes = config.pauseDurationMinutes || (config.pauseDurationHours ? config.pauseDurationHours * 60 : 360);
-      const pauseHours = config.pauseDurationHours || (pauseMinutes / 60);
+      const pauseMinutes = (agent.pauseDurationHours ? agent.pauseDurationHours * 60 : agent.pauseDurationMinutes) || 360;
+      const pauseHours = pauseMinutes / 60;
 
       // Pausa o bot automaticamente para não atropelar a conversa do atendente humano
-      memoryStore.pauseChat(chatId, pauseMinutes);
-      messageDebouncer.cancel(chatId);
+      memoryStore.pauseChat(chatId, pauseMinutes, agent.id);
+      messageDebouncer.cancel(chatId, sessionName);
 
       this.addLog({
         type: 'info',
         chatId,
-        message: `Intervenção humana detectada (WhatsApp/Chatwoot). Bot pausado para ${chatId} por ${pauseHours} horas.`
+        message: `Intervenção humana detectada (WhatsApp/Chatwoot). Bot [${agent.name}] pausado para ${chatId} por ${pauseHours} horas.`
       });
       return;
     }
 
-    // 4. Se o bot estiver pausado para este chatId, ignora
-    if (memoryStore.isChatPaused(chatId)) {
-      console.log(`[Orchestrator] Bot pausado para ${chatId}, ignorando processamento.`);
+    // 4. Se o bot estiver pausado para este chatId e agente, ignora
+    if (memoryStore.isChatPaused(chatId, agent.id)) {
+      console.log(`[Orchestrator] Bot [${agent.name}] pausado para ${chatId}, ignorando processamento.`);
       this.addLog({
         type: 'info',
         chatId,
-        message: `Mensagem recebida mas bot está pausado para este contato: "${body}"`
+        message: `Mensagem recebida mas bot [${agent.name}] está pausado para este contato: "${body}"`
       });
       return;
     }
@@ -169,44 +176,56 @@ export class AgentOrchestrator {
       type: 'incoming',
       chatId,
       contactName,
-      message: body
+      message: `[${agent.name}] ${body}`
     });
 
-    // 6. Envia mensagem para o debouncer (buffer de mensagens consecutivas)
-    messageDebouncer.enqueue(chatId, body, contactName);
+    // 6. Envia mensagem para o debouncer com escopo da sessão e agente
+    messageDebouncer.enqueue(chatId, body, contactName, sessionName, agent.id, agent.debounceSeconds);
   }
 
   /**
    * Processa a mensagem unificada após a janela de debounce
    */
-  private async handleDebouncedMessage(chatId: string, messageText: string, contactName?: string): Promise<void> {
-    const config = loadBotConfig();
-    const session = env.wahaSession;
+  private async handleDebouncedMessage(
+    chatId: string,
+    messageText: string,
+    contactName?: string,
+    sessionName?: string,
+    agentId?: string
+  ): Promise<void> {
+    const agent = (agentId ? agentManager.getAgent(agentId) : null)
+      || (sessionName ? agentManager.getAgentBySession(sessionName) : null)
+      || agentManager.getDefaultAgent();
+
+    const activeSession = (sessionName && sessionName !== '*')
+      ? sessionName
+      : ((agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession);
 
     // 1. Confirmação de leitura (sendSeen) e indicador de digitação (startTyping)
-    if (config.enableSendSeen) {
-      await wahaClient.sendSeen(chatId, session);
+    if (agent.enableSendSeen !== false) {
+      await wahaClient.sendSeen(chatId, activeSession);
     }
 
-    if (config.enableTypingSimulation) {
-      await wahaClient.startTyping(chatId, session);
+    if (agent.enableTypingSimulation !== false) {
+      await wahaClient.startTyping(chatId, activeSession);
     }
 
     const context: AgentContext = {
       chatId,
       userMessage: messageText,
       contactName,
-      session
+      session: activeSession,
+      agent
     };
 
     let response: AgentResponse | null = null;
 
     try {
       // 2. Execução pela esteira de agentes
-      for (const agent of this.agents) {
-        const canHandle = await agent.canHandle(context);
+      for (const a of this.agents) {
+        const canHandle = await a.canHandle(context);
         if (canHandle) {
-          response = await agent.execute(context);
+          response = await a.execute(context);
           if (response.handled) {
             break;
           }
@@ -214,14 +233,14 @@ export class AgentOrchestrator {
       }
 
       // 3. Aguarda um pequeno delay para humanizar a resposta
-      if (config.enableTypingSimulation) {
+      if (agent.enableTypingSimulation !== false) {
         await new Promise(resolve => setTimeout(resolve, 1500));
-        await wahaClient.stopTyping(chatId, session);
+        await wahaClient.stopTyping(chatId, activeSession);
       }
 
       // 4. Envia a resposta final via WAHA
       if (response && response.replyText) {
-        const sendResult = await wahaClient.sendText(chatId, response.replyText, { session });
+        const sendResult = await wahaClient.sendText(chatId, response.replyText, { session: activeSession });
         botTracker.recordBotMessage(chatId, response.replyText, sendResult?.id);
 
         this.addLog({
@@ -229,12 +248,12 @@ export class AgentOrchestrator {
           chatId,
           contactName,
           message: response.replyText,
-          agentName: response.agentName
+          agentName: response.agentName || agent.name
         });
       }
     } catch (error: any) {
-      if (config.enableTypingSimulation) {
-        await wahaClient.stopTyping(chatId, session);
+      if (agent.enableTypingSimulation !== false) {
+        await wahaClient.stopTyping(chatId, activeSession);
       }
       console.error(`[Orchestrator] Falha no processamento de ${chatId}:`, error.message);
       this.addLog({
@@ -248,18 +267,21 @@ export class AgentOrchestrator {
   /**
    * Permite executar uma simulação direta (para teste no painel web)
    */
-  async simulateMessage(chatId: string, messageText: string): Promise<AgentResponse> {
+  async simulateMessage(chatId: string, messageText: string, agentId?: string): Promise<AgentResponse> {
+    const agent = (agentId ? agentManager.getAgent(agentId) : null) || agentManager.getDefaultAgent();
+
     const context: AgentContext = {
       chatId,
       userMessage: messageText,
       contactName: 'Cliente Teste',
-      session: 'simulator'
+      session: 'simulator',
+      agent
     };
 
-    for (const agent of this.agents) {
-      const canHandle = await agent.canHandle(context);
+    for (const a of this.agents) {
+      const canHandle = await a.canHandle(context);
       if (canHandle) {
-        const res = await agent.execute(context);
+        const res = await a.execute(context);
         if (res.handled) {
           return res;
         }

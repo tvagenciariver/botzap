@@ -1,8 +1,11 @@
+import { AgentProfile } from '../../config/agent-types.js';
+
 export interface AgentContext {
   chatId: string;
   userMessage: string;
   contactName?: string;
   session: string;
+  agent?: AgentProfile;
   metadata?: Record<string, any>;
 }
 

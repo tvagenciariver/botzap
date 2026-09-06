@@ -7,31 +7,30 @@ export class BusinessHoursAgent implements IAgent {
   name = 'BusinessHoursAgent';
   description = 'Informa os clientes quando o contato é realizado fora do horário de atendimento ou durante o almoço';
 
-  canHandle(_context: AgentContext): boolean {
-    const config = loadBotConfig();
-    if (!config.businessHours || !config.businessHours.enabled) {
+  canHandle(context: AgentContext): boolean {
+    const bh = context.agent?.businessHours || loadBotConfig().businessHours;
+    if (!bh || !bh.enabled) {
       return false;
     }
 
-    const status = checkBusinessHoursStatus(config);
+    const status = checkBusinessHoursStatus(bh);
     return !status.isOpen;
   }
 
   async execute(context: AgentContext): Promise<AgentResponse> {
-    const config = loadBotConfig();
-    const status = checkBusinessHoursStatus(config);
-    const bh = config.businessHours;
+    const bh = context.agent?.businessHours || loadBotConfig().businessHours;
+    const status = checkBusinessHoursStatus(bh);
 
     const outOfHoursMessage = bh?.outOfHoursMessage || 
       'Olá! Nosso horário de atendimento encerrou. Deixe sua dúvida que responderemos assim que retornarmos! 🕒';
 
-    const canSendNotice = memoryStore.canSendOutOfHoursNotice(context.chatId, 2);
+    const canSendNotice = memoryStore.canSendOutOfHoursNotice(context.chatId, 2, context.agent?.id);
 
     if (canSendNotice) {
       // Registra que o aviso foi enviado para evitar flood
-      memoryStore.recordOutOfHoursNotice(context.chatId);
-      memoryStore.addMessage(context.chatId, 'user', context.userMessage, context.contactName);
-      memoryStore.addMessage(context.chatId, 'model', outOfHoursMessage, context.contactName);
+      memoryStore.recordOutOfHoursNotice(context.chatId, context.agent?.id);
+      memoryStore.addMessage(context.chatId, 'user', context.userMessage, context.contactName, context.agent?.id);
+      memoryStore.addMessage(context.chatId, 'model', outOfHoursMessage, context.contactName, context.agent?.id);
 
       console.log(`[BusinessHoursAgent] Mensagem fora de expediente enviada para ${context.chatId} (Motivo: ${status.reason}, Horário: ${status.currentTime}).`);
 
@@ -43,7 +42,7 @@ export class BusinessHoursAgent implements IAgent {
       };
     } else {
       // Cliente já recebeu o aviso de ausência recentemente
-      memoryStore.addMessage(context.chatId, 'user', context.userMessage, context.contactName);
+      memoryStore.addMessage(context.chatId, 'user', context.userMessage, context.contactName, context.agent?.id);
 
       console.log(`[BusinessHoursAgent] Mensagem de ${context.chatId} recebida fora de expediente, mas aviso recente já emitido (Cooldown ativo).`);
 

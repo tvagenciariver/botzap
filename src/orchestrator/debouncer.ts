@@ -1,11 +1,19 @@
 import { loadBotConfig } from '../config/index.js';
 
-type MessageHandler = (chatId: string, combinedText: string, contactName?: string) => Promise<void>;
+type MessageHandler = (
+  chatId: string,
+  combinedText: string,
+  contactName?: string,
+  sessionName?: string,
+  agentId?: string
+) => Promise<void>;
 
 interface PendingBuffer {
   timer: NodeJS.Timeout;
   messages: string[];
   contactName?: string;
+  sessionName?: string;
+  agentId?: string;
 }
 
 export class MessageDebouncer {
@@ -16,16 +24,25 @@ export class MessageDebouncer {
     this.handler = handler;
   }
 
-  enqueue(chatId: string, messageText: string, contactName?: string): void {
+  enqueue(
+    chatId: string,
+    messageText: string,
+    contactName?: string,
+    sessionName?: string,
+    agentId?: string,
+    customDebounceSeconds?: number
+  ): void {
     if (!this.handler) {
       console.warn('[Debouncer] Nenhum handler registrado no debouncer.');
       return;
     }
 
     const config = loadBotConfig();
-    const waitTimeMs = Math.max(1000, (config.debounceSeconds || 2.5) * 1000);
+    const waitSeconds = customDebounceSeconds ?? config.debounceSeconds ?? 2.5;
+    const waitTimeMs = Math.max(1000, waitSeconds * 1000);
 
-    const existing = this.buffers.get(chatId);
+    const bufferKey = sessionName ? `${sessionName}:${chatId}` : chatId;
+    const existing = this.buffers.get(bufferKey);
 
     if (existing) {
       // Limpa timer anterior e acumula mensagem
@@ -34,43 +51,46 @@ export class MessageDebouncer {
       if (contactName) existing.contactName = contactName;
 
       existing.timer = setTimeout(() => {
-        this.flush(chatId);
+        this.flush(bufferKey, chatId);
       }, waitTimeMs);
     } else {
       // Cria novo buffer para o chatId
       const timer = setTimeout(() => {
-        this.flush(chatId);
+        this.flush(bufferKey, chatId);
       }, waitTimeMs);
 
-      this.buffers.set(chatId, {
+      this.buffers.set(bufferKey, {
         timer,
         messages: [messageText],
-        contactName
+        contactName,
+        sessionName,
+        agentId
       });
     }
   }
 
-  private async flush(chatId: string): Promise<void> {
-    const buffer = this.buffers.get(chatId);
+  private async flush(bufferKey: string, realChatId: string): Promise<void> {
+    const buffer = this.buffers.get(bufferKey);
     if (!buffer) return;
 
-    this.buffers.delete(chatId);
+    this.buffers.delete(bufferKey);
 
     const combinedText = buffer.messages.join('\n');
     if (this.handler && combinedText.trim()) {
       try {
-        await this.handler(chatId, combinedText, buffer.contactName);
+        await this.handler(realChatId, combinedText, buffer.contactName, buffer.sessionName, buffer.agentId);
       } catch (err: any) {
-        console.error(`[Debouncer] Erro ao processar mensagens para ${chatId}:`, err.message);
+        console.error(`[Debouncer] Erro ao processar mensagens para ${realChatId}:`, err.message);
       }
     }
   }
 
-  cancel(chatId: string): void {
-    const existing = this.buffers.get(chatId);
+  cancel(chatId: string, sessionName?: string): void {
+    const bufferKey = sessionName ? `${sessionName}:${chatId}` : chatId;
+    const existing = this.buffers.get(bufferKey);
     if (existing) {
       clearTimeout(existing.timer);
-      this.buffers.delete(chatId);
+      this.buffers.delete(bufferKey);
     }
   }
 }

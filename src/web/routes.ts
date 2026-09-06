@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { orchestrator } from '../orchestrator/engine.js';
 import { loadBotConfig, saveBotConfig, updateEnvFile, env } from '../config/index.js';
+import { agentManager } from '../config/agent-manager.js';
+import { AgentProfile } from '../config/agent-types.js';
 import { memoryStore } from '../gemini/memory.js';
 import { geminiService } from '../gemini/client.js';
 import { openAIService } from '../openai/client.js';
@@ -10,6 +12,16 @@ import { WahaWebhookEvent } from '../waha/types.js';
 import { checkBusinessHoursStatus } from '../orchestrator/schedule-helper.js';
 
 export const apiRouter = Router();
+
+function sanitizeAgentProfile(agent: AgentProfile) {
+  return {
+    ...agent,
+    geminiApiKey: agent.geminiApiKey ? '••••••••' + agent.geminiApiKey.slice(-4) : '',
+    openaiApiKey: agent.openaiApiKey ? '••••••••' + agent.openaiApiKey.slice(-4) : '',
+    hasGeminiKey: !!(agent.geminiApiKey && agent.geminiApiKey.trim()),
+    hasOpenAIKey: !!(agent.openaiApiKey && agent.openaiApiKey.trim())
+  };
+}
 
 // Sessões de autenticação ativas (Tokens de sessão em memória)
 const activeSessions = new Set<string>();
@@ -468,13 +480,13 @@ apiRouter.post('/api/chats/:chatId/clear', requireAuth, (req: Request, res: Resp
  * 11. Simular conversa (Chat Simulator)
  */
 apiRouter.post('/api/simulate', requireAuth, async (req: Request, res: Response) => {
-  const { chatId = 'simulacao@c.us', message } = req.body;
+  const { chatId = 'simulacao@c.us', message, agentId } = req.body;
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'Mensagem inválida.' });
   }
 
   try {
-    const result = await orchestrator.simulateMessage(chatId, message);
+    const result = await orchestrator.simulateMessage(chatId, message, agentId);
     return res.json(result);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -494,4 +506,73 @@ apiRouter.get('/api/logs', requireAuth, (_req: Request, res: Response) => {
 apiRouter.delete('/api/logs', requireAuth, (_req: Request, res: Response) => {
   orchestrator.clearLogs();
   res.json({ success: true });
+});
+
+/**
+ * 14. Gerenciamento Multi-Agentes (CRUD)
+ */
+apiRouter.get('/api/agents', requireAuth, (_req: Request, res: Response) => {
+  const agents = agentManager.listAgents().map(sanitizeAgentProfile);
+  res.json({ agents });
+});
+
+apiRouter.get('/api/agents/:id', requireAuth, (req: Request, res: Response) => {
+  const agent = agentManager.getAgent(req.params.id);
+  if (!agent) {
+    return res.status(404).json({ error: 'Agente não encontrado.' });
+  }
+  res.json({ agent: sanitizeAgentProfile(agent) });
+});
+
+apiRouter.post('/api/agents', requireAuth, (req: Request, res: Response) => {
+  try {
+    const data = req.body;
+    const created = agentManager.createAgent(data);
+    res.status(201).json({ success: true, agent: sanitizeAgentProfile(created) });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/api/agents/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updates = { ...req.body };
+
+    // Se as chaves enviadas forem as mascaradas, preserva a chave existente
+    const current = agentManager.getAgent(id);
+    if (current) {
+      if (typeof updates.geminiApiKey === 'string' && updates.geminiApiKey.includes('••••')) {
+        delete updates.geminiApiKey;
+      }
+      if (typeof updates.openaiApiKey === 'string' && updates.openaiApiKey.includes('••••')) {
+        delete updates.openaiApiKey;
+      }
+    }
+
+    const updated = agentManager.updateAgent(id, updates);
+    res.json({ success: true, agent: sanitizeAgentProfile(updated) });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/api/agents/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const success = agentManager.deleteAgent(id);
+    res.json({ success, message: 'Agente excluído com sucesso.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/api/agents/:id/duplicate', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const duplicated = agentManager.duplicateAgent(id);
+    res.status(201).json({ success: true, agent: sanitizeAgentProfile(duplicated) });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
 });

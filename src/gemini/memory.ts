@@ -9,6 +9,7 @@ export interface ChatMessage {
 
 export interface ChatSessionState {
   chatId: string;
+  agentId?: string;
   contactName?: string;
   isPaused: boolean;
   pausedUntil?: number;
@@ -68,16 +69,28 @@ export class MemoryStore {
     }
   }
 
-  getSession(chatId: string): ChatSessionState {
-    let state = this.sessions.get(chatId);
+  getSessionKey(chatId: string, agentId?: string): string {
+    if (chatId.includes(':')) return chatId;
+    if (agentId && agentId !== 'default') {
+      return `${agentId}:${chatId}`;
+    }
+    return chatId;
+  }
+
+  getSession(chatId: string, agentId?: string): ChatSessionState {
+    const key = this.getSessionKey(chatId, agentId);
+    let state = this.sessions.get(key);
     if (!state) {
       state = {
-        chatId,
+        chatId: key,
+        agentId: agentId || 'default',
         isPaused: false,
         lastMessageAt: Date.now(),
         messages: []
       };
-      this.sessions.set(chatId, state);
+      this.sessions.set(key, state);
+    } else if (agentId && !state.agentId) {
+      state.agentId = agentId;
     }
     return state;
   }
@@ -89,8 +102,8 @@ export class MemoryStore {
    * 2. As mensagens alternem rigorosamente entre 'user' e 'model'.
    * 3. Termine em 'model', pois o startChat será seguido por sendMessage('user').
    */
-  getHistory(chatId: string): Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> {
-    const session = this.getSession(chatId);
+  getHistory(chatId: string, agentId?: string): Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> {
+    const session = this.getSession(chatId, agentId);
     const validHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
 
     for (const m of session.messages) {
@@ -129,8 +142,8 @@ export class MemoryStore {
   /**
    * Retorna o histórico formatado para o padrão OpenAI / ChatGPT ({ role, content })
    */
-  getOpenAIHistory(chatId: string): Array<{ role: 'user' | 'assistant'; content: string }> {
-    const session = this.getSession(chatId);
+  getOpenAIHistory(chatId: string, agentId?: string): Array<{ role: 'user' | 'assistant'; content: string }> {
+    const session = this.getSession(chatId, agentId);
     const result: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 
     for (const m of session.messages) {
@@ -144,8 +157,8 @@ export class MemoryStore {
     return result;
   }
 
-  addMessage(chatId: string, role: 'user' | 'model', text: string, contactName?: string): void {
-    const session = this.getSession(chatId);
+  addMessage(chatId: string, role: 'user' | 'model', text: string, contactName?: string, agentId?: string): void {
+    const session = this.getSession(chatId, agentId);
     if (contactName) {
       session.contactName = contactName;
     }
@@ -166,8 +179,9 @@ export class MemoryStore {
     this.scheduleSave();
   }
 
-  isChatPaused(chatId: string): boolean {
-    const session = this.sessions.get(chatId);
+  isChatPaused(chatId: string, agentId?: string): boolean {
+    const key = this.getSessionKey(chatId, agentId);
+    const session = this.sessions.get(key);
     if (!session) return false;
     if (!session.isPaused) return false;
 
@@ -181,35 +195,35 @@ export class MemoryStore {
     return true;
   }
 
-  pauseChat(chatId: string, durationMinutes: number): void {
-    const session = this.getSession(chatId);
+  pauseChat(chatId: string, durationMinutes: number, agentId?: string): void {
+    const session = this.getSession(chatId, agentId);
     session.isPaused = true;
     session.pausedUntil = Date.now() + durationMinutes * 60 * 1000;
     this.saveToDisk();
   }
 
-  resumeChat(chatId: string): void {
-    const session = this.getSession(chatId);
+  resumeChat(chatId: string, agentId?: string): void {
+    const session = this.getSession(chatId, agentId);
     session.isPaused = false;
     session.pausedUntil = undefined;
     this.saveToDisk();
   }
 
-  canSendOutOfHoursNotice(chatId: string, cooldownHours = 2): boolean {
-    const session = this.getSession(chatId);
+  canSendOutOfHoursNotice(chatId: string, cooldownHours = 2, agentId?: string): boolean {
+    const session = this.getSession(chatId, agentId);
     if (!session.lastOutOfHoursNoticeAt) return true;
     const diffMs = Date.now() - session.lastOutOfHoursNoticeAt;
     return diffMs > cooldownHours * 60 * 60 * 1000;
   }
 
-  recordOutOfHoursNotice(chatId: string): void {
-    const session = this.getSession(chatId);
+  recordOutOfHoursNotice(chatId: string, agentId?: string): void {
+    const session = this.getSession(chatId, agentId);
     session.lastOutOfHoursNoticeAt = Date.now();
     this.scheduleSave();
   }
 
-  clearHistory(chatId: string): void {
-    const session = this.getSession(chatId);
+  clearHistory(chatId: string, agentId?: string): void {
+    const session = this.getSession(chatId, agentId);
     if (session) {
       session.messages = [];
       this.scheduleSave();
@@ -218,6 +232,7 @@ export class MemoryStore {
 
   listActiveChats(): Array<{
     chatId: string;
+    agentId?: string;
     contactName?: string;
     isPaused: boolean;
     pausedUntil?: number;
@@ -226,12 +241,13 @@ export class MemoryStore {
     lastMessagePreview?: string;
   }> {
     const list = [];
-    for (const [chatId, session] of this.sessions.entries()) {
+    for (const [key, session] of this.sessions.entries()) {
       const lastMsg = session.messages[session.messages.length - 1];
       list.push({
-        chatId,
+        chatId: key,
+        agentId: session.agentId || 'default',
         contactName: session.contactName,
-        isPaused: this.isChatPaused(chatId),
+        isPaused: this.isChatPaused(key),
         pausedUntil: session.pausedUntil,
         lastMessageAt: session.lastMessageAt,
         messageCount: session.messages.length,

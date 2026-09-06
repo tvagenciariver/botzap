@@ -1,4 +1,4 @@
-import { BotConfig } from '../config/index.js';
+import { BotConfig, BusinessHoursConfig } from '../config/index.js';
 
 export type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
@@ -43,8 +43,13 @@ function parseTimeToMinutes(timeStr: string): number {
 /**
  * Avalia se o momento atual (ou data informada) está dentro do horário comercial configurado
  */
-export function checkBusinessHoursStatus(config: BotConfig, targetDate: Date = new Date()): BusinessHoursStatus {
-  const bh = config.businessHours;
+export function checkBusinessHoursStatus(
+  configOrHours: BotConfig | BusinessHoursConfig | { businessHours?: BusinessHoursConfig },
+  targetDate: Date = new Date()
+): BusinessHoursStatus {
+  const bh: BusinessHoursConfig | undefined = (configOrHours as any)?.businessHours !== undefined
+    ? (configOrHours as any).businessHours
+    : (configOrHours as BusinessHoursConfig);
   const timezone = bh?.timezone || 'America/Sao_Paulo';
 
   // Formata a data no timezone configurado

@@ -14,12 +14,17 @@ export class AttendantAgent implements IAgent {
       const result = await llmProviderManager.generateReply(
         context.chatId,
         context.userMessage,
-        context.contactName
+        context.contactName,
+        context.agent
       );
 
-      const agentLabel = result.provider === 'openai' 
+      const providerLabel = result.provider === 'openai' 
         ? `OpenAI (${result.model})` 
         : `Gemini (${result.model})`;
+
+      const agentLabel = context.agent?.name
+        ? `${context.agent.name} [${providerLabel}]`
+        : providerLabel;
 
       return {
         handled: true,

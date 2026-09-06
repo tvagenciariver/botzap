@@ -1,5 +1,7 @@
 import axios from 'axios';
 import { env, loadBotConfig, saveBotConfig } from '../config/index.js';
+import { AgentProfile } from '../config/agent-types.js';
+import { agentManager } from '../config/agent-manager.js';
 import { memoryStore } from '../gemini/memory.js';
 
 export interface OpenAIMessage {
@@ -28,13 +30,16 @@ export class OpenAIService {
   /**
    * Constrói o System Prompt completo unindo as diretrizes e dados do negócio
    */
-  private buildFullSystemInstruction(): string {
+  private buildFullSystemInstruction(agent?: AgentProfile): string {
     const config = loadBotConfig();
+    const companyName = agent?.companyName || config.companyName || 'Nossa Empresa';
+    const rawInstruction = agent?.systemInstruction || config.systemInstruction || 'Você é um atendente inteligente para WhatsApp.';
     
-    let instruction = config.systemInstruction.replace('{companyName}', config.companyName);
+    let instruction = rawInstruction.replace('{companyName}', companyName);
 
-    if (config.businessInfo && config.businessInfo.trim()) {
-      instruction += `\n\n--- INFORMAÇÕES E REGRAS DA EMPRESA ---\n${config.businessInfo}`;
+    const businessInfo = agent ? agent.businessInfo : config.businessInfo;
+    if (businessInfo && businessInfo.trim()) {
+      instruction += `\n\n--- INFORMAÇÕES E REGRAS DA EMPRESA ---\n${businessInfo}`;
     }
 
     instruction += `\n\n--- REGRAS DE FORMATAÇÃO WHATSAPP ---
@@ -50,14 +55,17 @@ export class OpenAIService {
   /**
    * Gera resposta para o cliente usando OpenAI Chat Completions com recuperação de modelo
    */
-  async generateReply(chatId: string, userMessage: string, contactName?: string): Promise<string> {
-    const apiKey = this.getApiKey();
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY não configurada. Informe sua chave na aba "Agente & Prompts" no Painel Web.');
+  async generateReply(chatId: string, userMessage: string, contactName?: string, agent?: AgentProfile): Promise<string> {
+    const apiKey = (agent?.openaiApiKey && agent.openaiApiKey.trim() !== '' && agent.openaiApiKey !== 'sua_chave_openai_aqui')
+      ? agent.openaiApiKey.trim()
+      : this.getApiKey();
+
+    if (!apiKey || apiKey === 'sua_chave_openai_aqui') {
+      throw new Error('OPENAI_API_KEY não configurada. Informe sua chave no perfil do Agente ou nas configurações gerais.');
     }
 
     const config = loadBotConfig();
-    const systemInstruction = this.buildFullSystemInstruction();
+    const systemInstruction = this.buildFullSystemInstruction(agent);
     const history = memoryStore.getOpenAIHistory(chatId);
 
     const messages: OpenAIMessage[] = [
@@ -66,7 +74,8 @@ export class OpenAIService {
       { role: 'user', content: userMessage }
     ];
 
-    const preferredModel = config.openaiModel || this.defaultModel;
+    const preferredModel = agent?.openaiModel || config.openaiModel || this.defaultModel;
+    const temperature = agent?.temperature ?? config.temperature ?? 0.4;
     const candidateModels = Array.from(new Set([
       preferredModel,
       'gpt-4o-mini',
@@ -84,7 +93,7 @@ export class OpenAIService {
           {
             model: modelName,
             messages,
-            temperature: config.temperature ?? 0.4,
+            temperature,
             max_tokens: 1000
           },
           {
@@ -102,9 +111,14 @@ export class OpenAIService {
         }
 
         // Se precisou usar outro modelo com sucesso, salva a configuração
-        if (modelName !== config.openaiModel) {
-          console.log(`[OpenAI] Modelo alternado com sucesso para "${modelName}" (anterior "${config.openaiModel}" falhou).`);
-          saveBotConfig({ openaiModel: modelName });
+        if (modelName !== preferredModel) {
+          console.log(`[OpenAI] Modelo alternado com sucesso para "${modelName}" (anterior "${preferredModel}" falhou).`);
+          if (agent) {
+            agent.openaiModel = modelName;
+            agentManager.updateAgent(agent.id, { openaiModel: modelName });
+          } else {
+            saveBotConfig({ openaiModel: modelName });
+          }
         }
 
         // Sanitização amigável de títulos Markdown para formato WhatsApp (*Negrito*)

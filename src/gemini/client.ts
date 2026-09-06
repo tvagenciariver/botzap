@@ -1,5 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { env, loadBotConfig, saveBotConfig } from '../config/index.js';
+import { AgentProfile } from '../config/agent-types.js';
+import { agentManager } from '../config/agent-manager.js';
 import { memoryStore } from './memory.js';
 
 export class GeminiService {
@@ -36,13 +38,16 @@ export class GeminiService {
   /**
    * Constrói o System Prompt completo unindo as diretrizes e dados do negócio
    */
-  private buildFullSystemInstruction(): string {
+  private buildFullSystemInstruction(agent?: AgentProfile): string {
     const config = loadBotConfig();
+    const companyName = agent?.companyName || config.companyName || 'Nossa Empresa';
+    const rawInstruction = agent?.systemInstruction || config.systemInstruction || 'Você é um atendente inteligente para WhatsApp.';
     
-    let instruction = config.systemInstruction.replace('{companyName}', config.companyName);
+    let instruction = rawInstruction.replace('{companyName}', companyName);
 
-    if (config.businessInfo && config.businessInfo.trim()) {
-      instruction += `\n\n--- INFORMAÇÕES E REGRAS DA EMPRESA ---\n${config.businessInfo}`;
+    const businessInfo = agent ? agent.businessInfo : config.businessInfo;
+    if (businessInfo && businessInfo.trim()) {
+      instruction += `\n\n--- INFORMAÇÕES E REGRAS DA EMPRESA ---\n${businessInfo}`;
     }
 
     instruction += `\n\n--- REGRAS DE FORMATAÇÃO WHATSAPP ---
@@ -58,18 +63,23 @@ export class GeminiService {
   /**
    * Gera resposta para o cliente usando Google Gemini Flash com auto-recuperação de modelo
    */
-  async generateReply(chatId: string, userMessage: string, contactName?: string): Promise<string> {
-    this.initClient();
-    if (!this.genAI) {
-      throw new Error('GEMINI_API_KEY não configurada. Informe sua chave na aba "Agente & Prompts" no Painel Web.');
+  async generateReply(chatId: string, userMessage: string, contactName?: string, agent?: AgentProfile): Promise<string> {
+    const config = loadBotConfig();
+    const apiKey = (agent?.geminiApiKey && agent.geminiApiKey.trim() !== '' && agent.geminiApiKey !== 'sua_chave_gemini_aqui')
+      ? agent.geminiApiKey.trim()
+      : (env.geminiApiKey || config.geminiApiKey || '').trim();
+
+    if (!apiKey || apiKey === 'sua_chave_gemini_aqui') {
+      throw new Error('GEMINI_API_KEY não configurada. Informe sua chave no perfil do Agente ou nas configurações gerais.');
     }
 
-    const config = loadBotConfig();
-    const systemInstruction = this.buildFullSystemInstruction();
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const systemInstruction = this.buildFullSystemInstruction(agent);
     const history = memoryStore.getHistory(chatId);
 
     // Lista de modelos candidatos priorizados para garantir altíssima disponibilidade
-    const preferredModel = config.model || 'gemini-flash-lite-latest';
+    const preferredModel = agent?.model || config.model || 'gemini-flash-lite-latest';
+    const temperature = agent?.temperature ?? config.temperature ?? 0.4;
     const candidateModels = Array.from(new Set([
       preferredModel,
       'gemini-flash-lite-latest',
@@ -85,14 +95,14 @@ export class GeminiService {
 
     for (const modelName of candidateModels) {
       try {
-        const model = this.genAI.getGenerativeModel({
+        const model = genAI.getGenerativeModel({
           model: modelName,
           systemInstruction: {
             role: 'system',
             parts: [{ text: systemInstruction }]
           },
           generationConfig: {
-            temperature: config.temperature ?? 0.4,
+            temperature,
             maxOutputTokens: 1000
           }
         });
@@ -115,9 +125,14 @@ export class GeminiService {
         let replyText = result.response.text();
 
         // Se precisou usar outro modelo com sucesso, atualiza a configuração para os próximos
-        if (modelName !== config.model) {
-          console.log(`[Gemini] Modelo alternado com sucesso para "${modelName}" (anterior "${config.model}" falhou/sem quota).`);
-          saveBotConfig({ model: modelName });
+        if (modelName !== preferredModel) {
+          console.log(`[Gemini] Modelo alternado com sucesso para "${modelName}" (anterior "${preferredModel}" falhou/sem quota).`);
+          if (agent) {
+            agent.model = modelName;
+            agentManager.updateAgent(agent.id, { model: modelName });
+          } else {
+            saveBotConfig({ model: modelName });
+          }
         }
 
         // Sanitização amigável de títulos Markdown para formato WhatsApp (*Negrito*)
@@ -153,11 +168,14 @@ export class GeminiService {
   /**
    * Avalia se a mensagem do cliente expressa o desejo de falar com atendente humano
    */
-  checkHandoffIntent(userMessage: string): boolean {
+  checkHandoffIntent(userMessage: string, customKeywords?: string[]): boolean {
     const config = loadBotConfig();
+    const keywords = (customKeywords && customKeywords.length > 0)
+      ? customKeywords
+      : (config.handoffKeywords || []);
     const normalized = userMessage.toLowerCase().trim();
 
-    for (const keyword of config.handoffKeywords) {
+    for (const keyword of keywords) {
       if (normalized.includes(keyword.toLowerCase())) {
         return true;
       }
