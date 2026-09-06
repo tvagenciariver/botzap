@@ -2996,7 +2996,7 @@ textarea.form-control {
 }
 
 .modal-card.modal-lg {
-  max-width: 680px;
+  max-width: 780px;
   width: 100%;
 }
 
@@ -3090,10 +3090,33 @@ textarea.form-control {
   border-color: #6366f1;
 }
 
+.modal-card > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .modal-body {
-  padding: 24px;
+  padding: 22px 24px;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-body::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+}
+.modal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .modal-footer {
@@ -3103,9 +3126,10 @@ textarea.form-control {
   gap: 12px;
   padding: 16px 24px;
   border-top: 1px solid var(--border);
-  background: rgba(15, 23, 42, 0.8);
+  background: rgba(15, 23, 42, 0.95);
   border-bottom-left-radius: 16px;
   border-bottom-right-radius: 16px;
+  flex-shrink: 0;
 }
 
 /* Checkbox Days Container */
@@ -3276,4 +3300,223 @@ textarea.form-control {
   background: rgba(16, 185, 129, 0.15);
   color: #34d399;
   border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+/* Grade de Opções de Destinatários de Exames */
+.exam-target-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.exam-target-card {
+  border: 1.5px solid var(--border);
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.exam-target-card:hover {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.exam-target-card.selected {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.12);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
+}
+
+.exam-target-card input[type="radio"] {
+  accent-color: #3b82f6;
+  margin-top: 3px;
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   WIDGET DE ALTERNAR EMPRESA / CLIENTE ATIVO (TOPBAR)
+   ========================================================================== */
+
+.company-switcher-pill {
+  display: flex;
+  align-items: center;
+}
+
+.btn-company-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(59, 130, 246, 0.15));
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 20px;
+  padding: 5px 14px;
+  color: #f8fafc;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.btn-company-selector:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.28), rgba(59, 130, 246, 0.28));
+  border-color: #818cf8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+}
+
+.company-badge-icon {
+  font-size: 16px;
+}
+
+.company-selector-info {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  line-height: 1.15;
+}
+
+.company-selector-label {
+  font-size: 9px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+
+.company-selector-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #e0e7ff;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.company-selector-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(99, 102, 241, 0.28);
+  color: #c7d2fe;
+  padding: 3px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  transition: all 0.2s;
+  margin-left: 4px;
+}
+
+.btn-company-selector:hover .company-selector-action {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   MODAL DE ESCOLHA DE EMPRESA / CLIENTE (PÓS-LOGIN E SWITCHER)
+   ========================================================================== */
+
+.company-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.company-picker-card {
+  background: rgba(30, 41, 59, 0.45);
+  border: 1.5px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+  text-align: left;
+}
+
+.company-picker-card:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: #6366f1;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.company-picker-card.active-company {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(16, 185, 129, 0.15));
+  border-color: #10b981;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.25);
+}
+
+.company-picker-card.card-all-companies {
+  border: 1.5px dashed rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.company-picker-card.card-all-companies:hover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: #818cf8;
+}
+
+.company-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.company-card-icon {
+  font-size: 26px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.company-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin: 0 0 3px 0;
+  line-height: 1.2;
+}
+
+.company-card-subtitle {
+  font-size: 11.5px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.company-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.company-card-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  font-weight: 600;
+  color: #818cf8;
+}
+
+.company-picker-card:hover .company-card-cta {
+  color: #a5b4fc;
 }

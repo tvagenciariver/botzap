@@ -1,6 +1,8 @@
-// Estado Global e Autenticação
+// Estado Global, Autenticação e Multiempresa Ativa
 const AUTH_TOKEN_KEY = 'botzap_auth_token';
+const ACTIVE_COMPANY_KEY = 'botzap_active_company_id';
 let currentChatId = 'simulador_' + Math.random().toString(36).substring(2, 7) + '@c.us';
+let currentActiveCompanyId = localStorage.getItem(ACTIVE_COMPANY_KEY) || 'all';
 
 function getAuthToken() {
   return localStorage.getItem(AUTH_TOKEN_KEY);
@@ -12,6 +14,243 @@ function setAuthToken(token) {
 
 function clearAuthToken() {
   localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+function getActiveCompanyId() {
+  return currentActiveCompanyId || 'all';
+}
+
+function updateTopbarCompanyDisplay() {
+  const nameEl = document.getElementById('topbar-company-name');
+  if (!nameEl) return;
+
+  if (currentActiveCompanyId === 'all') {
+    nameEl.textContent = 'Todas as Empresas (Visão Global)';
+  } else {
+    const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+      ? allAgents
+      : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+    const agent = agentsList.find(a => a.id === currentActiveCompanyId);
+    if (agent) {
+      nameEl.textContent = agent.companyName || agent.name;
+    } else {
+      nameEl.textContent = `Empresa #${currentActiveCompanyId.substring(0, 8)}`;
+    }
+  }
+}
+
+function setActiveCompany(companyId, reload = true) {
+  currentActiveCompanyId = companyId || 'all';
+  localStorage.setItem(ACTIVE_COMPANY_KEY, currentActiveCompanyId);
+
+  // 1. Atualiza Top Bar
+  updateTopbarCompanyDisplay();
+
+  // 2. Sincroniza Filtro de Agendamentos
+  if (typeof currentAppointmentsAgentFilter !== 'undefined') {
+    currentAppointmentsAgentFilter = currentActiveCompanyId;
+  }
+  const aptAgentSelect = document.getElementById('apt-filter-agent');
+  if (aptAgentSelect && aptAgentSelect.value !== currentActiveCompanyId) {
+    aptAgentSelect.value = currentActiveCompanyId;
+  }
+
+  // 3. Sincroniza Filtro de Exames
+  const examAgentSelect = document.getElementById('exam-filter-agent');
+  if (examAgentSelect && examAgentSelect.value !== currentActiveCompanyId) {
+    examAgentSelect.value = currentActiveCompanyId;
+  }
+
+  // 4. Sincroniza selects de modais (caso o usuário crie novo agendamento ou exame)
+  const modalAptAgent = document.getElementById('modal-apt-agent');
+  if (modalAptAgent && currentActiveCompanyId !== 'all') {
+    modalAptAgent.value = currentActiveCompanyId;
+  }
+  const modalExamAgent = document.getElementById('modal-exam-agent');
+  if (modalExamAgent && currentActiveCompanyId !== 'all') {
+    modalExamAgent.value = currentActiveCompanyId;
+  }
+
+  // 5. Se for um agente específico, sincroniza também barra lateral e simulador
+  if (currentActiveCompanyId !== 'all') {
+    const sidebarSelect = document.getElementById('sidebar-agent-select');
+    if (sidebarSelect && sidebarSelect.value !== currentActiveCompanyId) {
+      sidebarSelect.value = currentActiveCompanyId;
+      if (typeof updateSidebarAgentStatus === 'function') {
+        updateSidebarAgentStatus(currentActiveCompanyId);
+      }
+    }
+  }
+
+  // 6. Recarrega dados da view ativa se solicitado
+  if (reload) {
+    const activeNav = document.querySelector('.nav-menu .nav-btn.active');
+    const activeTab = activeNav ? activeNav.getAttribute('data-tab') : null;
+
+    if (activeTab === 'appointments' && typeof loadAppointments === 'function') {
+      loadAppointments();
+    } else if (activeTab === 'exams' && typeof loadExams === 'function') {
+      loadExams();
+    } else if (activeTab === 'simulator' && currentActiveCompanyId !== 'all') {
+      const simSelect = document.getElementById('sim-agent-select');
+      if (simSelect && simSelect.value !== currentActiveCompanyId) {
+        simSelect.value = currentActiveCompanyId;
+        simSelect.dispatchEvent(new Event('change'));
+      }
+    }
+  }
+}
+
+let isCompanyPickerMandatory = false;
+
+async function openCompanyPickerModal(isMandatory = false) {
+  isCompanyPickerMandatory = isMandatory;
+  const overlay = document.getElementById('modal-company-picker-overlay');
+  if (!overlay) return;
+
+  const closeBtn = document.getElementById('btn-close-company-picker');
+  const skipBtn = document.getElementById('btn-skip-company-picker');
+  const titleEl = document.getElementById('company-picker-title');
+  const subtitleEl = document.getElementById('company-picker-subtitle');
+  const searchInput = document.getElementById('company-picker-search');
+
+  if (searchInput) searchInput.value = '';
+
+  if (isMandatory) {
+    if (closeBtn) closeBtn.style.display = 'none';
+    if (titleEl) titleEl.textContent = '👋 Bem-vindo! Selecione a Empresa para Acessar';
+    if (subtitleEl) subtitleEl.textContent = 'Escolha qual empresa ou cliente você deseja gerenciar agora no painel:';
+    if (skipBtn) skipBtn.textContent = '🌐 Entrar com Visão Geral (Todas as Empresas)';
+  } else {
+    if (closeBtn) closeBtn.style.display = 'block';
+    if (titleEl) titleEl.textContent = '🏢 Alternar Empresa / Cliente';
+    if (subtitleEl) subtitleEl.textContent = 'Selecione a empresa que você deseja focar agora no painel:';
+    if (skipBtn) skipBtn.textContent = '🌐 Ver Todas as Empresas (Visão Global)';
+  }
+
+  // Garante que temos a lista de agentes
+  if (typeof allAgents === 'undefined' || allAgents.length === 0) {
+    try {
+      const res = await fetchWithAuth('/api/agents');
+      if (res.ok) {
+        const data = await res.json();
+        allAgents = data.agents || [];
+        allAgentsCache = allAgents;
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar agentes para modal:', e);
+    }
+  }
+
+  renderCompanyPickerCards();
+  overlay.style.display = 'flex';
+  if (searchInput) {
+    setTimeout(() => searchInput.focus(), 50);
+  }
+}
+
+function closeCompanyPickerModal() {
+  const overlay = document.getElementById('modal-company-picker-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function renderCompanyPickerCards(filterText = '') {
+  const grid = document.getElementById('company-picker-grid');
+  if (!grid) return;
+
+  const q = (filterText || '').toLowerCase().trim();
+  const agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+    ? allAgents
+    : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+
+  let html = '';
+
+  // 1. Card Todas as Empresas
+  const allMatches = !q || 'todas as empresas visao global todas consolidated'.includes(q);
+  if (allMatches) {
+    const isAllActive = currentActiveCompanyId === 'all';
+    html += `
+      <div class="company-picker-card card-all-companies ${isAllActive ? 'active-company' : ''}" data-company-id="all">
+        <div class="company-card-header">
+          <div class="company-card-icon" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">🌐</div>
+          <div>
+            <h4 class="company-card-title">Todas as Empresas</h4>
+            <p class="company-card-subtitle">Visão Consolidada Multiempresa</p>
+          </div>
+        </div>
+        <div class="company-card-meta">
+          <span class="badge badge-primary">${agents.length} ${agents.length === 1 ? 'Unidade' : 'Unidades'}</span>
+          <span class="badge badge-secondary">Visão Geral</span>
+        </div>
+        <div class="company-card-cta">
+          <span>${isAllActive ? '✅ Empresa Ativa no Momento' : 'Selecionar Visão Geral'}</span>
+          <span>➔</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // 2. Cards individuais para cada agente/empresa
+  const filteredAgents = agents.filter(a => {
+    if (!q) return true;
+    const name = (a.name || '').toLowerCase();
+    const comp = (a.companyName || '').toLowerCase();
+    const session = (a.wahaSession || '').toLowerCase();
+    return name.includes(q) || comp.includes(q) || session.includes(q);
+  });
+
+  if (filteredAgents.length === 0 && !allMatches) {
+    html = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: var(--text-muted);">
+        <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
+        <p>Nenhuma empresa encontrada com "<strong>${escapeHtml(q)}</strong>".</p>
+      </div>
+    `;
+  } else {
+    filteredAgents.forEach(a => {
+      const isActive = currentActiveCompanyId === a.id;
+      const prov = a.llmProvider === 'openai' ? 'OpenAI' : 'Gemini';
+      const isOnline = a.active !== false;
+
+      html += `
+        <div class="company-picker-card ${isActive ? 'active-company' : ''}" data-company-id="${a.id}">
+          <div class="company-card-header">
+            <div class="company-card-icon" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">🏢</div>
+            <div>
+              <h4 class="company-card-title">${escapeHtml(a.companyName || a.name)}</h4>
+              <p class="company-card-subtitle">🤖 Bot: ${escapeHtml(a.name)}</p>
+            </div>
+          </div>
+          <div class="company-card-meta">
+            <span class="badge ${isOnline ? 'badge-emerald' : 'badge-danger'}">
+              <span class="status-dot ${isOnline ? 'online' : 'offline'}" style="margin-right: 4px;"></span>
+              ${isOnline ? 'WhatsApp Ativo' : 'Inativo'}
+            </span>
+            <span class="badge badge-secondary">${prov}</span>
+            ${a.isDefault ? '<span class="badge badge-primary">Padrão</span>' : ''}
+          </div>
+          <div class="company-card-cta">
+            <span>${isActive ? '✅ Empresa Ativa no Momento' : 'Acessar Esta Empresa'}</span>
+            <span>➔</span>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  grid.innerHTML = html;
+
+  grid.querySelectorAll('.company-picker-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const id = card.getAttribute('data-company-id');
+      if (id) {
+        setActiveCompany(id, true);
+        closeCompanyPickerModal();
+        const companyName = id === 'all' ? 'Todas as Empresas' : (card.querySelector('.company-card-title')?.textContent || 'Empresa');
+        showToast(`Empresa ativa: ${companyName} 🏢`, 'success');
+      }
+    });
+  });
 }
 
 function showLoginModal(errorMsg = '') {
@@ -55,9 +294,32 @@ function applyRolePermissions(user) {
       switchToTab('appointments');
     }
 
-    // Se vinculado a um cliente/agente específico (não '*'), aplica filtro automático
+    // Se vinculado a um cliente/agente específico (não '*'), aplica filtro automático e oculta o switcher
+    const switcherPill = document.getElementById('company-switcher-pill');
     if (user.assignedAgentId && user.assignedAgentId !== '*') {
-      currentAppointmentsAgentFilter = user.assignedAgentId;
+      setActiveCompany(user.assignedAgentId, false);
+      if (switcherPill) {
+        const actionEl = switcherPill.querySelector('.company-selector-action');
+        if (actionEl) actionEl.style.display = 'none';
+        const btnSelector = document.getElementById('btn-switch-company');
+        if (btnSelector) btnSelector.style.cursor = 'default';
+      }
+    } else {
+      if (switcherPill) {
+        const actionEl = switcherPill.querySelector('.company-selector-action');
+        if (actionEl) actionEl.style.display = 'inline-flex';
+        const btnSelector = document.getElementById('btn-switch-company');
+        if (btnSelector) btnSelector.style.cursor = 'pointer';
+      }
+    }
+  } else {
+    // Admin: acesso total ao seletor
+    const switcherPill = document.getElementById('company-switcher-pill');
+    if (switcherPill) {
+      const actionEl = switcherPill.querySelector('.company-selector-action');
+      if (actionEl) actionEl.style.display = 'inline-flex';
+      const btnSelector = document.getElementById('btn-switch-company');
+      if (btnSelector) btnSelector.style.cursor = 'pointer';
     }
   }
 }
@@ -84,6 +346,7 @@ function hideLoginModal(user = 'admin') {
   }
 
   applyRolePermissions(uObj);
+  updateTopbarCompanyDisplay();
 }
 
 /**
@@ -1154,12 +1417,17 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
         loadConfig();
         loadSchedule();
         loadWahaConfig();
-        loadAgents();
+        await loadAgents();
       }
       loadAgentsForSimulator();
       loadAppointments();
       if (data.user?.role === 'attendant') {
         switchToTab('appointments');
+      }
+
+      // Se for admin ou atendente com acesso a todas as empresas, abre o seletor obrigatório de empresa logo após o login
+      if (!data.user || data.user.role === 'admin' || !data.user.assignedAgentId || data.user.assignedAgentId === '*') {
+        openCompanyPickerModal(true);
       }
     } else {
       errorEl.textContent = data.error || 'Credenciais inválidas. Verifique usuário e senha.';
@@ -1185,6 +1453,8 @@ async function loadAgents() {
     const res = await fetchWithAuth('/api/agents');
     const data = await res.json();
     allAgents = data.agents || [];
+    allAgentsCache = allAgents;
+    updateTopbarCompanyDisplay();
 
     const badgeTotal = document.getElementById('badge-total-agents');
     if (badgeTotal) {
@@ -2217,7 +2487,11 @@ function populateAgentsDropdowns(agents) {
       agents.forEach(a => {
         filterSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
       });
-      if (current) filterSelect.value = current;
+      if (currentActiveCompanyId && (currentActiveCompanyId === 'all' || agents.some(a => a.id === currentActiveCompanyId))) {
+        filterSelect.value = currentActiveCompanyId;
+      } else if (current) {
+        filterSelect.value = current;
+      }
     }
   }
 
@@ -2234,7 +2508,11 @@ function populateAgentsDropdowns(agents) {
       agents.forEach(a => {
         modalSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} - ${a.companyName || 'Empresa'}</option>`;
       });
-      if (current) modalSelect.value = current;
+      if (currentActiveCompanyId && currentActiveCompanyId !== 'all') {
+        modalSelect.value = currentActiveCompanyId;
+      } else if (current) {
+        modalSelect.value = current;
+      }
     }
   }
 
@@ -2264,6 +2542,8 @@ function populateAgentsDropdowns(agents) {
     });
     if (current) userAgentSelect.value = current;
   }
+
+  updateTopbarCompanyDisplay();
 }
 
 /**
@@ -3414,9 +3694,17 @@ async function initApp() {
         loadConfig();
         loadSchedule();
         loadWahaConfig();
-        loadAgents();
+        await loadAgents();
       }
       loadAgentsForSimulator();
+
+      // Aplica empresa ativa salva no localStorage ou vinculada ao atendente
+      if (data.user?.assignedAgentId && data.user.assignedAgentId !== '*') {
+        setActiveCompany(data.user.assignedAgentId, false);
+      } else {
+        setActiveCompany(currentActiveCompanyId, false);
+      }
+
       await loadAppointments();
       startAppointmentsRealtimeSync();
       if (data.user?.role === 'attendant') {
@@ -4580,8 +4868,9 @@ function openExamDispatchModal(prefill = {}) {
     document.getElementById('modal-exam-patient-phone').value = prefill.clientPhone.replace(/@.*$/, '').replace(/\D/g, '');
   }
 
+  const targetAgent = prefill.agentId || (currentActiveCompanyId !== 'all' ? currentActiveCompanyId : '*');
   populatePartnersDropdowns();
-  populateExamAgentsSelect(prefill.agentId);
+  populateExamAgentsSelect(targetAgent);
   populateAppointmentsPickerForExams(prefill.appointmentId);
 
   const isPartner = prefill.referralType === 'partner';
@@ -4604,7 +4893,19 @@ function openExamDispatchModal(prefill = {}) {
   }
 
   updateExamTargetOptions(isPartner);
+  syncExamTargetCardClasses();
   overlay.style.display = 'flex';
+}
+
+function syncExamTargetCardClasses() {
+  document.querySelectorAll('.exam-target-card').forEach(card => {
+    const radio = card.querySelector('input[type="radio"]');
+    if (radio && radio.checked) {
+      card.classList.add('selected');
+    } else {
+      card.classList.remove('selected');
+    }
+  });
 }
 
 function updateExamTargetOptions(isPartner) {
@@ -4614,14 +4915,15 @@ function updateExamTargetOptions(isPartner) {
   const radioPartner = document.querySelector('input[name="modal-exam-target"][value="partner"]');
 
   if (isPartner) {
-    if (optPartner) optPartner.style.display = 'block';
-    if (optBoth) optBoth.style.display = 'block';
+    if (optPartner) optPartner.style.display = 'flex';
+    if (optBoth) optBoth.style.display = 'flex';
     if (radioPartner) radioPartner.checked = true;
   } else {
     if (optPartner) optPartner.style.display = 'none';
     if (optBoth) optBoth.style.display = 'none';
     if (radioPatient) radioPatient.checked = true;
   }
+  syncExamTargetCardClasses();
 }
 
 function openExamDispatchModalForAppointment(aptId) {
@@ -4668,23 +4970,30 @@ function populateExamAgentsSelect(targetAgentId) {
   if (!sel && !filterSel) return;
 
   let opts = '<option value="*">🌐 Agente Padrão (Global)</option>';
-  let filterOpts = '<option value="all">Todas as Unidades</option>';
+  let filterOpts = '<option value="all">🌐 Todas as Unidades (Visão Geral)</option>';
 
-  if (typeof allAgents !== 'undefined' && Array.isArray(allAgents)) {
-    allAgents.forEach(a => {
-      opts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
-      filterOpts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
-    });
-  }
+  const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+    ? allAgents
+    : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+
+  agentsList.forEach(a => {
+    opts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
+    filterOpts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
+  });
 
   if (sel) {
     sel.innerHTML = opts;
-    if (targetAgentId) sel.value = targetAgentId;
+    const defaultAgent = targetAgentId || (currentActiveCompanyId !== 'all' ? currentActiveCompanyId : '*');
+    sel.value = defaultAgent;
   }
   if (filterSel) {
     const curr = filterSel.value;
     filterSel.innerHTML = filterOpts;
-    if (curr) filterSel.value = curr;
+    if (currentActiveCompanyId && (currentActiveCompanyId === 'all' || agentsList.some(a => a.id === currentActiveCompanyId))) {
+      filterSel.value = currentActiveCompanyId;
+    } else if (curr) {
+      filterSel.value = curr;
+    }
   }
 }
 
@@ -5529,6 +5838,11 @@ document.querySelectorAll('input[name="modal-exam-referral-type"]').forEach(r =>
   });
 });
 
+// Listener para alternar visual dos cards de destinatário no modal de exames
+document.querySelectorAll('input[name="modal-exam-target"]').forEach(r => {
+  r.addEventListener('change', syncExamTargetCardClasses);
+});
+
 // Reenvio de Exame
 document.getElementById('btn-close-resend-modal')?.addEventListener('click', closeResendExamModal);
 document.getElementById('btn-cancel-resend')?.addEventListener('click', closeResendExamModal);
@@ -5542,8 +5856,16 @@ document.getElementById('exam-search-input')?.addEventListener('input', loadExam
 document.getElementById('exam-filter-referral')?.addEventListener('change', loadExams);
 document.getElementById('exam-filter-partner')?.addEventListener('change', loadExams);
 document.getElementById('exam-filter-status')?.addEventListener('change', loadExams);
-document.getElementById('exam-filter-agent')?.addEventListener('change', loadExams);
+document.getElementById('exam-filter-agent')?.addEventListener('change', (e) => {
+  setActiveCompany(e.target.value, false);
+  loadExams();
+});
 document.getElementById('btn-refresh-exams')?.addEventListener('click', loadExams);
+
+// Sincroniza alteração no select de agendamentos com o estado global da empresa
+document.getElementById('apt-filter-agent')?.addEventListener('change', (e) => {
+  setActiveCompany(e.target.value, false);
+});
 
 // Impressão de Relatório de Exames
 document.getElementById('btn-open-print-exams')?.addEventListener('click', openPrintExamsModal);
@@ -5566,6 +5888,36 @@ document.getElementById('print-exams-filter-referral')?.addEventListener('change
 document.getElementById('print-exams-filter-status')?.addEventListener('change', updatePrintExamsPreviewCount);
 document.getElementById('print-exams-filter-agent')?.addEventListener('change', updatePrintExamsPreviewCount);
 document.getElementById('btn-execute-print-exams')?.addEventListener('click', generateAndPrintExamsReport);
+
+// ============================================================================
+// Event Listeners: Seletor e Alternador de Empresa Ativa (Topbar & Modal)
+// ============================================================================
+document.getElementById('btn-switch-company')?.addEventListener('click', () => {
+  // Se for atendente vinculado a uma empresa fixa, impede alternar
+  if (currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*') {
+    showToast('Seu usuário de atendimento está vinculado exclusivamente a esta unidade.', 'warning');
+    return;
+  }
+  openCompanyPickerModal(false);
+});
+
+document.getElementById('btn-close-company-picker')?.addEventListener('click', closeCompanyPickerModal);
+
+document.getElementById('btn-skip-company-picker')?.addEventListener('click', () => {
+  setActiveCompany('all', true);
+  closeCompanyPickerModal();
+  showToast('Visão consolidada para todas as empresas ativada. 🌐', 'info');
+});
+
+document.getElementById('modal-company-picker-overlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-company-picker-overlay' && !isCompanyPickerMandatory) {
+    closeCompanyPickerModal();
+  }
+});
+
+document.getElementById('company-picker-search')?.addEventListener('input', (e) => {
+  renderCompanyPickerCards(e.target.value);
+});
 
 // Inicializa Drag & Drop de exames no carregamento
 setupExamDropzone();

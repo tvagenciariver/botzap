@@ -113,7 +113,22 @@
     <main class="main-content">
       <!-- Top Bar -->
       <header class="topbar">
-        <div class="page-title" id="page-title">Simulador de Atendimento</div>
+        <div class="topbar-left-group" style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+          <div class="page-title" id="page-title">Simulador de Atendimento</div>
+
+          <!-- Widget de Alternar Empresa / Cliente Ativo -->
+          <div class="company-switcher-pill" id="company-switcher-pill">
+            <button type="button" class="btn-company-selector" id="btn-switch-company" title="Clique para alternar a empresa ou cliente ativo">
+              <span class="company-badge-icon">🏢</span>
+              <div class="company-selector-info">
+                <span class="company-selector-label">Empresa Ativa</span>
+                <strong class="company-selector-name" id="topbar-company-name">Todas as Empresas</strong>
+              </div>
+              <span class="company-selector-action">🔄 Alternar Conta</span>
+            </button>
+          </div>
+        </div>
+
         <div class="topbar-actions">
           <div class="user-badge-container" id="user-badge-container" style="display: none;">
             <span class="user-badge-name" id="user-badge-name">👤 admin</span>
@@ -1875,7 +1890,7 @@
 
         <div class="modal-body">
           <!-- Atalho para vincular a agendamento existente -->
-          <div class="form-group">
+          <div class="form-group mb-3">
             <label for="modal-exam-select-appointment">Preencher a partir de um Agendamento (Opcional)</label>
             <select id="modal-exam-select-appointment" class="form-control">
               <option value="">✍️ Digitação Manual de Paciente</option>
@@ -1920,77 +1935,74 @@
             </div>
           </div>
 
-          <!-- Destino do Envio Inteligente -->
-          <div class="form-group" id="modal-exam-target-group">
+          <!-- Destino do Envio Inteligente (Cards Clicáveis) -->
+          <div class="form-group mb-3" id="modal-exam-target-group">
             <label>Destinatário do Envio no WhatsApp <span class="text-danger">*</span></label>
-            <div class="card p-3" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
+            <div class="exam-target-grid">
               <!-- Opção Paciente -->
-              <div class="exam-target-option" id="target-opt-patient">
-                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
-                  <input type="radio" name="modal-exam-target" value="patient" checked>
-                  <div>
-                    <strong>👤 Enviar somente para o Paciente</strong>
-                    <div style="font-size: 12px; color: var(--text-muted);">O laudo/exame será enviado diretamente no WhatsApp do paciente.</div>
-                  </div>
-                </label>
-              </div>
+              <label class="exam-target-card selected" id="target-opt-patient">
+                <input type="radio" name="modal-exam-target" value="patient" checked>
+                <div>
+                  <strong>👤 Somente Paciente</strong>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Envia diretamente no WhatsApp do paciente.</div>
+                </div>
+              </label>
 
               <!-- Opções de Convênio (visíveis somente se encaminhamento for partner) -->
-              <div class="exam-target-option mt-2" id="target-opt-partner" style="display: none;">
-                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
-                  <input type="radio" name="modal-exam-target" value="partner">
-                  <div>
-                    <strong>🏢 Enviar somente para a Clínica Parceira / Convênio</strong>
-                    <div style="font-size: 12px; color: var(--text-muted);">O laudo será enviado apenas ao contato da empresa parceira, que fará o repasse ao paciente.</div>
-                  </div>
-                </label>
-              </div>
-
-              <div class="exam-target-option mt-2" id="target-opt-both" style="display: none;">
-                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
-                  <input type="radio" name="modal-exam-target" value="both">
-                  <div>
-                    <strong>👥 Enviar para Ambos (Paciente + Clínica Parceira)</strong>
-                    <div style="font-size: 12px; color: var(--text-muted);">Envia simultaneamente uma via para o WhatsApp do paciente e outra para a clínica parceira.</div>
-                  </div>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <!-- Upload de Arquivo -->
-          <div class="form-group">
-            <label>Arquivo do Laudo ou Exame (PDF ou Imagem) <span class="text-danger">*</span></label>
-            <div id="exam-dropzone" class="file-dropzone" style="border: 2px dashed var(--border-color); border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: border-color 0.2s; background: rgba(255,255,255,0.01);">
-              <input type="file" id="modal-exam-file-input" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" style="display: none;">
-              <div class="dropzone-content" id="dropzone-empty-state">
-                <span class="dropzone-icon" style="font-size: 32px; display: block; margin-bottom: 6px;">📁</span>
-                <p style="margin: 0 0 4px 0;"><strong>Clique para selecionar</strong> ou arraste o arquivo aqui</p>
-                <small class="text-muted">Formatos suportados: PDF, JPG, PNG (até 25MB)</small>
-              </div>
-              <div class="dropzone-file-info" id="dropzone-file-selected" style="display: none; align-items: center; justify-content: space-between;">
-                <div class="d-flex align-center gap-2">
-                  <span class="file-icon" id="dropzone-file-icon" style="font-size: 28px;">📄</span>
-                  <div style="text-align: left;">
-                    <strong id="dropzone-file-name">laudo.pdf</strong>
-                    <div style="font-size: 11px; color: var(--text-muted);" id="dropzone-file-size">0 KB</div>
-                  </div>
+              <label class="exam-target-card" id="target-opt-partner" style="display: none;">
+                <input type="radio" name="modal-exam-target" value="partner">
+                <div>
+                  <strong>🏢 Somente Clínica Parceira</strong>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Envia para a clínica parceira repassar.</div>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline text-danger" id="btn-remove-selected-file">Remover</button>
-              </div>
+              </label>
+
+              <label class="exam-target-card" id="target-opt-both" style="display: none;">
+                <input type="radio" name="modal-exam-target" value="both">
+                <div>
+                  <strong>👥 Para Ambos</strong>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Envia para Paciente + Clínica Parceira.</div>
+                </div>
+              </label>
             </div>
           </div>
 
-          <!-- Legenda / Mensagem Personalizada do WhatsApp -->
-          <div class="form-group">
-            <label for="modal-exam-caption">Mensagem / Observação no WhatsApp (Opcional)</label>
-            <textarea id="modal-exam-caption" class="form-control" rows="2" placeholder="Deixe em branco para usar a mensagem padrão com identificação oficial da clínica e paciente..."></textarea>
+          <!-- Linha Dividida: Upload de Arquivo + Observações -->
+          <div class="form-row">
+            <!-- Upload de Arquivo -->
+            <div class="form-group col-6">
+              <label>Arquivo do Laudo / Exame <span class="text-danger">*</span></label>
+              <div id="exam-dropzone" class="file-dropzone" style="padding: 14px 12px; min-height: 110px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                <input type="file" id="modal-exam-file-input" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" style="display: none;">
+                <div class="dropzone-content" id="dropzone-empty-state">
+                  <span class="dropzone-icon" style="font-size: 26px; margin-bottom: 4px;">📁</span>
+                  <p style="margin: 0; font-size: 12px;"><strong>Clique ou arraste</strong> o laudo aqui</p>
+                  <small class="text-muted" style="font-size: 10.5px;">PDF, JPG, PNG (até 30MB)</small>
+                </div>
+                <div class="dropzone-file-info" id="dropzone-file-selected" style="display: none; width: 100%; align-items: center; justify-content: space-between;">
+                  <div class="d-flex align-center gap-2">
+                    <span class="file-icon" id="dropzone-file-icon" style="font-size: 22px;">📄</span>
+                    <div style="text-align: left;">
+                      <strong id="dropzone-file-name" style="font-size: 12px; display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">laudo.pdf</strong>
+                      <div style="font-size: 10.5px; color: var(--text-muted);" id="dropzone-file-size">0 KB</div>
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-outline text-danger" id="btn-remove-selected-file" style="padding: 2px 8px; font-size: 11px;">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Legenda / Mensagem no WhatsApp -->
+            <div class="form-group col-6">
+              <label for="modal-exam-caption">Mensagem no WhatsApp (Opcional)</label>
+              <textarea id="modal-exam-caption" class="form-control" rows="4" style="height: 110px; resize: none;" placeholder="Mensagem personalizada opcional (ou deixe em branco para usar a identificação oficial automática da clínica)..."></textarea>
+            </div>
           </div>
 
           <!-- Unidade / Agente -->
-          <div class="form-group">
+          <div class="form-group mt-2">
             <label for="modal-exam-agent">Unidade / Cliente Emissor</label>
-            <select id="modal-exam-agent" class="form-control">
+            <select id="modal-exam-agent" class="form-control form-control-sm">
               <option value="*">🌐 Agente Padrão (Global)</option>
             </select>
           </div>
@@ -2247,6 +2259,37 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-outline" id="btn-cancel-print-exams">Cancelar</button>
         <button type="button" class="btn btn-primary btn-glow" id="btn-execute-print-exams">🖨️ Visualizar & Imprimir Relatório (PDF)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Escolha de Empresa / Cliente Ativo (Pós-Login ou Switcher) -->
+  <div id="modal-company-picker-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🏢</span>
+          <div>
+            <h3 id="company-picker-title">Selecione a Empresa / Cliente</h3>
+            <p id="company-picker-subtitle">Escolha qual empresa você deseja gerenciar agora no painel:</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-company-picker">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="search-box mb-3">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="company-picker-search" class="form-control" placeholder="Buscar por empresa, nome do bot ou sessão WAHA...">
+        </div>
+
+        <div class="company-picker-grid" id="company-picker-grid">
+          <!-- Cards gerados dinamicamente via app.js -->
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="btn-skip-company-picker">🌐 Ver Todas as Empresas (Visão Global)</button>
       </div>
     </div>
   </div>
