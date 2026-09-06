@@ -1,0 +1,32 @@
+[
+  {
+    "id": "srv_consulta_medica",
+    "agentId": "*",
+    "name": "Consulta Médica Geral",
+    "description": "Avaliação clínica completa, check-up e prescrição",
+    "durationMinutes": 30,
+    "price": 200,
+    "active": true,
+    "createdAt": "2026-09-06T16:28:11.922Z"
+  },
+  {
+    "id": "srv_psicoterapia",
+    "agentId": "*",
+    "name": "Sessão de Psicoterapia",
+    "description": "Terapia Cognitivo-Comportamental individual",
+    "durationMinutes": 45,
+    "price": 180,
+    "active": true,
+    "createdAt": "2026-09-06T16:28:11.922Z"
+  },
+  {
+    "id": "srv_avaliacao_odonto",
+    "agentId": "*",
+    "name": "Avaliação Odontológica & Limpeza",
+    "description": "Profilaxia dental, remoção de tártaro e raio-X preventivo",
+    "durationMinutes": 30,
+    "price": 150,
+    "active": true,
+    "createdAt": "2026-09-06T16:28:11.922Z"
+  }
+]

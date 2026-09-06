@@ -75,6 +75,9 @@
         <button class="nav-btn active" data-tab="simulator">
           <span class="nav-icon">💬</span> Simulador de Chat
         </button>
+        <button class="nav-btn" data-tab="appointments">
+          <span class="nav-icon">📅</span> Agendamentos & Agenda
+        </button>
         <button class="nav-btn" data-tab="agents">
           <span class="nav-icon">🤖</span> Agentes & Clientes
         </button>
@@ -148,6 +151,189 @@
             <input type="text" id="chat-input" placeholder="Digite uma mensagem como se fosse o cliente..." autocomplete="off">
             <button type="submit" class="btn btn-primary" id="btn-send-sim">Enviar</button>
           </form>
+        </div>
+      </section>
+
+      <!-- TAB: Agendamentos & Agenda Inteligente -->
+      <section class="tab-pane" id="pane-appointments">
+        <!-- Header da Central de Agendamentos -->
+        <div class="card tab-header-card">
+          <div class="tab-header-left">
+            <div class="tab-header-title">
+              <span class="tab-header-icon">📅</span>
+              <div>
+                <h2>Central de Agendamentos & Agenda Inteligente</h2>
+                <p>Gestão completa de consultas, anti-colisão em tempo real, alertas no WhatsApp dos especialistas e confirmações D-1 automáticas com fila de encaixes.</p>
+              </div>
+            </div>
+            <div class="tab-header-meta">
+              <span class="badge badge-emerald" id="badge-appointments-date">
+                📅 Hoje: Carregando...
+              </span>
+            </div>
+          </div>
+          <div class="tab-header-actions">
+            <button class="btn btn-outline" id="btn-trigger-reminders" title="Enviar lembrete D-1 pelo WhatsApp para quem tem consulta amanhã">
+              🔔 Disparar Lembretes D-1
+            </button>
+            <button class="btn btn-secondary" id="btn-manage-specialists">
+              👨‍⚕️ Especialistas & Serviços
+            </button>
+            <button class="btn btn-primary btn-glow" id="btn-new-appointment">
+              ➕ Novo Agendamento
+            </button>
+          </div>
+        </div>
+
+        <!-- Banner de Vagas e Encaixes Rápidos -->
+        <div id="encaixe-alert-banner" class="encaixe-banner" style="display: none;">
+          <div class="encaixe-banner-content">
+            <div class="encaixe-icon">⚡</div>
+            <div class="encaixe-text">
+              <strong>Vagas Livres para Encaixe Imediato!</strong>
+              <span id="encaixe-banner-msg">Existem horários liberados recentemente por cancelamentos de pacientes para hoje ou amanhã.</span>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-amber" id="btn-filter-encaixes">Visualizar Vagas de Encaixe</button>
+        </div>
+
+        <!-- KPIs Strip -->
+        <div class="kpi-strip">
+          <div class="kpi-card">
+            <div class="kpi-val" id="kpi-total">0</div>
+            <div class="kpi-lbl">Total no Dia</div>
+            <div class="kpi-bar" style="background: var(--primary);"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-primary" id="kpi-confirmed">0</div>
+            <div class="kpi-lbl">Confirmados</div>
+            <div class="kpi-bar" style="background: #3b82f6;"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-emerald" id="kpi-presence">0</div>
+            <div class="kpi-lbl">Presença D-1 Confirmada</div>
+            <div class="kpi-bar" style="background: #10b981;"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-cyan" id="kpi-progress">0</div>
+            <div class="kpi-lbl">Em Atendimento</div>
+            <div class="kpi-bar" style="background: #06b6d4;"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-purple" id="kpi-completed">0</div>
+            <div class="kpi-lbl">Concluídos</div>
+            <div class="kpi-bar" style="background: #a855f7;"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-rose" id="kpi-cancelled">0</div>
+            <div class="kpi-lbl">Cancelados (Vagas Abertas)</div>
+            <div class="kpi-bar" style="background: #f43f5e;"></div>
+          </div>
+          <div class="kpi-card kpi-card-encaixes">
+            <div class="kpi-val text-amber" id="kpi-encaixes">0</div>
+            <div class="kpi-lbl">Vagas Encaixe</div>
+            <div class="kpi-bar" style="background: #f59e0b;"></div>
+          </div>
+        </div>
+
+        <!-- Barra de Ferramentas e Filtros -->
+        <div class="card appointments-toolbar">
+          <div class="toolbar-row">
+            <!-- Filtros de Data Rápida -->
+            <div class="date-quick-filters">
+              <button type="button" class="btn btn-sm btn-date-filter active" data-datefilter="today" id="btn-quick-today">Hoje</button>
+              <button type="button" class="btn btn-sm btn-date-filter" data-datefilter="tomorrow" id="btn-quick-tomorrow">Amanhã</button>
+              <button type="button" class="btn btn-sm btn-date-filter" data-datefilter="all" id="btn-quick-all">Todos</button>
+              <div class="date-picker-wrap">
+                <input type="date" id="apt-filter-date" class="form-control form-control-sm">
+              </div>
+            </div>
+
+            <!-- Filtros por Dropdowns -->
+            <div class="dropdown-filters">
+              <div class="filter-item">
+                <label for="apt-filter-agent">Cliente / Agente:</label>
+                <select id="apt-filter-agent" class="form-control form-control-sm">
+                  <option value="all">Todos os Clientes</option>
+                </select>
+              </div>
+              <div class="filter-item">
+                <label for="apt-filter-specialist">Especialista:</label>
+                <select id="apt-filter-specialist" class="form-control form-control-sm">
+                  <option value="all">Todos os Especialistas</option>
+                </select>
+              </div>
+              <div class="filter-item">
+                <label for="apt-filter-status">Status:</label>
+                <select id="apt-filter-status" class="form-control form-control-sm">
+                  <option value="all">Todos os Status</option>
+                  <option value="confirmed">Confirmado</option>
+                  <option value="presence_confirmed">Presença Confirmada (D-1)</option>
+                  <option value="waiting">Aguardando Recepção</option>
+                  <option value="in_progress">Em Atendimento</option>
+                  <option value="completed">Concluído</option>
+                  <option value="cancelled">Cancelado</option>
+                  <option value="cancelled_by_patient">Desistência do Paciente</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Seletor de Modo de Exibição -->
+            <div class="view-switch-group">
+              <button type="button" class="btn btn-sm view-switch-btn active" id="btn-view-timeline" title="Grade de Horários">
+                🕒 Grade Horários
+              </button>
+              <button type="button" class="btn btn-sm view-switch-btn" id="btn-view-kanban" title="Visualização Kanban">
+                📊 Kanban
+              </button>
+              <button type="button" class="btn btn-sm view-switch-btn" id="btn-view-table" title="Lista / Tabela">
+                📋 Tabela
+              </button>
+            </div>
+          </div>
+
+          <!-- Barra de Busca Rápida -->
+          <div class="search-box apt-search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="apt-search-input" class="form-control" placeholder="Buscar paciente, telefone WhatsApp, procedimento ou anotações...">
+          </div>
+        </div>
+
+        <!-- Conteúdo das Visualizações -->
+        <div class="appointments-view-wrapper">
+          <!-- VISÃO 1: Linha do Tempo / Grade de Horários por Especialista -->
+          <div id="appointments-timeline-view" class="appointments-subview">
+            <!-- Renderizado dinamicamente via app.js -->
+          </div>
+
+          <!-- VISÃO 2: Visualização Kanban por Status -->
+          <div id="appointments-kanban-view" class="appointments-subview" style="display: none;">
+            <!-- Renderizado dinamicamente via app.js -->
+          </div>
+
+          <!-- VISÃO 3: Tabela Completa e Detalhada -->
+          <div id="appointments-table-view" class="appointments-subview" style="display: none;">
+            <div class="card table-card">
+              <table class="data-table" id="appointments-data-table">
+                <thead>
+                  <tr>
+                    <th>Data & Horário</th>
+                    <th>Paciente</th>
+                    <th>WhatsApp</th>
+                    <th>Especialista</th>
+                    <th>Procedimento</th>
+                    <th>Status</th>
+                    <th>Origem</th>
+                    <th>Alertas</th>
+                    <th style="text-align: right;">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="appointments-table-body">
+                  <!-- Linhas renderizadas via app.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1005,6 +1191,273 @@
   <div id="toast-container"></div>
 
 
+
+  <!-- MODAL: Novo / Editar Agendamento -->
+  <div id="modal-appointment-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🗓️</span>
+          <div>
+            <h3 id="modal-apt-title">Novo Agendamento</h3>
+            <p id="modal-apt-subtitle">Preencha os dados da consulta. O horário será validado contra colisões.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-apt-modal">&times;</button>
+      </div>
+
+      <form id="modal-appointment-form">
+        <input type="hidden" id="modal-apt-id" value="">
+
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="modal-apt-agent">Cliente / Agente da Empresa <span class="text-danger">*</span></label>
+              <select id="modal-apt-agent" class="form-control" required></select>
+            </div>
+            <div class="form-group col-6">
+              <label for="modal-apt-specialist">Profissional / Especialista <span class="text-danger">*</span></label>
+              <select id="modal-apt-specialist" class="form-control" required></select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="modal-apt-service">Procedimento / Serviço</label>
+              <select id="modal-apt-service" class="form-control"></select>
+            </div>
+            <div class="form-group col-6">
+              <label for="modal-apt-date">Data da Consulta <span class="text-danger">*</span></label>
+              <input type="date" id="modal-apt-date" class="form-control" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="modal-apt-time">Horário Disponível (Anti-Colisão) <span class="text-danger">*</span></label>
+            <div class="slot-picker-container">
+              <select id="modal-apt-time" class="form-control" required>
+                <option value="">Selecione uma data e especialista para ver horários livres...</option>
+              </select>
+              <small class="form-hint" id="modal-slot-hint">Horários calculados automaticamente com base na agenda do profissional e agendamentos existentes.</small>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="modal-apt-name">Nome Completo do Paciente <span class="text-danger">*</span></label>
+              <input type="text" id="modal-apt-name" class="form-control" placeholder="Ex: João da Silva" required>
+            </div>
+            <div class="form-group col-6">
+              <label for="modal-apt-phone">WhatsApp do Paciente <span class="text-danger">*</span></label>
+              <input type="text" id="modal-apt-phone" class="form-control" placeholder="Ex: 5511999998888" required>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="modal-apt-notes">Observações Médicas / Motivo da Consulta</label>
+            <textarea id="modal-apt-notes" class="form-control" rows="2" placeholder="Ex: Primeira consulta, queixa de dores, encaminhado pelo Dr. Fulano..."></textarea>
+          </div>
+
+          <div class="form-group checkbox-group" style="margin-top: 10px;">
+            <label class="custom-checkbox">
+              <input type="checkbox" id="modal-apt-notify" checked>
+              <span class="checkmark"></span>
+              <span><strong>Notificar Especialista:</strong> Enviar mensagem automática no WhatsApp do médico/profissional com os detalhes desta consulta</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-apt">Descartar</button>
+          <button type="submit" class="btn btn-primary btn-glow" id="btn-save-apt">💾 Confirmar Agendamento</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Gerenciador de Especialistas & Serviços -->
+  <div id="modal-specialists-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-xl">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">👨‍⚕️</span>
+          <div>
+            <h3>Gerenciador de Especialistas & Procedimentos</h3>
+            <p>Cadastre médicos, psicólogos, dentistas e procedimentos disponíveis para agendamento.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-specs-modal">&times;</button>
+      </div>
+
+      <!-- Abas internas -->
+      <div class="modal-tabs-nav">
+        <button type="button" class="modal-tab-btn active" data-spectab="specs" id="tab-btn-specs">
+          👨‍⚕️ Especialistas (Médicos / Profissionais)
+        </button>
+        <button type="button" class="modal-tab-btn" data-spectab="services" id="tab-btn-services">
+          🩺 Procedimentos & Serviços
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <!-- SUB-ABA 1: Especialistas -->
+        <div id="spec-tab-specs" class="spec-tab-pane active">
+          <div class="d-flex justify-between align-center mb-3">
+            <h4>Profissionais Cadastrados</h4>
+            <button type="button" class="btn btn-sm btn-primary" id="btn-show-add-specialist">➕ Novo Especialista</button>
+          </div>
+
+          <!-- Formulário Criar Especialista (Oculto por padrão) -->
+          <div id="form-new-specialist-wrap" class="card card-inner mb-3" style="display: none;">
+            <h5 id="form-spec-title">Cadastrar Novo Especialista</h5>
+            <form id="form-specialist">
+              <input type="hidden" id="spec-id" value="">
+              <div class="form-row">
+                <div class="form-group col-4">
+                  <label>Nome do Profissional <span class="text-danger">*</span></label>
+                  <input type="text" id="spec-name" class="form-control" placeholder="Dr. Lucas Mendes" required>
+                </div>
+                <div class="form-group col-4">
+                  <label>Especialidade / Cargo <span class="text-danger">*</span></label>
+                  <input type="text" id="spec-role" class="form-control" placeholder="Clínico Geral / Psicólogo" required>
+                </div>
+                <div class="form-group col-4">
+                  <label>WhatsApp para Alertas <span class="text-danger">*</span></label>
+                  <input type="text" id="spec-phone" class="form-control" placeholder="5511999998888" required>
+                  <small class="form-hint">Recebe avisos automáticos de novas consultas e cancelamentos.</small>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group col-3">
+                  <label>Início Expediente</label>
+                  <input type="time" id="spec-hours-start" class="form-control" value="08:00" required>
+                </div>
+                <div class="form-group col-3">
+                  <label>Fim Expediente</label>
+                  <input type="time" id="spec-hours-end" class="form-control" value="18:00" required>
+                </div>
+                <div class="form-group col-3">
+                  <label>Início Almoço</label>
+                  <input type="time" id="spec-break-start" class="form-control" value="12:00">
+                </div>
+                <div class="form-group col-3">
+                  <label>Fim Almoço</label>
+                  <input type="time" id="spec-break-end" class="form-control" value="13:00">
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group col-4">
+                  <label>Duração por Consulta (min)</label>
+                  <select id="spec-duration" class="form-control">
+                    <option value="15">15 minutos</option>
+                    <option value="20">20 minutos</option>
+                    <option value="30" selected>30 minutos</option>
+                    <option value="45">45 minutos</option>
+                    <option value="60">60 minutos (1 hora)</option>
+                  </select>
+                </div>
+                <div class="form-group col-8">
+                  <label>Dias de Atendimento na Semana</label>
+                  <div class="days-checkboxes">
+                    <label class="day-check"><input type="checkbox" name="spec-days" value="monday" checked> Seg</label>
+                    <label class="day-check"><input type="checkbox" name="spec-days" value="tuesday" checked> Ter</label>
+                    <label class="day-check"><input type="checkbox" name="spec-days" value="wednesday" checked> Qua</label>
+                    <label class="day-check"><input type="checkbox" name="spec-days" value="thursday" checked> Qui</label>
+                    <label class="day-check"><input type="checkbox" name="spec-days" value="friday" checked> Sex</label>
+                    <label class="day-check"><input type="checkbox" name="spec-days" value="saturday"> Sáb</label>
+                    <label class="day-check"><input type="checkbox" name="spec-days" value="sunday"> Dom</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex justify-end gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-outline" id="btn-cancel-specialist">Cancelar</button>
+                <button type="submit" class="btn btn-sm btn-primary">Salvar Especialista</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Tabela de Especialistas -->
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Profissional</th>
+                  <th>Especialidade</th>
+                  <th>WhatsApp Alertas</th>
+                  <th>Horário Atendimento</th>
+                  <th>Duração</th>
+                  <th>Status</th>
+                  <th style="text-align: right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="specialists-table-body">
+                <!-- Preenchido via app.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SUB-ABA 2: Procedimentos & Serviços -->
+        <div id="spec-tab-services" class="spec-tab-pane" style="display: none;">
+          <div class="d-flex justify-between align-center mb-3">
+            <h4>Procedimentos & Serviços Ofertados</h4>
+            <button type="button" class="btn btn-sm btn-primary" id="btn-show-add-service">➕ Novo Procedimento</button>
+          </div>
+
+          <!-- Formulário Criar Serviço -->
+          <div id="form-new-service-wrap" class="card card-inner mb-3" style="display: none;">
+            <h5 id="form-service-title">Cadastrar Novo Procedimento</h5>
+            <form id="form-service">
+              <input type="hidden" id="service-id" value="">
+              <div class="form-row">
+                <div class="form-group col-4">
+                  <label>Nome do Procedimento <span class="text-danger">*</span></label>
+                  <input type="text" id="service-name" class="form-control" placeholder="Consulta Cardiológica" required>
+                </div>
+                <div class="form-group col-4">
+                  <label>Duração (minutos)</label>
+                  <input type="number" id="service-duration" class="form-control" value="30" min="10" max="180">
+                </div>
+                <div class="form-group col-4">
+                  <label>Valor (R$)</label>
+                  <input type="number" id="service-price" class="form-control" placeholder="150.00" step="0.01">
+                </div>
+              </div>
+              <div class="d-flex justify-end gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-outline" id="btn-cancel-service">Cancelar</button>
+                <button type="submit" class="btn btn-sm btn-primary">Salvar Procedimento</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Tabela de Serviços -->
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Procedimento</th>
+                  <th>Duração</th>
+                  <th>Preço Estimado</th>
+                  <th>Status</th>
+                  <th style="text-align: right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="services-table-body">
+                <!-- Preenchido via app.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="btn-close-specs-bottom">Fechar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal / Tela de Login com Usuário e Senha -->
   <div id="login-overlay" class="login-overlay">

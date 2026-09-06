@@ -1,6 +1,7 @@
 import { IAgent, AgentContext, AgentResponse } from './agents/base.js';
 import { BusinessHoursAgent } from './agents/business-hours.js';
 import { HandoffAgent } from './agents/handoff.js';
+import { BookingAgent } from './agents/booking.js';
 import { AttendantAgent } from './agents/attendant.js';
 import { messageDebouncer } from './debouncer.js';
 import { botTracker } from './bot-tracker.js';
@@ -31,10 +32,12 @@ export class AgentOrchestrator {
     // Ordem de prioridade dos agentes:
     // 1. BusinessHoursAgent (verifica se está fora do horário comercial)
     // 2. HandoffAgent (checa se o cliente quer atendente humano)
-    // 3. AttendantAgent (IA: Google Gemini / OpenAI)
+    // 3. BookingAgent (Agendamentos, anti-conflitos e confirmação D-1)
+    // 4. AttendantAgent (IA: Google Gemini / OpenAI)
     this.agents = [
       new BusinessHoursAgent(),
       new HandoffAgent(),
+      new BookingAgent(),
       new AttendantAgent()
     ];
 

@@ -10,6 +10,8 @@ import { openAIService } from '../openai/client.js';
 import { wahaClient } from '../waha/client.js';
 import { WahaWebhookEvent } from '../waha/types.js';
 import { checkBusinessHoursStatus } from '../orchestrator/schedule-helper.js';
+import { appointmentManager } from '../appointments/appointment-manager.js';
+import { notificationService } from '../appointments/notification-service.js';
 
 export const apiRouter = Router();
 
@@ -596,3 +598,278 @@ apiRouter.post('/api/agents/:id/duplicate', requireAuth, (req: Request, res: Res
     res.status(400).json({ error: err.message });
   }
 });
+
+// ============================================================================
+// AGENDAMENTOS & AGENDA INTELIGENTE
+// ============================================================================
+
+/**
+ * Lista agendamentos com filtros (data, agentId, specialistId, status)
+ */
+apiRouter.get('/api/appointments', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { agentId, date, specialistId, status } = req.query as {
+      agentId?: string;
+      date?: string;
+      specialistId?: string;
+      status?: string;
+    };
+    const appointments = appointmentManager.listAppointments({ agentId, date, specialistId, status });
+    res.json({ appointments });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Métricas e KPIs para o Dashboard de Agendamentos
+ */
+apiRouter.get('/api/appointments/summary', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { agentId, date } = req.query as { agentId?: string; date?: string };
+    const summary = appointmentManager.getAppointmentsSummary(agentId, date);
+    res.json({ summary });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Consulta horários disponíveis (anti-colisão) para uma data e especialista
+ */
+apiRouter.get('/api/appointments/slots', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { specialistId, date } = req.query as { specialistId?: string; date?: string };
+    if (!specialistId || !date) {
+      return res.status(400).json({ error: 'specialistId e date são obrigatórios.' });
+    }
+    const slots = appointmentManager.getAvailableSlots(specialistId, date);
+    res.json({ slots });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Lista vagas canceladas para encaixes rápidos (Hoje e Amanhã)
+ */
+apiRouter.get('/api/appointments/encaixes', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { agentId } = req.query as { agentId?: string };
+    const encaixes = appointmentManager.getEncaixes(agentId);
+    res.json({ encaixes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Criação manual de agendamento pelo painel
+ */
+apiRouter.post('/api/appointments', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const {
+      agentId,
+      specialistId,
+      serviceId,
+      clientPhone,
+      clientName,
+      date,
+      startTime,
+      notes,
+      notifySpecialist
+    } = req.body;
+
+    if (!specialistId || !date || !startTime || !clientName || !clientPhone) {
+      return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
+    }
+
+    const clientChatId = notificationService.formatToWhatsAppChatId(clientPhone);
+
+    const appointment = appointmentManager.createAppointment({
+      agentId: agentId || 'default',
+      specialistId,
+      serviceId,
+      clientChatId,
+      clientPhone,
+      clientName,
+      date,
+      startTime,
+      notes,
+      bookedVia: 'manual'
+    });
+
+    // Notifica o especialista se solicitado
+    if (notifySpecialist !== false) {
+      notificationService.notifySpecialistNewBooking(appointment).catch(err => {
+        console.error('[Routes] Erro ao notificar especialista sobre novo agendamento:', err.message);
+      });
+    }
+
+    res.status(201).json({ success: true, appointment });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * Atualiza status, observações ou reagendamento de consulta
+ */
+apiRouter.put('/api/appointments/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const previous = appointmentManager.getAppointment(id);
+    if (!previous) {
+      return res.status(404).json({ error: 'Agendamento não encontrado.' });
+    }
+
+    const updated = appointmentManager.updateAppointment(id, req.body);
+
+    // Se mudou para cancelado e não era antes, notifica especialista
+    if (
+      (updated.status === 'cancelled' || updated.status === 'cancelled_by_patient') &&
+      previous.status !== 'cancelled' && previous.status !== 'cancelled_by_patient'
+    ) {
+      notificationService.notifySpecialistCancellation(updated).catch(err => {
+        console.error('[Routes] Erro ao notificar cancelamento:', err.message);
+      });
+    }
+
+    res.json({ success: true, appointment: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * Exclui agendamento permanentemente
+ */
+apiRouter.delete('/api/appointments/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const ok = appointmentManager.deleteAppointment(id);
+    res.json({ success: ok, message: 'Agendamento removido com sucesso.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * Reenvia notificação WhatsApp ao especialista
+ */
+apiRouter.post('/api/appointments/:id/notify', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const apt = appointmentManager.getAppointment(id);
+    if (!apt) {
+      return res.status(404).json({ error: 'Agendamento não encontrado.' });
+    }
+
+    const sent = await notificationService.notifySpecialistNewBooking(apt);
+    res.json({ success: true, sent });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Disparo em lote de Lembretes D-1 para consultas de amanhã
+ */
+apiRouter.post('/api/appointments/send-reminders', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { agentId } = req.body;
+    const result = await notificationService.sendRemindersForTomorrow(agentId);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Envia lembrete D-1 individual para um agendamento
+ */
+apiRouter.post('/api/appointments/:id/send-reminder', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const apt = appointmentManager.getAppointment(id);
+    if (!apt) {
+      return res.status(404).json({ error: 'Agendamento não encontrado.' });
+    }
+
+    const sent = await notificationService.sendDMinusOneReminder(apt);
+    res.json({ success: true, sent });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// ESPECIALISTAS & SERVIÇOS
+// ============================================================================
+
+apiRouter.get('/api/specialists', requireAuth, (req: Request, res: Response) => {
+  const { agentId } = req.query as { agentId?: string };
+  const specialists = appointmentManager.listSpecialists(agentId);
+  res.json({ specialists });
+});
+
+apiRouter.post('/api/specialists', requireAuth, (req: Request, res: Response) => {
+  try {
+    const created = appointmentManager.createSpecialist(req.body);
+    res.status(201).json({ success: true, specialist: created });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/api/specialists/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const updated = appointmentManager.updateSpecialist(req.params.id, req.body);
+    res.json({ success: true, specialist: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/api/specialists/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const ok = appointmentManager.deleteSpecialist(req.params.id);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/api/services', requireAuth, (req: Request, res: Response) => {
+  const { agentId } = req.query as { agentId?: string };
+  const services = appointmentManager.listServices(agentId);
+  res.json({ services });
+});
+
+apiRouter.post('/api/services', requireAuth, (req: Request, res: Response) => {
+  try {
+    const created = appointmentManager.createService(req.body);
+    res.status(201).json({ success: true, service: created });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/api/services/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const updated = appointmentManager.updateService(req.params.id, req.body);
+    res.json({ success: true, service: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/api/services/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const ok = appointmentManager.deleteService(req.params.id);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+

@@ -1,0 +1,81 @@
+[
+  {
+    "id": "spec_carlos",
+    "agentId": "*",
+    "name": "Dr. Carlos Medeiros",
+    "role": "Clínico Geral & Cardiologista",
+    "phone": "5511999998888",
+    "email": "carlos.medeiros@clinica.com.br",
+    "avatar": "👨‍⚕️",
+    "workingDays": [
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday"
+    ],
+    "workHoursStart": "08:00",
+    "workHoursEnd": "18:00",
+    "breakStart": "12:00",
+    "breakEnd": "13:00",
+    "slotDurationMinutes": 30,
+    "serviceIds": [
+      "srv_consulta_medica"
+    ],
+    "active": true,
+    "createdAt": "2026-09-06T16:28:11.920Z"
+  },
+  {
+    "id": "spec_sofia",
+    "agentId": "*",
+    "name": "Dra. Sofia Nogueira",
+    "role": "Psicóloga Clínica (TCC)",
+    "phone": "5511988887777",
+    "email": "sofia.psicologia@clinica.com.br",
+    "avatar": "👩‍⚕️",
+    "workingDays": [
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday"
+    ],
+    "workHoursStart": "09:00",
+    "workHoursEnd": "18:00",
+    "breakStart": "12:00",
+    "breakEnd": "13:00",
+    "slotDurationMinutes": 45,
+    "serviceIds": [
+      "srv_psicoterapia"
+    ],
+    "active": true,
+    "createdAt": "2026-09-06T16:28:11.921Z"
+  },
+  {
+    "id": "spec_mariana",
+    "agentId": "*",
+    "name": "Dra. Mariana Santos",
+    "role": "Cirurgiã-Dentista & Ortodontista",
+    "phone": "5511977776666",
+    "email": "mariana.odonto@clinica.com.br",
+    "avatar": "🦷",
+    "workingDays": [
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday"
+    ],
+    "workHoursStart": "08:30",
+    "workHoursEnd": "17:30",
+    "breakStart": "12:00",
+    "breakEnd": "13:00",
+    "slotDurationMinutes": 30,
+    "serviceIds": [
+      "srv_avaliacao_odonto"
+    ],
+    "active": true,
+    "createdAt": "2026-09-06T16:28:11.921Z"
+  }
+]

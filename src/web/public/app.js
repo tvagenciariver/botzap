@@ -104,6 +104,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 
     const titles = {
       simulator: 'Simulador de Atendimento (WhatsApp)',
+      appointments: 'Central de Agendamentos & Agenda Inteligente',
       agents: 'Gerenciador de Agentes & Clientes (Multi-Agentes)',
       prompts: 'Configuração Geral & Agente Padrão',
       schedule: 'Horário Comercial & Mensagem de Ausência',
@@ -115,6 +116,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 
     if (getAuthToken()) {
       if (targetTab === 'simulator') loadAgentsForSimulator();
+      if (targetTab === 'appointments') loadAppointments();
       if (targetTab === 'agents') loadAgents();
       if (targetTab === 'chats') loadChats();
       if (targetTab === 'logs') loadLogs();
@@ -1804,6 +1806,1153 @@ document.getElementById('btn-logout')?.addEventListener('click', async () => {
   showLoginModal();
 });
 
+// ============================================================================
+// SISTEMA DE AGENDAMENTO, TIMELINE, KANBAN E NOTIFICAÇÕES (FRONTEND)
+// ============================================================================
+
+let appointmentsState = [];
+let specialistsState = [];
+let servicesState = [];
+let encaixesState = [];
+let currentAppointmentsView = 'timeline'; // 'timeline' | 'kanban' | 'table'
+let currentAppointmentsDateFilter = 'today';
+let currentAppointmentsDateValue = '';
+let currentAppointmentsAgentFilter = 'all';
+let currentAppointmentsSpecialistFilter = 'all';
+let currentAppointmentsStatusFilter = 'all';
+let currentAppointmentsSearch = '';
+
+function getTodayString() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getTomorrowString() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateBR(dateStr) {
+  if (!dateStr || !dateStr.includes('-')) return dateStr || '';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function getStatusPill(status) {
+  switch (status) {
+    case 'scheduled':
+    case 'confirmed':
+      return `<span class="status-pill pill-confirmed">🔵 Confirmado</span>`;
+    case 'presence_confirmed':
+      return `<span class="status-pill pill-presence_confirmed">✅ Presença D-1</span>`;
+    case 'waiting':
+      return `<span class="status-pill pill-waiting">⏳ Recepção</span>`;
+    case 'in_progress':
+      return `<span class="status-pill pill-in_progress">🩺 Em Atendimento</span>`;
+    case 'completed':
+      return `<span class="status-pill pill-completed">🟣 Concluído</span>`;
+    case 'cancelled':
+      return `<span class="status-pill pill-cancelled">❌ Cancelado</span>`;
+    case 'cancelled_by_patient':
+      return `<span class="status-pill pill-cancelled_by_patient">⚠️ Desistência D-1</span>`;
+    default:
+      return `<span class="status-pill">${status}</span>`;
+  }
+}
+
+/**
+ * Carrega todos os dados da Central de Agendamentos
+ */
+async function loadAppointments() {
+  if (!getAuthToken()) return;
+
+  if (!currentAppointmentsDateValue) {
+    currentAppointmentsDateValue = getTodayString();
+    const dateInput = document.getElementById('apt-filter-date');
+    if (dateInput) dateInput.value = currentAppointmentsDateValue;
+  }
+
+  try {
+    // 1. Carrega Especialistas e Serviços se ainda não carregados
+    const [specRes, srvRes, agentsRes] = await Promise.all([
+      fetchWithAuth('/api/specialists'),
+      fetchWithAuth('/api/services'),
+      fetchWithAuth('/api/agents')
+    ]);
+
+    if (specRes.ok) {
+      const data = await specRes.json();
+      specialistsState = data.specialists || [];
+      populateSpecialistsDropdowns();
+    }
+
+    if (srvRes.ok) {
+      const data = await srvRes.json();
+      servicesState = data.services || [];
+      populateServicesDropdowns();
+    }
+
+    if (agentsRes.ok) {
+      const data = await agentsRes.json();
+      populateAgentsDropdowns(data.agents || []);
+    }
+
+    // 2. Parâmetros de busca de agendamentos
+    const query = new URLSearchParams();
+    if (currentAppointmentsDateFilter !== 'all' && currentAppointmentsDateValue) {
+      query.set('date', currentAppointmentsDateValue);
+    }
+    if (currentAppointmentsAgentFilter !== 'all') {
+      query.set('agentId', currentAppointmentsAgentFilter);
+    }
+    if (currentAppointmentsSpecialistFilter !== 'all') {
+      query.set('specialistId', currentAppointmentsSpecialistFilter);
+    }
+    if (currentAppointmentsStatusFilter !== 'all') {
+      query.set('status', currentAppointmentsStatusFilter);
+    }
+
+    // 3. Busca Agendamentos, Resumo e Encaixes
+    const [aptsRes, sumRes, encRes] = await Promise.all([
+      fetchWithAuth(`/api/appointments?${query.toString()}`),
+      fetchWithAuth(`/api/appointments/summary?date=${currentAppointmentsDateValue}&agentId=${currentAppointmentsAgentFilter}`),
+      fetchWithAuth(`/api/appointments/encaixes?agentId=${currentAppointmentsAgentFilter}`)
+    ]);
+
+    if (aptsRes.ok) {
+      const data = await aptsRes.json();
+      appointmentsState = data.appointments || [];
+    }
+
+    if (sumRes.ok) {
+      const data = await sumRes.json();
+      renderKPIs(data.summary);
+    }
+
+    if (encRes.ok) {
+      const data = await encRes.json();
+      encaixesState = data.encaixes || [];
+      renderEncaixeBanner();
+    }
+
+    // Atualiza badge de data
+    const dateBadge = document.getElementById('badge-appointments-date');
+    if (dateBadge) {
+      if (currentAppointmentsDateFilter === 'today') {
+        dateBadge.textContent = `📅 Hoje: ${formatDateBR(currentAppointmentsDateValue)}`;
+      } else if (currentAppointmentsDateFilter === 'tomorrow') {
+        dateBadge.textContent = `📅 Amanhã: ${formatDateBR(currentAppointmentsDateValue)}`;
+      } else if (currentAppointmentsDateFilter === 'all') {
+        dateBadge.textContent = `📅 Todas as Datas`;
+      } else {
+        dateBadge.textContent = `📅 Data: ${formatDateBR(currentAppointmentsDateValue)}`;
+      }
+    }
+
+    renderAppointments();
+  } catch (err) {
+    console.error('[Appointments] Erro ao carregar:', err);
+  }
+}
+
+/**
+ * Atualiza cards de KPIs
+ */
+function renderKPIs(summary) {
+  if (!summary) return;
+  document.getElementById('kpi-total').textContent = summary.total || 0;
+  document.getElementById('kpi-confirmed').textContent = summary.confirmed || 0;
+  document.getElementById('kpi-presence').textContent = summary.presenceConfirmed || 0;
+  document.getElementById('kpi-progress').textContent = summary.inProgress || 0;
+  document.getElementById('kpi-completed').textContent = summary.completed || 0;
+  document.getElementById('kpi-cancelled').textContent = summary.cancelled || 0;
+  document.getElementById('kpi-encaixes').textContent = summary.encaixes || 0;
+}
+
+/**
+ * Banner de Oportunidades de Encaixe
+ */
+function renderEncaixeBanner() {
+  const banner = document.getElementById('encaixe-alert-banner');
+  const msgEl = document.getElementById('encaixe-banner-msg');
+  if (!banner || !msgEl) return;
+
+  if (encaixesState.length > 0) {
+    banner.style.display = 'flex';
+    msgEl.textContent = `Existem ${encaixesState.length} vaga(s) liberada(s) por cancelamento ou desistência de pacientes para Hoje / Amanhã. Aproveite para encaixar novos pacientes!`;
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+/**
+ * Preenche dropdowns de agentes
+ */
+function populateAgentsDropdowns(agents) {
+  const filterSelect = document.getElementById('apt-filter-agent');
+  const modalSelect = document.getElementById('modal-apt-agent');
+
+  if (filterSelect) {
+    const current = filterSelect.value;
+    filterSelect.innerHTML = '<option value="all">Todos os Clientes</option>';
+    agents.forEach(a => {
+      filterSelect.innerHTML += `<option value="${a.id}">${a.name} (${a.companyName || 'Empresa'})</option>`;
+    });
+    if (current) filterSelect.value = current;
+  }
+
+  if (modalSelect) {
+    modalSelect.innerHTML = '';
+    agents.forEach(a => {
+      modalSelect.innerHTML += `<option value="${a.id}">${a.name} - ${a.companyName || 'Empresa'}</option>`;
+    });
+  }
+}
+
+/**
+ * Preenche dropdowns de especialistas
+ */
+function populateSpecialistsDropdowns() {
+  const filterSelect = document.getElementById('apt-filter-specialist');
+  const modalSelect = document.getElementById('modal-apt-specialist');
+
+  if (filterSelect) {
+    const current = filterSelect.value;
+    filterSelect.innerHTML = '<option value="all">Todos os Especialistas</option>';
+    specialistsState.forEach(s => {
+      filterSelect.innerHTML += `<option value="${s.id}">${s.name} (${s.role})</option>`;
+    });
+    if (current) filterSelect.value = current;
+  }
+
+  if (modalSelect) {
+    modalSelect.innerHTML = '<option value="">Selecione um profissional...</option>';
+    specialistsState.filter(s => s.active).forEach(s => {
+      modalSelect.innerHTML += `<option value="${s.id}">${s.name} - ${s.role}</option>`;
+    });
+  }
+}
+
+/**
+ * Preenche dropdowns de serviços
+ */
+function populateServicesDropdowns() {
+  const modalSelect = document.getElementById('modal-apt-service');
+  if (modalSelect) {
+    modalSelect.innerHTML = '<option value="">Consulta Padrão</option>';
+    servicesState.filter(s => s.active).forEach(s => {
+      modalSelect.innerHTML += `<option value="${s.id}">${s.name} (${s.durationMinutes} min) ${s.price ? `- R$ ${s.price.toFixed(2)}` : ''}</option>`;
+    });
+  }
+}
+
+/**
+ * Filtra e despacha renderização da visão ativa
+ */
+function renderAppointments() {
+  let list = [...appointmentsState];
+
+  // Filtro de busca textual
+  if (currentAppointmentsSearch.trim()) {
+    const q = currentAppointmentsSearch.toLowerCase().trim();
+    list = list.filter(a =>
+      a.clientName.toLowerCase().includes(q) ||
+      a.clientPhone.includes(q) ||
+      a.specialistName.toLowerCase().includes(q) ||
+      a.serviceName.toLowerCase().includes(q) ||
+      (a.notes && a.notes.toLowerCase().includes(q))
+    );
+  }
+
+  // Alterna visibilidade dos containers
+  const timelineView = document.getElementById('appointments-timeline-view');
+  const kanbanView = document.getElementById('appointments-kanban-view');
+  const tableView = document.getElementById('appointments-table-view');
+
+  if (timelineView) timelineView.style.display = currentAppointmentsView === 'timeline' ? 'block' : 'none';
+  if (kanbanView) kanbanView.style.display = currentAppointmentsView === 'kanban' ? 'block' : 'none';
+  if (tableView) tableView.style.display = currentAppointmentsView === 'table' ? 'block' : 'none';
+
+  if (currentAppointmentsView === 'timeline') {
+    renderTimelineView(list);
+  } else if (currentAppointmentsView === 'kanban') {
+    renderKanbanView(list);
+  } else if (currentAppointmentsView === 'table') {
+    renderTableView(list);
+  }
+}
+
+/**
+ * VISÃO 1: Linha do Tempo / Grade de Horários por Especialista
+ */
+async function renderTimelineView(apts) {
+  const container = document.getElementById('appointments-timeline-view');
+  if (!container) return;
+
+  const targetDate = currentAppointmentsDateValue || getTodayString();
+  const specialists = currentAppointmentsSpecialistFilter === 'all'
+    ? specialistsState.filter(s => s.active)
+    : specialistsState.filter(s => s.id === currentAppointmentsSpecialistFilter);
+
+  if (specialists.length === 0) {
+    container.innerHTML = `
+      <div class="card text-center p-5">
+        <p class="text-muted">Nenhum especialista cadastrado ou ativo.</p>
+        <button class="btn btn-primary btn-sm mt-2" onclick="openSpecialistsModal()">Cadastrar Especialista</button>
+      </div>`;
+    return;
+  }
+
+  let html = '';
+
+  for (const spec of specialists) {
+    const specApts = apts.filter(a => a.specialistId === spec.id);
+
+    html += `
+      <div class="timeline-specialist-block">
+        <div class="timeline-header">
+          <div class="timeline-spec-info">
+            <div class="timeline-spec-avatar">👨‍⚕️</div>
+            <div class="timeline-spec-text">
+              <h3>${spec.name}</h3>
+              <p>${spec.role} • WhatsApp: ${spec.phone} • Atendimento: ${spec.workHoursStart} às ${spec.workHoursEnd}</p>
+            </div>
+          </div>
+          <div class="timeline-spec-badges">
+            <span class="badge badge-info">${specApts.length} atendimento(s) no dia</span>
+            <button class="btn btn-sm btn-outline" onclick="openNewAppointmentModal({ specialistId: '${spec.id}', date: '${targetDate}' })">
+              ➕ Agendar com ${spec.name.split(' ')[0]}
+            </button>
+          </div>
+        </div>
+
+        <div class="timeline-slots-grid" id="slots-grid-${spec.id}">
+          <div class="p-3 text-muted"><small>Calculando horários livres e consultas...</small></div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+
+  // Carrega assincronamente os slots de cada especialista para não travar a UI
+  for (const spec of specialists) {
+    loadSpecialistTimelineSlots(spec, targetDate, apts.filter(a => a.specialistId === spec.id));
+  }
+}
+
+/**
+ * Carrega e renderiza a grade completa de horários (ocupados + livres + encaixes)
+ */
+async function loadSpecialistTimelineSlots(specialist, targetDate, specApts) {
+  const gridEl = document.getElementById(`slots-grid-${specialist.id}`);
+  if (!gridEl) return;
+
+  try {
+    const res = await fetchWithAuth(`/api/appointments/slots?specialistId=${specialist.id}&date=${targetDate}`);
+    const data = await res.json();
+    const freeSlots = data.slots || [];
+
+    // Mapeia agendamentos por startTime
+    const aptsByTime = new Map();
+    specApts.forEach(a => aptsByTime.set(a.startTime, a));
+
+    // Monta todos os horários únicos ordenados
+    const allTimes = Array.from(new Set([...freeSlots, ...specApts.map(a => a.startTime)])).sort();
+
+    if (allTimes.length === 0) {
+      gridEl.innerHTML = `<div class="p-3 text-muted" style="grid-column: 1 / -1;"><small>Sem horários disponíveis ou expediente encerrado para esta data.</small></div>`;
+      return;
+    }
+
+    let cardsHtml = '';
+
+    allTimes.forEach(time => {
+      const apt = aptsByTime.get(time);
+
+      if (apt) {
+        // Se foi cancelado, destaca como vaga de encaixe
+        const isCancelled = apt.status === 'cancelled' || apt.status === 'cancelled_by_patient';
+
+        if (isCancelled) {
+          cardsHtml += `
+            <div class="slot-card slot-card-encaixe" onclick="openNewAppointmentModal({ specialistId: '${specialist.id}', date: '${targetDate}', startTime: '${time}' })" title="Clique para agendar novo paciente nesta vaga liberada!">
+              <div class="slot-header">
+                <span class="slot-time">🕒 ${apt.startTime}</span>
+                <span class="badge badge-warning" style="font-size: 10px;">⚡ ENCAIXE LIVRE</span>
+              </div>
+              <div class="slot-patient-name text-amber">${apt.clientName} (Desistiu)</div>
+              <div class="slot-service-name">${apt.serviceName}</div>
+              <div class="slot-free-cta">✨ Vaga liberada! Clique para realocar</div>
+            </div>
+          `;
+        } else {
+          // Consulta agendada ativa
+          cardsHtml += `
+            <div class="slot-card slot-card-booked status-${apt.status}">
+              <div class="slot-header">
+                <span class="slot-time">🕒 ${apt.startTime} às ${apt.endTime}</span>
+                ${getStatusPill(apt.status)}
+              </div>
+              <div class="slot-patient-name" title="${apt.clientName}">👤 ${apt.clientName}</div>
+              <div class="slot-service-name">🩺 ${apt.serviceName}</div>
+              <div class="slot-patient-phone">
+                <span>📱 ${apt.clientPhone}</span>
+                ${apt.reminderSent ? '<span title="Lembrete D-1 enviado">🔔</span>' : ''}
+              </div>
+              <div class="slot-card-actions">
+                <div class="slot-actions-btns">
+                  <a href="https://wa.me/${apt.clientPhone.replace(/\D/g, '')}" target="_blank" class="slot-action-btn btn-act-whatsapp" title="Conversar no WhatsApp">💬</a>
+                  <button class="slot-action-btn" onclick="reNotifySpecialist('${apt.id}')" title="Reenviar notificação no WhatsApp do especialista">🔔 Médico</button>
+                  <button class="slot-action-btn" onclick="sendIndividualReminder('${apt.id}')" title="Enviar Lembrete D-1 ao Paciente">📩 D-1</button>
+                </div>
+                <div class="dropdown-quick-status">
+                  <select class="kanban-card-status-select" onchange="updateAppointmentStatus('${apt.id}', this.value)">
+                    <option value="confirmed" ${apt.status === 'confirmed' ? 'selected' : ''}>Confirmado</option>
+                    <option value="presence_confirmed" ${apt.status === 'presence_confirmed' ? 'selected' : ''}>Presença D-1</option>
+                    <option value="waiting" ${apt.status === 'waiting' ? 'selected' : ''}>Recepção</option>
+                    <option value="in_progress" ${apt.status === 'in_progress' ? 'selected' : ''}>Em Atendimento</option>
+                    <option value="completed" ${apt.status === 'completed' ? 'selected' : ''}>Concluído</option>
+                    <option value="cancelled" ${apt.status === 'cancelled' ? 'selected' : ''}>Cancelar</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+      } else {
+        // Horário vago disponível para marcação imediata
+        cardsHtml += `
+          <div class="slot-card slot-card-free" onclick="openNewAppointmentModal({ specialistId: '${specialist.id}', date: '${targetDate}', startTime: '${time}' })" title="Clique para agendar neste horário">
+            <div class="slot-free-time">🕒 ${time}</div>
+            <div class="slot-free-cta">➕ Vaga Livre (Marcar)</div>
+          </div>
+        `;
+      }
+    });
+
+    gridEl.innerHTML = cardsHtml;
+  } catch (err) {
+    gridEl.innerHTML = `<div class="p-3 text-danger"><small>Erro ao carregar horários livres.</small></div>`;
+  }
+}
+
+/**
+ * VISÃO 2: Visualização Kanban por Status
+ */
+function renderKanbanView(apts) {
+  const container = document.getElementById('appointments-kanban-view');
+  if (!container) return;
+
+  const columns = [
+    { key: 'confirmed', label: '🔵 Confirmados', statuses: ['confirmed', 'scheduled'] },
+    { key: 'presence_confirmed', label: '✅ Presença Confirmada (D-1)', statuses: ['presence_confirmed'] },
+    { key: 'waiting', label: '⏳ Aguardando Recepção', statuses: ['waiting'] },
+    { key: 'in_progress', label: '🩺 Em Atendimento', statuses: ['in_progress'] },
+    { key: 'completed', label: '🟣 Concluídos', statuses: ['completed'] },
+    { key: 'cancelled', label: '❌ Cancelados / Encaixes', statuses: ['cancelled', 'cancelled_by_patient'] }
+  ];
+
+  let boardHtml = `<div class="kanban-board">`;
+
+  columns.forEach(col => {
+    const colApts = apts.filter(a => col.statuses.includes(a.status));
+
+    boardHtml += `
+      <div class="kanban-column">
+        <div class="kanban-column-header">
+          <div class="kanban-column-title">${col.label}</div>
+          <span class="kanban-column-badge">${colApts.length}</span>
+        </div>
+        <div class="kanban-column-cards">
+    `;
+
+    if (colApts.length === 0) {
+      boardHtml += `<div class="p-3 text-center text-muted"><small>Nenhum atendimento nesta coluna</small></div>`;
+    } else {
+      colApts.forEach(apt => {
+        boardHtml += `
+          <div class="kanban-card">
+            <div class="d-flex justify-between align-center">
+              <span class="slot-time">🕒 ${apt.startTime} - ${apt.endTime}</span>
+              <span class="badge badge-sm badge-info">${formatDateBR(apt.date)}</span>
+            </div>
+            <div class="kanban-card-patient">${apt.clientName}</div>
+            <div class="kanban-card-meta">
+              <span>👨‍⚕️ ${apt.specialistName} (${apt.specialistRole})</span>
+              <span>🩺 ${apt.serviceName}</span>
+              <span>📱 ${apt.clientPhone}</span>
+              ${apt.notes ? `<span class="text-muted">📝 "${apt.notes}"</span>` : ''}
+            </div>
+            <div class="kanban-card-actions">
+              <div class="d-flex gap-1">
+                <a href="https://wa.me/${apt.clientPhone.replace(/\D/g, '')}" target="_blank" class="slot-action-btn btn-act-whatsapp" title="Abrir WhatsApp">💬</a>
+                <button class="slot-action-btn" onclick="reNotifySpecialist('${apt.id}')" title="Avisar Médico">👨‍⚕️</button>
+              </div>
+              <select class="kanban-card-status-select" onchange="updateAppointmentStatus('${apt.id}', this.value)">
+                <option value="confirmed" ${apt.status === 'confirmed' ? 'selected' : ''}>Confirmado</option>
+                <option value="presence_confirmed" ${apt.status === 'presence_confirmed' ? 'selected' : ''}>Presença D-1</option>
+                <option value="waiting" ${apt.status === 'waiting' ? 'selected' : ''}>Recepção</option>
+                <option value="in_progress" ${apt.status === 'in_progress' ? 'selected' : ''}>Em Atendimento</option>
+                <option value="completed" ${apt.status === 'completed' ? 'selected' : ''}>Concluído</option>
+                <option value="cancelled" ${apt.status === 'cancelled' ? 'selected' : ''}>Cancelar</option>
+              </select>
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    boardHtml += `
+        </div>
+      </div>
+    `;
+  });
+
+  boardHtml += `</div>`;
+  container.innerHTML = boardHtml;
+}
+
+/**
+ * VISÃO 3: Tabela Detalhada
+ */
+function renderTableView(apts) {
+  const tbody = document.getElementById('appointments-table-body');
+  if (!tbody) return;
+
+  if (apts.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center p-4 text-muted">Nenhum agendamento localizado para os filtros selecionados.</td></tr>`;
+    return;
+  }
+
+  let html = '';
+  apts.forEach(apt => {
+    html += `
+      <tr>
+        <td>
+          <strong>${formatDateBR(apt.date)}</strong><br>
+          <span class="text-muted" style="font-family: monospace;">${apt.startTime} às ${apt.endTime}</span>
+        </td>
+        <td>
+          <strong>${apt.clientName}</strong>
+          ${apt.notes ? `<br><small class="text-muted">${apt.notes}</small>` : ''}
+        </td>
+        <td>
+          <a href="https://wa.me/${apt.clientPhone.replace(/\D/g, '')}" target="_blank" class="text-emerald" style="text-decoration: none;">
+            📱 ${apt.clientPhone}
+          </a>
+        </td>
+        <td>
+          <strong>${apt.specialistName}</strong><br>
+          <small class="text-muted">${apt.specialistRole}</small>
+        </td>
+        <td>${apt.serviceName}</td>
+        <td>${getStatusPill(apt.status)}</td>
+        <td>
+          <span class="badge ${apt.bookedVia === 'whatsapp' ? 'badge-info' : 'badge-outline'}" style="font-size: 10.5px;">
+            ${apt.bookedVia === 'whatsapp' ? '🟢 WhatsApp' : '🖥️ Painel'}
+          </span>
+        </td>
+        <td>
+          <small>
+            ${apt.notifiedSpecialist ? '👨‍⚕️ Médico avisado ✅' : '👨‍⚕️ Pendente'}<br>
+            ${apt.reminderSent ? '🔔 Lembrete D-1 enviado ✅' : '🔔 Sem lembrete'}
+          </small>
+        </td>
+        <td style="text-align: right;">
+          <div class="d-flex justify-end gap-1">
+            <select class="kanban-card-status-select" onchange="updateAppointmentStatus('${apt.id}', this.value)" style="max-width: 120px;">
+              <option value="confirmed" ${apt.status === 'confirmed' ? 'selected' : ''}>Confirmado</option>
+              <option value="presence_confirmed" ${apt.status === 'presence_confirmed' ? 'selected' : ''}>Presença D-1</option>
+              <option value="waiting" ${apt.status === 'waiting' ? 'selected' : ''}>Recepção</option>
+              <option value="in_progress" ${apt.status === 'in_progress' ? 'selected' : ''}>Atendimento</option>
+              <option value="completed" ${apt.status === 'completed' ? 'selected' : ''}>Concluído</option>
+              <option value="cancelled" ${apt.status === 'cancelled' ? 'selected' : ''}>Cancelar</option>
+            </select>
+            <button class="btn btn-sm btn-outline" onclick="reNotifySpecialist('${apt.id}')" title="Reenviar Alerta ao Especialista">🔔</button>
+            <button class="btn btn-sm btn-outline" onclick="sendIndividualReminder('${apt.id}')" title="Enviar Lembrete D-1">📩</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="deleteAppointment('${apt.id}')" title="Excluir Definitivamente">🗑️</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+}
+
+/**
+ * Atualiza status de um agendamento
+ */
+async function updateAppointmentStatus(id, newStatus) {
+  try {
+    const res = await fetchWithAuth(`/api/appointments/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus })
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Falha ao atualizar status.');
+    }
+
+    showToast(`Status atualizado com sucesso!`, 'success');
+    await loadAppointments();
+  } catch (err) {
+    showToast(`Erro: ${err.message}`, 'error');
+  }
+}
+
+/**
+ * Reenvia notificação no WhatsApp do especialista
+ */
+async function reNotifySpecialist(id) {
+  try {
+    showToast('Enviando alerta para o WhatsApp do especialista...', 'info');
+    const res = await fetchWithAuth(`/api/appointments/${id}/notify`, { method: 'POST' });
+    const data = await res.json();
+
+    if (res.ok && data.sent) {
+      showToast('Notificação enviada com sucesso no WhatsApp do especialista!', 'success');
+      loadAppointments();
+    } else {
+      showToast('Especialista sem telefone cadastrado ou falha no envio.', 'warning');
+    }
+  } catch (err) {
+    showToast(`Erro ao notificar: ${err.message}`, 'error');
+  }
+}
+
+/**
+ * Envia lembrete D-1 individual para um paciente
+ */
+async function sendIndividualReminder(id) {
+  try {
+    showToast('Enviando lembrete D-1 ao paciente...', 'info');
+    const res = await fetchWithAuth(`/api/appointments/${id}/send-reminder`, { method: 'POST' });
+    const data = await res.json();
+
+    if (res.ok && data.sent) {
+      showToast('Lembrete D-1 enviado ao WhatsApp do paciente!', 'success');
+      loadAppointments();
+    } else {
+      showToast('Não foi possível enviar o lembrete.', 'warning');
+    }
+  } catch (err) {
+    showToast(`Erro ao enviar lembrete: ${err.message}`, 'error');
+  }
+}
+
+/**
+ * Disparo em lote de Lembretes D-1 para amanhã
+ */
+async function triggerBatchReminders() {
+  const tomorrowStr = getTomorrowString();
+  if (!confirm(`Deseja disparar lembretes de confirmação de presença (D-1) pelo WhatsApp para TODOS os pacientes com consulta agendada para amanhã (${formatDateBR(tomorrowStr)})?`)) {
+    return;
+  }
+
+  try {
+    showToast('Disparando lembretes D-1 em lote...', 'info');
+    const res = await fetchWithAuth('/api/appointments/send-reminders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: currentAppointmentsAgentFilter })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      showToast(`Disparo concluído: ${data.sent} de ${data.total} lembrete(s) enviado(s) para amanhã!`, 'success');
+      loadAppointments();
+    } else {
+      showToast(data.error || 'Erro ao disparar lembretes.', 'error');
+    }
+  } catch (err) {
+    showToast(`Erro: ${err.message}`, 'error');
+  }
+}
+
+/**
+ * Exclui agendamento
+ */
+async function deleteAppointment(id) {
+  if (!confirm('Deseja realmente excluir este agendamento?')) return;
+
+  try {
+    const res = await fetchWithAuth(`/api/appointments/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Agendamento excluído com sucesso.', 'success');
+      loadAppointments();
+    }
+  } catch (err) {
+    showToast(`Erro ao excluir: ${err.message}`, 'error');
+  }
+}
+
+// ============================================================================
+// MODAL DE NOVO / EDITAR AGENDAMENTO
+// ============================================================================
+
+async function openNewAppointmentModal(prefill = {}) {
+  const overlay = document.getElementById('modal-appointment-overlay');
+  if (!overlay) return;
+
+  document.getElementById('modal-appointment-form').reset();
+  document.getElementById('modal-apt-id').value = '';
+
+  const dateInput = document.getElementById('modal-apt-date');
+  const specSelect = document.getElementById('modal-apt-specialist');
+  const agentSelect = document.getElementById('modal-apt-agent');
+  const serviceSelect = document.getElementById('modal-apt-service');
+
+  if (agentSelect && agentSelect.options.length > 0) {
+    agentSelect.selectedIndex = 0;
+  }
+
+  // Preenche especialista
+  if (prefill.specialistId && specSelect) {
+    specSelect.value = prefill.specialistId;
+  } else if (specSelect && specSelect.options.length > 1) {
+    specSelect.selectedIndex = 1;
+  }
+
+  // Preenche data
+  const targetDate = prefill.date || currentAppointmentsDateValue || getTodayString();
+  if (dateInput) {
+    dateInput.value = targetDate;
+  }
+
+  // Preenche serviço se fornecido
+  if (prefill.serviceId && serviceSelect) {
+    serviceSelect.value = prefill.serviceId;
+  }
+
+  overlay.style.display = 'flex';
+
+  // Carrega horários livres dinamicamente
+  await loadAvailableSlotsForModal(prefill.startTime);
+}
+
+function closeAppointmentModal() {
+  const overlay = document.getElementById('modal-appointment-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+/**
+ * Atualiza horários livres no modal ao mudar Especialista ou Data
+ */
+async function loadAvailableSlotsForModal(preferredSlot = '') {
+  const specId = document.getElementById('modal-apt-specialist')?.value;
+  const dateStr = document.getElementById('modal-apt-date')?.value;
+  const timeSelect = document.getElementById('modal-apt-time');
+  const hintEl = document.getElementById('modal-slot-hint');
+
+  if (!timeSelect) return;
+
+  if (!specId || !dateStr) {
+    timeSelect.innerHTML = '<option value="">Selecione especialista e data...</option>';
+    return;
+  }
+
+  timeSelect.innerHTML = '<option value="">Buscando horários disponíveis...</option>';
+
+  try {
+    const res = await fetchWithAuth(`/api/appointments/slots?specialistId=${specId}&date=${dateStr}`);
+    const data = await res.json();
+    const slots = data.slots || [];
+
+    if (slots.length === 0) {
+      timeSelect.innerHTML = '<option value="">Nenhum horário livre nesta data</option>';
+      if (hintEl) hintEl.textContent = 'Todos os horários estão ocupados ou o especialista não atende neste dia.';
+      return;
+    }
+
+    let optionsHtml = '<option value="">Selecione um horário disponível...</option>';
+    slots.forEach(s => {
+      const isPref = s === preferredSlot ? 'selected' : '';
+      optionsHtml += `<option value="${s}" ${isPref}>🕒 ${s}</option>`;
+    });
+
+    timeSelect.innerHTML = optionsHtml;
+    if (hintEl) hintEl.textContent = `${slots.length} horário(s) livre(s) encontrado(s) sem conflitos.`;
+  } catch (err) {
+    timeSelect.innerHTML = '<option value="">Erro ao buscar horários</option>';
+  }
+}
+
+// Event Listeners para recarregar slots livres no modal
+document.getElementById('modal-apt-specialist')?.addEventListener('change', () => loadAvailableSlotsForModal());
+document.getElementById('modal-apt-date')?.addEventListener('change', () => loadAvailableSlotsForModal());
+
+// Submissão do Formulário de Agendamento Manual
+document.getElementById('modal-appointment-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const payload = {
+    agentId: document.getElementById('modal-apt-agent')?.value,
+    specialistId: document.getElementById('modal-apt-specialist')?.value,
+    serviceId: document.getElementById('modal-apt-service')?.value || undefined,
+    date: document.getElementById('modal-apt-date')?.value,
+    startTime: document.getElementById('modal-apt-time')?.value,
+    clientName: document.getElementById('modal-apt-name')?.value.trim(),
+    clientPhone: document.getElementById('modal-apt-phone')?.value.trim(),
+    notes: document.getElementById('modal-apt-notes')?.value.trim(),
+    notifySpecialist: document.getElementById('modal-apt-notify')?.checked
+  };
+
+  if (!payload.startTime) {
+    showToast('Por favor, selecione um horário disponível.', 'warning');
+    return;
+  }
+
+  try {
+    const btn = document.getElementById('btn-save-apt');
+    if (btn) btn.disabled = true;
+
+    const res = await fetchWithAuth('/api/appointments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao criar agendamento.');
+    }
+
+    showToast(`Agendamento confirmado para ${data.appointment.clientName}!`, 'success');
+    closeAppointmentModal();
+    await loadAppointments();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    const btn = document.getElementById('btn-save-apt');
+    if (btn) btn.disabled = false;
+  }
+});
+
+// Botões de fechar modal de agendamento
+document.getElementById('btn-close-apt-modal')?.addEventListener('click', closeAppointmentModal);
+document.getElementById('btn-cancel-apt')?.addEventListener('click', closeAppointmentModal);
+
+// ============================================================================
+// MODAL DE GERENCIAMENTO DE ESPECIALISTAS & SERVIÇOS
+// ============================================================================
+
+function openSpecialistsModal() {
+  const overlay = document.getElementById('modal-specialists-overlay');
+  if (overlay) overlay.style.display = 'flex';
+  renderSpecialistsTable();
+  renderServicesTable();
+}
+
+function closeSpecialistsModal() {
+  const overlay = document.getElementById('modal-specialists-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+document.getElementById('btn-close-specs-modal')?.addEventListener('click', closeSpecialistsModal);
+document.getElementById('btn-close-specs-bottom')?.addEventListener('click', closeSpecialistsModal);
+
+// Abas internas do Modal
+document.querySelectorAll('.modal-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.modal-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.spec-tab-pane').forEach(p => p.style.display = 'none');
+
+    btn.classList.add('active');
+    const tabKey = btn.getAttribute('data-spectab');
+    const pane = document.getElementById(`spec-tab-${tabKey}`);
+    if (pane) pane.style.display = 'block';
+  });
+});
+
+// Toggle formulário novo especialista
+document.getElementById('btn-show-add-specialist')?.addEventListener('click', () => {
+  const wrap = document.getElementById('form-new-specialist-wrap');
+  if (wrap) wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+});
+
+document.getElementById('btn-cancel-specialist')?.addEventListener('click', () => {
+  const wrap = document.getElementById('form-new-specialist-wrap');
+  if (wrap) wrap.style.display = 'none';
+});
+
+// Salvar Especialista
+document.getElementById('form-specialist')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const id = document.getElementById('spec-id')?.value;
+  const daysChecked = Array.from(document.querySelectorAll('input[name="spec-days"]:checked')).map(c => c.value);
+
+  const payload = {
+    name: document.getElementById('spec-name')?.value.trim(),
+    role: document.getElementById('spec-role')?.value.trim(),
+    phone: document.getElementById('spec-phone')?.value.trim(),
+    workHoursStart: document.getElementById('spec-hours-start')?.value || '08:00',
+    workHoursEnd: document.getElementById('spec-hours-end')?.value || '18:00',
+    breakStart: document.getElementById('spec-break-start')?.value || '12:00',
+    breakEnd: document.getElementById('spec-break-end')?.value || '13:00',
+    slotDurationMinutes: parseInt(document.getElementById('spec-duration')?.value || '30', 10),
+    workingDays: daysChecked.length > 0 ? daysChecked : ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+    active: true
+  };
+
+  try {
+    const url = id ? `/api/specialists/${id}` : '/api/specialists';
+    const method = id ? 'PUT' : 'POST';
+
+    const res = await fetchWithAuth(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error('Falha ao salvar especialista.');
+
+    showToast('Especialista salvo com sucesso!', 'success');
+    document.getElementById('form-specialist').reset();
+    document.getElementById('form-new-specialist-wrap').style.display = 'none';
+    await loadAppointments();
+    renderSpecialistsTable();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+});
+
+function renderSpecialistsTable() {
+  const tbody = document.getElementById('specialists-table-body');
+  if (!tbody) return;
+
+  if (specialistsState.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center p-3 text-muted">Nenhum especialista cadastrado.</td></tr>`;
+    return;
+  }
+
+  let html = '';
+  specialistsState.forEach(s => {
+    html += `
+      <tr>
+        <td><strong>${s.name}</strong></td>
+        <td>${s.role}</td>
+        <td>📱 ${s.phone}</td>
+        <td>${s.workHoursStart} às ${s.workHoursEnd} (Almoço: ${s.breakStart || '--'} - ${s.breakEnd || '--'})</td>
+        <td>${s.slotDurationMinutes} min</td>
+        <td><span class="badge ${s.active ? 'badge-success' : 'badge-danger'}">${s.active ? 'Ativo' : 'Inativo'}</span></td>
+        <td style="text-align: right;">
+          <button class="btn btn-sm btn-danger-outline" onclick="deleteSpecialist('${s.id}')">Excluir</button>
+        </td>
+      </tr>
+    `;
+  });
+  tbody.innerHTML = html;
+}
+
+async function deleteSpecialist(id) {
+  if (!confirm('Deseja realmente remover este especialista?')) return;
+  try {
+    const res = await fetchWithAuth(`/api/specialists/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Especialista removido.', 'success');
+      await loadAppointments();
+      renderSpecialistsTable();
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// Toggle formulário novo serviço
+document.getElementById('btn-show-add-service')?.addEventListener('click', () => {
+  const wrap = document.getElementById('form-new-service-wrap');
+  if (wrap) wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+});
+
+document.getElementById('btn-cancel-service')?.addEventListener('click', () => {
+  const wrap = document.getElementById('form-new-service-wrap');
+  if (wrap) wrap.style.display = 'none';
+});
+
+// Salvar Serviço
+document.getElementById('form-service')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const payload = {
+    name: document.getElementById('service-name')?.value.trim(),
+    durationMinutes: parseInt(document.getElementById('service-duration')?.value || '30', 10),
+    price: parseFloat(document.getElementById('service-price')?.value || '0'),
+    active: true
+  };
+
+  try {
+    const res = await fetchWithAuth('/api/services', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error('Falha ao salvar serviço.');
+
+    showToast('Procedimento cadastrado com sucesso!', 'success');
+    document.getElementById('form-service').reset();
+    document.getElementById('form-new-service-wrap').style.display = 'none';
+    await loadAppointments();
+    renderServicesTable();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+});
+
+function renderServicesTable() {
+  const tbody = document.getElementById('services-table-body');
+  if (!tbody) return;
+
+  if (servicesState.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center p-3 text-muted">Nenhum procedimento cadastrado.</td></tr>`;
+    return;
+  }
+
+  let html = '';
+  servicesState.forEach(srv => {
+    html += `
+      <tr>
+        <td><strong>${srv.name}</strong></td>
+        <td>${srv.durationMinutes} min</td>
+        <td>${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Não definido'}</td>
+        <td><span class="badge ${srv.active ? 'badge-success' : 'badge-danger'}">${srv.active ? 'Ativo' : 'Inativo'}</span></td>
+        <td style="text-align: right;">
+          <button class="btn btn-sm btn-danger-outline" onclick="deleteService('${srv.id}')">Excluir</button>
+        </td>
+      </tr>
+    `;
+  });
+  tbody.innerHTML = html;
+}
+
+async function deleteService(id) {
+  if (!confirm('Deseja realmente remover este procedimento?')) return;
+  try {
+    const res = await fetchWithAuth(`/api/services/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Procedimento removido.', 'success');
+      await loadAppointments();
+      renderServicesTable();
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ============================================================================
+// EVENT LISTENERS DA BARRA DE FERRAMENTAS E FILTROS DE AGENDAMENTO
+// ============================================================================
+
+// Filtros de Data Rápida (Hoje, Amanhã, Todos, Custom)
+document.getElementById('btn-quick-today')?.addEventListener('click', () => {
+  document.querySelectorAll('.btn-date-filter').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-quick-today')?.classList.add('active');
+  currentAppointmentsDateFilter = 'today';
+  currentAppointmentsDateValue = getTodayString();
+  const dateInput = document.getElementById('apt-filter-date');
+  if (dateInput) dateInput.value = currentAppointmentsDateValue;
+  loadAppointments();
+});
+
+document.getElementById('btn-quick-tomorrow')?.addEventListener('click', () => {
+  document.querySelectorAll('.btn-date-filter').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-quick-tomorrow')?.classList.add('active');
+  currentAppointmentsDateFilter = 'tomorrow';
+  currentAppointmentsDateValue = getTomorrowString();
+  const dateInput = document.getElementById('apt-filter-date');
+  if (dateInput) dateInput.value = currentAppointmentsDateValue;
+  loadAppointments();
+});
+
+document.getElementById('btn-quick-all')?.addEventListener('click', () => {
+  document.querySelectorAll('.btn-date-filter').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-quick-all')?.classList.add('active');
+  currentAppointmentsDateFilter = 'all';
+  currentAppointmentsDateValue = '';
+  const dateInput = document.getElementById('apt-filter-date');
+  if (dateInput) dateInput.value = '';
+  loadAppointments();
+});
+
+document.getElementById('apt-filter-date')?.addEventListener('change', (e) => {
+  document.querySelectorAll('.btn-date-filter').forEach(b => b.classList.remove('active'));
+  currentAppointmentsDateFilter = 'custom';
+  currentAppointmentsDateValue = e.target.value;
+  loadAppointments();
+});
+
+// Dropdowns de Filtro
+document.getElementById('apt-filter-agent')?.addEventListener('change', (e) => {
+  currentAppointmentsAgentFilter = e.target.value;
+  loadAppointments();
+});
+
+document.getElementById('apt-filter-specialist')?.addEventListener('change', (e) => {
+  currentAppointmentsSpecialistFilter = e.target.value;
+  loadAppointments();
+});
+
+document.getElementById('apt-filter-status')?.addEventListener('change', (e) => {
+  currentAppointmentsStatusFilter = e.target.value;
+  loadAppointments();
+});
+
+// Busca textual com debounce
+let searchDebounceTimer;
+document.getElementById('apt-search-input')?.addEventListener('input', (e) => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    currentAppointmentsSearch = e.target.value;
+    renderAppointments();
+  }, 250);
+});
+
+// Alternador de Visualização (Timeline, Kanban, Tabela)
+document.getElementById('btn-view-timeline')?.addEventListener('click', () => {
+  document.querySelectorAll('.view-switch-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-view-timeline')?.classList.add('active');
+  currentAppointmentsView = 'timeline';
+  renderAppointments();
+});
+
+document.getElementById('btn-view-kanban')?.addEventListener('click', () => {
+  document.querySelectorAll('.view-switch-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-view-kanban')?.classList.add('active');
+  currentAppointmentsView = 'kanban';
+  renderAppointments();
+});
+
+document.getElementById('btn-view-table')?.addEventListener('click', () => {
+  document.querySelectorAll('.view-switch-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-view-table')?.classList.add('active');
+  currentAppointmentsView = 'table';
+  renderAppointments();
+});
+
+// Botões principais do cabeçalho
+document.getElementById('btn-new-appointment')?.addEventListener('click', () => openNewAppointmentModal());
+document.getElementById('btn-manage-specialists')?.addEventListener('click', openSpecialistsModal);
+document.getElementById('btn-trigger-reminders')?.addEventListener('click', triggerBatchReminders);
+document.getElementById('btn-filter-encaixes')?.addEventListener('click', () => {
+  // Filtra cancelados/encaixes na tabela ou timeline
+  currentAppointmentsStatusFilter = 'cancelled';
+  const statusSelect = document.getElementById('apt-filter-status');
+  if (statusSelect) statusSelect.value = 'cancelled';
+  loadAppointments();
+});
+
 // Inicialização da Aplicação
 async function initApp() {
   const token = getAuthToken();
@@ -1825,6 +2974,7 @@ async function initApp() {
       loadWahaConfig();
       loadAgents();
       loadAgentsForSimulator();
+      loadAppointments();
     } else {
       clearAuthToken();
       showLoginModal();
