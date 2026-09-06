@@ -15,8 +15,15 @@ const app = express();
 
 // Middlewares
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Serve arquivos de uploads (Exames e Laudos)
+const uploadsPath = path.resolve(process.cwd(), 'data', 'uploads');
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsPath));
 
 // Serve arquivos estáticos do Painel Web (Dashboard)
 let publicPath = path.resolve(__dirname, 'web', 'public');

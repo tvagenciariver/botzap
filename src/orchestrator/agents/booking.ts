@@ -1,10 +1,14 @@
 import { IAgent, AgentContext, AgentResponse } from './base.js';
 import { appointmentManager } from '../../appointments/appointment-manager.js';
 import { notificationService, matchPhoneOrChatId } from '../../appointments/notification-service.js';
-import { Specialist, ServiceItem, Appointment } from '../../appointments/types.js';
+import { partnerManager } from '../../appointments/partner-manager.js';
+import { Specialist, ServiceItem, Appointment, Partner } from '../../appointments/types.js';
 
 interface BookingSessionState {
-  step: 'select_specialist' | 'select_service' | 'select_date' | 'select_slot' | 'confirm_name' | 'confirm_phone' | 'confirm_cancellation';
+  step: 'select_referral' | 'select_partner' | 'select_specialist' | 'select_service' | 'select_date' | 'select_slot' | 'confirm_name' | 'confirm_phone' | 'confirm_cancellation';
+  referralType?: 'particular' | 'partner';
+  partnerId?: string;
+  partnerName?: string;
   specialistId?: string;
   serviceId?: string;
   dateStr?: string;
@@ -12,6 +16,7 @@ interface BookingSessionState {
   clientName?: string;
   clientPhone?: string;
   cancellationAptId?: string;
+  offeredPartners?: Partner[];
   offeredDates?: { label: string; date: string }[];
   offeredSlots?: string[];
   offeredSpecialists?: Specialist[];
@@ -247,6 +252,12 @@ export class BookingAgent implements IAgent {
       case 'confirm_cancellation':
         return this.handleCancellationStep(chatId, session, text);
 
+      case 'select_referral':
+        return this.handleSelectReferralStep(chatId, session, text, agentId, companyName);
+
+      case 'select_partner':
+        return this.handleSelectPartnerStep(chatId, session, text, agentId, companyName);
+
       case 'select_specialist':
         return this.handleSelectSpecialistStep(chatId, session, text, agentId);
 
@@ -276,16 +287,162 @@ export class BookingAgent implements IAgent {
   }
 
   /**
-   * Inicia o fluxo mostrando os especialistas cadastrados
+   * Inicia o fluxo de agendamento perguntando sobre convênio/particular se houver parceiros
    */
   private startBookingFlow(chatId: string, agentId: string, companyName: string): AgentResponse {
+    const activePartners = partnerManager.listPartners(agentId).filter(p => p.active);
+
+    if (activePartners.length > 0) {
+      this.setSession(chatId, {
+        step: 'select_referral',
+        offeredPartners: activePartners
+      });
+
+      const welcomeMsg = `Olá! Que alegria atender você na *${companyName}*! 🗓️✨\n\n` +
+        `Para organizarmos o seu atendimento, por favor informe:\n\n` +
+        `*1.* 👤 Particular\n` +
+        `*2.* 🏢 Encaminhamento / Convênio de Empresa Parceira\n\n` +
+        `_Digite *1* para Particular ou *2* para Convênio/Parceiro:_`;
+
+      return {
+        handled: true,
+        agentName: this.name,
+        replyText: welcomeMsg
+      };
+    }
+
+    // Se não houver parceiros, inicia direto na seleção de especialistas
+    this.setSession(chatId, { referralType: 'particular' });
+    return this.presentSpecialistsOrServices(chatId, agentId, companyName);
+  }
+
+  /**
+   * Tratamento da escolha de atendimento Particular vs Convênio/Parceiro
+   */
+  private handleSelectReferralStep(
+    chatId: string,
+    session: BookingSessionState,
+    text: string,
+    agentId: string,
+    companyName: string
+  ): AgentResponse {
+    const lower = text.toLowerCase().trim();
+    const isParticular = lower === '1' || lower.includes('part') || lower === 'particular';
+    const isPartner = lower === '2' || lower.includes('parc') || lower.includes('conv') || lower.includes('enca') || lower === 'encaminhamento';
+
+    if (!isParticular && !isPartner) {
+      return {
+        handled: true,
+        agentName: this.name,
+        replyText: `Por favor, digite apenas *1* para Particular ou *2* para Encaminhamento / Convênio de Empresa Parceira:`
+      };
+    }
+
+    if (isParticular) {
+      this.setSession(chatId, {
+        referralType: 'particular',
+        partnerId: undefined,
+        partnerName: undefined
+      });
+      return this.presentSpecialistsOrServices(chatId, agentId, companyName, 'Perfeito! Atendimento *Particular*.');
+    }
+
+    // Se escolheu parceiro/convênio
+    const partners = session.offeredPartners && session.offeredPartners.length > 0
+      ? session.offeredPartners
+      : partnerManager.listPartners(agentId).filter(p => p.active);
+
+    if (partners.length === 0) {
+      this.setSession(chatId, { referralType: 'particular' });
+      return this.presentSpecialistsOrServices(chatId, agentId, companyName, 'No momento não identificamos convênios ativos. Prosseguiremos como atendimento particular.');
+    }
+
+    if (partners.length === 1) {
+      const p = partners[0];
+      this.setSession(chatId, {
+        referralType: 'partner',
+        partnerId: p.id,
+        partnerName: p.name
+      });
+      return this.presentSpecialistsOrServices(chatId, agentId, companyName, `Convênio vinculado com sucesso: *${p.name}*! ✅`);
+    }
+
+    this.setSession(chatId, {
+      step: 'select_partner',
+      referralType: 'partner',
+      offeredPartners: partners
+    });
+
+    let msg = `🏢 *Empresas & Convênios Parceiros*\n\n` +
+      `Selecione abaixo a empresa parceira ou clínica que realizou seu encaminhamento:\n\n`;
+
+    partners.forEach((p, idx) => {
+      msg += `*${idx + 1}.* ${p.name}\n`;
+    });
+
+    msg += `\n_Digite o número correspondente à empresa parceira:_`;
+
+    return {
+      handled: true,
+      agentName: this.name,
+      replyText: msg
+    };
+  }
+
+  /**
+   * Tratamento da seleção da empresa parceira específica
+   */
+  private handleSelectPartnerStep(
+    chatId: string,
+    session: BookingSessionState,
+    text: string,
+    agentId: string,
+    companyName: string
+  ): AgentResponse {
+    const partners = session.offeredPartners || partnerManager.listPartners(agentId).filter(p => p.active);
+    const chosenIndex = parseInt(text.replace(/\D/g, ''), 10) - 1;
+
+    let chosenPartner: Partner | undefined;
+    if (!isNaN(chosenIndex) && chosenIndex >= 0 && chosenIndex < partners.length) {
+      chosenPartner = partners[chosenIndex];
+    } else {
+      const lower = text.toLowerCase();
+      chosenPartner = partners.find(p => p.name.toLowerCase().includes(lower));
+    }
+
+    if (!chosenPartner) {
+      return {
+        handled: true,
+        agentName: this.name,
+        replyText: `Opção inválida. Por favor, digite o número de 1 a ${partners.length} correspondente à sua empresa parceira:`
+      };
+    }
+
+    this.setSession(chatId, {
+      referralType: 'partner',
+      partnerId: chosenPartner.id,
+      partnerName: chosenPartner.name
+    });
+
+    return this.presentSpecialistsOrServices(chatId, agentId, companyName, `Convênio vinculado com sucesso: *${chosenPartner.name}*! ✅`);
+  }
+
+  /**
+   * Apresenta especialistas ou serviços após a escolha de particular/convênio
+   */
+  private presentSpecialistsOrServices(
+    chatId: string,
+    agentId: string,
+    companyName: string,
+    prefixMsg?: string
+  ): AgentResponse {
     const specialists = appointmentManager.listSpecialists(agentId).filter(s => s.active);
 
     if (specialists.length === 0) {
       return {
         handled: true,
         agentName: this.name,
-        replyText: `No momento não há especialistas com agenda aberta na *${companyName}*. Por favor, tente novamente mais tarde ou fale com um de nossos atendentes.`
+        replyText: `${prefixMsg ? prefixMsg + '\n\n' : ''}No momento não há especialistas com agenda aberta na *${companyName}*. Por favor, tente novamente mais tarde ou fale com um de nossos atendentes.`
       };
     }
 
@@ -301,8 +458,7 @@ export class BookingAgent implements IAgent {
           offeredServices: services
         });
 
-        let msg = `Olá! Que bom ter você aqui na *${companyName}*. 🗓️\n\n` +
-          `O atendimento será com *${spec.name}* (${spec.role}).\n` +
+        let msg = `${prefixMsg ? prefixMsg + '\n\n' : ''}O atendimento será com *${spec.name}* (${spec.role}).\n` +
           `Qual procedimento você deseja agendar?\n\n`;
 
         services.forEach((srv, i) => {
@@ -332,8 +488,7 @@ export class BookingAgent implements IAgent {
       offeredSpecialists: specialists
     });
 
-    let msg = `Olá! Bem-vindo(a) ao sistema de agendamento da *${companyName}*! 🗓️✨\n\n` +
-      `Por favor, escolha com qual de nossos profissionais você gostaria de marcar:\n\n`;
+    let msg = `${prefixMsg ? prefixMsg + '\n\n' : ''}Por favor, escolha com qual de nossos profissionais você gostaria de marcar:\n\n`;
 
     specialists.forEach((spec, idx) => {
       msg += `*${idx + 1}.* 👨‍⚕️ *${spec.name}* - ${spec.role}\n`;
@@ -727,6 +882,9 @@ export class BookingAgent implements IAgent {
         clientName,
         date: dateStr,
         startTime: slot,
+        referralType: session.referralType || 'particular',
+        partnerId: session.partnerId,
+        partnerName: session.partnerName,
         bookedVia: 'whatsapp'
       });
 
@@ -739,12 +897,16 @@ export class BookingAgent implements IAgent {
       });
 
       const formattedPhone = this.formatDisplayPhone(cleanPhone);
+      const referralLine = appointment.partnerName
+        ? `🏢 *Convênio / Encaminhamento:* ${appointment.partnerName}\n`
+        : `🏷️ *Tipo de Atendimento:* Particular\n`;
 
       const responseText = `🎉 *AGENDAMENTO CONFIRMADO COM SUCESSO!*\n\n` +
         `🏢 *${companyName}*\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `👤 *Paciente:* ${appointment.clientName}\n` +
         `📱 *WhatsApp:* ${formattedPhone}\n` +
+        referralLine +
         `👨‍⚕️ *Especialista:* ${appointment.specialistName} (${appointment.specialistRole})\n` +
         `🩺 *Procedimento:* ${appointment.serviceName}\n` +
         `📅 *Data:* ${notificationService.formatDateBR(appointment.date)}\n` +

@@ -78,6 +78,9 @@
         <button class="nav-btn" data-tab="appointments">
           <span class="nav-icon">📅</span> Agendamentos & Agenda
         </button>
+        <button class="nav-btn" data-tab="exams">
+          <span class="nav-icon">🔬</span> Envio de Exames
+        </button>
         <button class="nav-btn" data-tab="agents" data-admin-only="true">
           <span class="nav-icon">🤖</span> Agentes & Clientes
         </button>
@@ -342,6 +345,143 @@
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: Envio e Gestão de Exames & Laudos -->
+      <section class="tab-pane" id="pane-exams">
+        <!-- Cabeçalho Principal -->
+        <div class="card tab-header-card">
+          <div class="tab-header-left">
+            <div class="tab-header-title">
+              <span class="tab-header-icon">🔬</span>
+              <div>
+                <h2>Envio de Exames & Laudos Médicos</h2>
+                <p>Envie resultados de exames diretamente pelo WhatsApp para pacientes e/ou clínicas parceiras conveniadas com histórico completo.</p>
+              </div>
+            </div>
+            <div class="tab-header-meta">
+              <span class="badge" id="badge-total-exams" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border-color: rgba(16, 185, 129, 0.3);">
+                Carregando exames...
+              </span>
+            </div>
+          </div>
+          <div class="tab-header-actions">
+            <button class="btn btn-outline" id="btn-manage-partners">
+              🏢 Clínicas & Parceiros
+            </button>
+            <button class="btn btn-outline" id="btn-open-print-exams">
+              🖨️ Imprimir Relatório A4
+            </button>
+            <button class="btn btn-primary btn-glow" id="btn-new-exam">
+              ➕ Novo Envio de Exame
+            </button>
+          </div>
+        </div>
+
+        <!-- KPIs Strip de Exames -->
+        <div class="kpi-strip">
+          <div class="kpi-card">
+            <div class="kpi-val" id="kpi-exams-total">0</div>
+            <div class="kpi-lbl">Total Disparados</div>
+            <div class="kpi-bar" style="background: var(--primary);"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-emerald" id="kpi-exams-success">0</div>
+            <div class="kpi-lbl">Entregues com Sucesso</div>
+            <div class="kpi-bar" style="background: #10b981;"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-indigo" id="kpi-exams-partner">0</div>
+            <div class="kpi-lbl">Via Parceiro / Convênio</div>
+            <div class="kpi-bar" style="background: #6366f1;"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-cyan" id="kpi-exams-particular">0</div>
+            <div class="kpi-lbl">Particulares</div>
+            <div class="kpi-bar" style="background: #06b6d4;"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val text-rose" id="kpi-exams-failed">0</div>
+            <div class="kpi-lbl">Falhas de Envio</div>
+            <div class="kpi-bar" style="background: #f43f5e;"></div>
+          </div>
+        </div>
+
+        <!-- Toolbar & Filtros de Exames -->
+        <div class="card appointments-toolbar">
+          <div class="toolbar-row">
+            <!-- Busca de Exames -->
+            <div class="search-box" style="flex: 1; min-width: 250px;">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="exam-search-input" class="form-control" placeholder="Buscar por paciente, WhatsApp, clínica parceira ou arquivo...">
+            </div>
+
+            <!-- Filtro de Tipo de Encaminhamento -->
+            <div class="filter-item">
+              <label for="exam-filter-referral">Tipo:</label>
+              <select id="exam-filter-referral" class="form-control form-control-sm">
+                <option value="all">Todos os Tipos</option>
+                <option value="partner">🏢 Convênio / Parceiro</option>
+                <option value="particular">👤 Particular</option>
+              </select>
+            </div>
+
+            <!-- Filtro de Parceiro / Convênio -->
+            <div class="filter-item">
+              <label for="exam-filter-partner">Clínica Parceira:</label>
+              <select id="exam-filter-partner" class="form-control form-control-sm">
+                <option value="all">Todas as Clínicas</option>
+              </select>
+            </div>
+
+            <!-- Filtro de Status -->
+            <div class="filter-item">
+              <label for="exam-filter-status">Status Envio:</label>
+              <select id="exam-filter-status" class="form-control form-control-sm">
+                <option value="all">Todos os Status</option>
+                <option value="sent">✅ Enviado com Sucesso</option>
+                <option value="partial">⚠️ Parcialmente Enviado</option>
+                <option value="failed">❌ Falha no Envio</option>
+              </select>
+            </div>
+
+            <!-- Filtro de Unidade / Cliente -->
+            <div class="filter-item">
+              <label for="exam-filter-agent">Unidade / Cliente:</label>
+              <select id="exam-filter-agent" class="form-control form-control-sm">
+                <option value="all">Todas as Unidades</option>
+              </select>
+            </div>
+
+            <button type="button" class="btn btn-sm btn-outline" id="btn-refresh-exams" title="Atualizar Lista">
+              🔄 Atualizar
+            </button>
+          </div>
+        </div>
+
+        <!-- Tabela de Exames Enviados -->
+        <div class="card appointments-content-card">
+          <div class="table-responsive">
+            <table class="table appointments-table">
+              <thead>
+                <tr>
+                  <th>Data/Hora</th>
+                  <th>Paciente</th>
+                  <th>WhatsApp</th>
+                  <th>Origem / Encaminhamento</th>
+                  <th>Destino do Envio</th>
+                  <th>Arquivo / Laudo</th>
+                  <th>Status</th>
+                  <th>Enviado Por</th>
+                  <th style="text-align: right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="exams-table-body">
+                <!-- Linhas renderizadas via app.js -->
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -1318,6 +1458,28 @@
             </div>
           </div>
 
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Tipo de Atendimento</label>
+              <div class="d-flex gap-3" style="margin-top: 8px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="radio" name="modal-apt-referral-type" value="particular" id="modal-apt-ref-part" checked>
+                  <span>👤 Particular</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="radio" name="modal-apt-referral-type" value="partner" id="modal-apt-ref-partner">
+                  <span>🏢 Convênio / Parceiro</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-group col-6" id="modal-apt-partner-wrap" style="display: none;">
+              <label for="modal-apt-partner">Clínica Parceira / Convênio</label>
+              <select id="modal-apt-partner" class="form-control">
+                <option value="">Selecione a clínica parceira...</option>
+              </select>
+            </div>
+          </div>
+
           <div class="form-group">
             <label for="modal-apt-notes">Observações Médicas / Motivo da Consulta</label>
             <textarea id="modal-apt-notes" class="form-control" rows="2" placeholder="Ex: Primeira consulta, queixa de dores, encaminhado pelo Dr. Fulano..."></textarea>
@@ -1687,6 +1849,404 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-outline" id="btn-cancel-print">Cancelar</button>
         <button type="button" class="btn btn-primary btn-glow" id="btn-execute-print">🖨️ Visualizar & Imprimir (PDF)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Novo Envio de Exame / Laudo -->
+  <div id="modal-exam-dispatch-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🔬</span>
+          <div>
+            <h3>Enviar Laudo / Exame pelo WhatsApp</h3>
+            <p>Selecione o paciente, anexe o arquivo (PDF ou imagem) e defina os destinatários do envio.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-exam-modal">&times;</button>
+      </div>
+
+      <form id="modal-exam-dispatch-form">
+        <input type="hidden" id="modal-exam-appointment-id" value="">
+        <input type="hidden" id="modal-exam-file-base64" value="">
+        <input type="hidden" id="modal-exam-file-name" value="">
+        <input type="hidden" id="modal-exam-file-mimetype" value="">
+
+        <div class="modal-body">
+          <!-- Atalho para vincular a agendamento existente -->
+          <div class="form-group">
+            <label for="modal-exam-select-appointment">Preencher a partir de um Agendamento (Opcional)</label>
+            <select id="modal-exam-select-appointment" class="form-control">
+              <option value="">✍️ Digitação Manual de Paciente</option>
+            </select>
+            <small class="form-hint">Selecione um paciente agendado para carregar automaticamente o nome, WhatsApp e convênio.</small>
+          </div>
+
+          <!-- Dados do Paciente -->
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="modal-exam-patient-name">Nome do Paciente <span class="text-danger">*</span></label>
+              <input type="text" id="modal-exam-patient-name" class="form-control" placeholder="Ex: Maria da Silva" required>
+            </div>
+            <div class="form-group col-6">
+              <label for="modal-exam-patient-phone">WhatsApp do Paciente <span class="text-danger">*</span></label>
+              <input type="text" id="modal-exam-patient-phone" class="form-control" placeholder="Ex: 87999998888 ou 5587988177877" required>
+              <small class="form-hint">DDD + Número (com ou sem 55)</small>
+            </div>
+          </div>
+
+          <!-- Tipo de Encaminhamento & Parceiro -->
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label>Tipo de Atendimento <span class="text-danger">*</span></label>
+              <div class="d-flex gap-3" style="margin-top: 8px;">
+                <label class="radio-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="radio" name="modal-exam-referral-type" value="particular" id="exam-ref-particular" checked>
+                  <span>👤 Particular</span>
+                </label>
+                <label class="radio-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="radio" name="modal-exam-referral-type" value="partner" id="exam-ref-partner">
+                  <span>🏢 Convênio / Clínica Parceira</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-group col-6" id="modal-exam-partner-wrap" style="display: none;">
+              <label for="modal-exam-partner-select">Empresa / Clínica Conveniada <span class="text-danger">*</span></label>
+              <select id="modal-exam-partner-select" class="form-control">
+                <option value="">Selecione a empresa conveniada...</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Destino do Envio Inteligente -->
+          <div class="form-group" id="modal-exam-target-group">
+            <label>Destinatário do Envio no WhatsApp <span class="text-danger">*</span></label>
+            <div class="card p-3" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);">
+              <!-- Opção Paciente -->
+              <div class="exam-target-option" id="target-opt-patient">
+                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                  <input type="radio" name="modal-exam-target" value="patient" checked>
+                  <div>
+                    <strong>👤 Enviar somente para o Paciente</strong>
+                    <div style="font-size: 12px; color: var(--text-muted);">O laudo/exame será enviado diretamente no WhatsApp do paciente.</div>
+                  </div>
+                </label>
+              </div>
+
+              <!-- Opções de Convênio (visíveis somente se encaminhamento for partner) -->
+              <div class="exam-target-option mt-2" id="target-opt-partner" style="display: none;">
+                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                  <input type="radio" name="modal-exam-target" value="partner">
+                  <div>
+                    <strong>🏢 Enviar somente para a Clínica Parceira / Convênio</strong>
+                    <div style="font-size: 12px; color: var(--text-muted);">O laudo será enviado apenas ao contato da empresa parceira, que fará o repasse ao paciente.</div>
+                  </div>
+                </label>
+              </div>
+
+              <div class="exam-target-option mt-2" id="target-opt-both" style="display: none;">
+                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                  <input type="radio" name="modal-exam-target" value="both">
+                  <div>
+                    <strong>👥 Enviar para Ambos (Paciente + Clínica Parceira)</strong>
+                    <div style="font-size: 12px; color: var(--text-muted);">Envia simultaneamente uma via para o WhatsApp do paciente e outra para a clínica parceira.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Upload de Arquivo -->
+          <div class="form-group">
+            <label>Arquivo do Laudo ou Exame (PDF ou Imagem) <span class="text-danger">*</span></label>
+            <div id="exam-dropzone" class="file-dropzone" style="border: 2px dashed var(--border-color); border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: border-color 0.2s; background: rgba(255,255,255,0.01);">
+              <input type="file" id="modal-exam-file-input" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" style="display: none;">
+              <div class="dropzone-content" id="dropzone-empty-state">
+                <span class="dropzone-icon" style="font-size: 32px; display: block; margin-bottom: 6px;">📁</span>
+                <p style="margin: 0 0 4px 0;"><strong>Clique para selecionar</strong> ou arraste o arquivo aqui</p>
+                <small class="text-muted">Formatos suportados: PDF, JPG, PNG (até 25MB)</small>
+              </div>
+              <div class="dropzone-file-info" id="dropzone-file-selected" style="display: none; align-items: center; justify-content: space-between;">
+                <div class="d-flex align-center gap-2">
+                  <span class="file-icon" id="dropzone-file-icon" style="font-size: 28px;">📄</span>
+                  <div style="text-align: left;">
+                    <strong id="dropzone-file-name">laudo.pdf</strong>
+                    <div style="font-size: 11px; color: var(--text-muted);" id="dropzone-file-size">0 KB</div>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline text-danger" id="btn-remove-selected-file">Remover</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Legenda / Mensagem Personalizada do WhatsApp -->
+          <div class="form-group">
+            <label for="modal-exam-caption">Mensagem / Observação no WhatsApp (Opcional)</label>
+            <textarea id="modal-exam-caption" class="form-control" rows="2" placeholder="Deixe em branco para usar a mensagem padrão com identificação oficial da clínica e paciente..."></textarea>
+          </div>
+
+          <!-- Unidade / Agente -->
+          <div class="form-group">
+            <label for="modal-exam-agent">Unidade / Cliente Emissor</label>
+            <select id="modal-exam-agent" class="form-control">
+              <option value="*">🌐 Agente Padrão (Global)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-exam">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-glow" id="btn-submit-exam">🚀 Enviar Exame pelo WhatsApp</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Gestão de Clínicas Parceiras & Convênios -->
+  <div id="modal-partners-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-xl">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🏢</span>
+          <div>
+            <h3>Gestão de Clínicas Parceiras & Convênios</h3>
+            <p>Cadastre e gerencie empresas, planos e clínicas parceiras que encaminham pacientes para exames.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-partners-modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="d-flex justify-between align-center mb-3">
+          <div class="search-box" style="max-width: 300px;">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="partner-search-input" class="form-control form-control-sm" placeholder="Buscar parceiro...">
+          </div>
+          <button type="button" class="btn btn-primary btn-sm btn-glow" id="btn-add-new-partner">
+            ➕ Nova Empresa Parceira
+          </button>
+        </div>
+
+        <!-- Form de Criação/Edição de Parceiro (Toggle) -->
+        <div id="partner-form-card" class="card p-3 mb-3" style="display: none; background: rgba(99, 102, 241, 0.05); border: 1px dashed var(--primary);">
+          <form id="partner-edit-form">
+            <input type="hidden" id="partner-form-id" value="">
+            <h4 id="partner-form-title" class="mb-2" style="font-size: 15px;">Cadastrar Empresa Parceira</h4>
+
+            <div class="form-row">
+              <div class="form-group col-6">
+                <label for="partner-form-name">Nome da Empresa / Clínica <span class="text-danger">*</span></label>
+                <input type="text" id="partner-form-name" class="form-control" placeholder="Ex: Clínica São Lucas" required>
+              </div>
+              <div class="form-group col-6">
+                <label for="partner-form-phone">WhatsApp de Contato/Recepção <span class="text-danger">*</span></label>
+                <input type="text" id="partner-form-phone" class="form-control" placeholder="Ex: 5587988177877" required>
+                <small class="form-hint">Número onde os exames serão entregues pelo bot.</small>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col-4">
+                <label for="partner-form-doc">CNPJ / Inscrição</label>
+                <input type="text" id="partner-form-doc" class="form-control" placeholder="00.000.000/0001-00">
+              </div>
+              <div class="form-group col-4">
+                <label for="partner-form-contact">Pessoa de Contato / Responsável</label>
+                <input type="text" id="partner-form-contact" class="form-control" placeholder="Ex: Dra. Juliana (Recepção)">
+              </div>
+              <div class="form-group col-4">
+                <label for="partner-form-email">E-mail</label>
+                <input type="email" id="partner-form-email" class="form-control" placeholder="convenios@empresa.com.br">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col-8">
+                <label for="partner-form-notes">Observações do Convênio</label>
+                <input type="text" id="partner-form-notes" class="form-control" placeholder="Ex: Acordo corporativo tabela com desconto de 20%">
+              </div>
+              <div class="form-group col-4">
+                <label for="partner-form-active">Status</label>
+                <select id="partner-form-active" class="form-control">
+                  <option value="true" selected>✅ Ativo (Disponível no bot e painel)</option>
+                  <option value="false">⛔ Inativo</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="d-flex justify-end gap-2 mt-2">
+              <button type="button" class="btn btn-sm btn-outline" id="btn-cancel-partner-form">Cancelar</button>
+              <button type="submit" class="btn btn-sm btn-primary btn-glow" id="btn-save-partner-form">💾 Salvar Parceiro</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Tabela de Parceiros -->
+        <div class="table-responsive">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Empresa / Clínica</th>
+                <th>CNPJ / Doc</th>
+                <th>WhatsApp</th>
+                <th>Responsável</th>
+                <th>E-mail</th>
+                <th>Status</th>
+                <th style="text-align: right;">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="partners-table-body">
+              <!-- Renderizado via app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="btn-close-partners-footer">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Reenviar Exame -->
+  <div id="modal-exam-resend-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🔁</span>
+          <div>
+            <h3>Reenviar Exame / Laudo</h3>
+            <p id="resend-exam-subtitle">Confirme os destinatários para o novo disparo no WhatsApp.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-resend-modal">&times;</button>
+      </div>
+
+      <form id="modal-exam-resend-form">
+        <input type="hidden" id="resend-exam-id" value="">
+
+        <div class="modal-body">
+          <div class="card p-3 mb-3" style="background: rgba(255,255,255,0.02);">
+            <div style="font-size: 13px;">
+              <div><strong>Paciente:</strong> <span id="resend-patient-name">-</span> (<span id="resend-patient-phone">-</span>)</div>
+              <div id="resend-partner-info" style="margin-top: 4px;"><strong>Convênio:</strong> <span id="resend-partner-name">-</span></div>
+              <div style="margin-top: 4px;"><strong>Arquivo:</strong> <span id="resend-file-name">-</span></div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Destino do Reenvio <span class="text-danger">*</span></label>
+            <select id="resend-target-select" class="form-control">
+              <option value="patient">👤 Apenas para o Paciente</option>
+              <option value="partner" id="resend-opt-partner">🏢 Apenas para a Empresa Parceira</option>
+              <option value="both" id="resend-opt-both">👥 Para Ambos (Paciente + Parceiro)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="resend-caption">Mensagem / Observação Adicional</label>
+            <textarea id="resend-caption" class="form-control" rows="2" placeholder="Opcional: motivo do reenvio ou novas instruções..."></textarea>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-resend">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-glow" id="btn-confirm-resend">🚀 Reenviar Agora</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Imprimir Relatório de Exames Realizados & Enviados -->
+  <div id="modal-print-exams-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🖨️</span>
+          <div>
+            <h3>Imprimir Relatório de Exames Realizados</h3>
+            <p>Emissão oficial de relatório A4 / PDF de exames enviados por convênios e particulares.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-print-exams-modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="print-exams-date-type">Período de Envio</label>
+            <select id="print-exams-date-type" class="form-control">
+              <option value="today" selected>📅 Enviados Hoje</option>
+              <option value="this_week">📅 Desta Semana</option>
+              <option value="this_month">📅 Deste Mês</option>
+              <option value="custom">📅 Intervalo Personalizado...</option>
+              <option value="all">🌐 Todos os Períodos</option>
+            </select>
+          </div>
+          <div class="form-group col-6" id="print-exams-custom-date-wrap" style="display: none;">
+            <div class="d-flex gap-2">
+              <div style="flex: 1;">
+                <label for="print-exams-start-date">Data Inicial</label>
+                <input type="date" id="print-exams-start-date" class="form-control">
+              </div>
+              <div style="flex: 1;">
+                <label for="print-exams-end-date">Data Final</label>
+                <input type="date" id="print-exams-end-date" class="form-control">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="print-exams-filter-partner">Filtrar por Clínica Parceira / Convênio</label>
+            <select id="print-exams-filter-partner" class="form-control">
+              <option value="all" selected>🏢 Todas as Clínicas Parceiras & Particulares</option>
+            </select>
+          </div>
+          <div class="form-group col-6">
+            <label for="print-exams-filter-referral">Tipo de Atendimento</label>
+            <select id="print-exams-filter-referral" class="form-control">
+              <option value="all" selected>📋 Todos (Convênios e Particulares)</option>
+              <option value="partner">🏢 Somente Convênios / Parceiros</option>
+              <option value="particular">👤 Somente Particulares</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="print-exams-filter-status">Status do Disparo</label>
+            <select id="print-exams-filter-status" class="form-control">
+              <option value="all" selected>📋 Todos os Status</option>
+              <option value="sent">✅ Apenas Enviados com Sucesso</option>
+              <option value="failed">❌ Falhas de Envio</option>
+            </select>
+          </div>
+          <div class="form-group col-6">
+            <label for="print-exams-filter-agent">Unidade / Cliente</label>
+            <select id="print-exams-filter-agent" class="form-control">
+              <option value="all" selected>🌐 Todas as Unidades</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="card card-inner p-3 mt-2" style="background: rgba(16, 185, 129, 0.05); border: 1px dashed #10b981;">
+          <div class="d-flex justify-between align-center">
+            <div>
+              <strong id="print-exams-preview-count">0 exames selecionados</strong>
+              <div style="font-size: 12px; color: var(--text-muted);">Relatório oficial para conferência e faturamento de convênios, com totais, dados do paciente e protocolo WhatsApp.</div>
+            </div>
+            <span style="font-size: 28px;">📄</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="btn-cancel-print-exams">Cancelar</button>
+        <button type="button" class="btn btn-primary btn-glow" id="btn-execute-print-exams">🖨️ Visualizar & Imprimir Relatório (PDF)</button>
       </div>
     </div>
   </div>

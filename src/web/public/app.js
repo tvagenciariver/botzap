@@ -49,7 +49,7 @@ function applyRolePermissions(user) {
   if (isAttendant) {
     const activeNav = document.querySelector('.nav-menu .nav-btn.active');
     const activeTab = activeNav ? activeNav.getAttribute('data-tab') : null;
-    const allowedTabs = ['appointments', 'simulator', 'chats'];
+    const allowedTabs = ['appointments', 'simulator', 'chats', 'exams'];
 
     if (!allowedTabs.includes(activeTab)) {
       switchToTab('appointments');
@@ -154,6 +154,7 @@ function switchToTab(targetTab) {
   const titles = {
     simulator: 'Simulador de Atendimento (WhatsApp)',
     appointments: 'Central de Agendamentos & Agenda Inteligente',
+    exams: 'Envio & Gestão de Exames e Laudos',
     agents: 'Gerenciador de Agentes & Clientes (Multi-Agentes)',
     prompts: 'Configuração Geral & Agente Padrão',
     schedule: 'Horário Comercial & Mensagem de Ausência',
@@ -168,6 +169,7 @@ function switchToTab(targetTab) {
   if (getAuthToken()) {
     if (targetTab === 'simulator') loadAgentsForSimulator();
     if (targetTab === 'appointments') loadAppointments();
+    if (targetTab === 'exams') loadExams();
     if (targetTab === 'agents' && currentUser?.role === 'admin') loadAgents();
     if (targetTab === 'chats') loadChats();
     if (targetTab === 'logs' && currentUser?.role === 'admin') loadLogs();
@@ -2476,6 +2478,7 @@ async function loadSpecialistTimelineSlots(specialist, targetDate, specApts) {
                 ${getStatusPill(apt.status)}
               </div>
               <div class="slot-patient-name" title="${apt.clientName}">👤 ${apt.clientName}</div>
+              ${apt.referralType === 'partner' ? `<div style="font-size: 11px; color: #818cf8; font-weight:600; margin-bottom: 2px;">🏢 ${apt.partnerName || 'Convênio'}</div>` : ''}
               <div class="slot-service-name">🩺 ${apt.serviceName}</div>
               <div class="slot-patient-phone">
                 <span>📱 ${formatPhoneDisplay(apt.clientPhone)}</span>
@@ -2486,6 +2489,7 @@ async function loadSpecialistTimelineSlots(specialist, targetDate, specApts) {
                   <a href="https://wa.me/${(apt.clientPhone || '').replace(/@.*$/, '').replace(/\D/g, '')}" target="_blank" class="slot-action-btn btn-act-whatsapp" title="Conversar no WhatsApp">💬</a>
                   <button class="slot-action-btn" onclick="reNotifySpecialist('${apt.id}')" title="Reenviar notificação no WhatsApp do especialista">🔔 Médico</button>
                   <button class="slot-action-btn" onclick="sendIndividualReminder('${apt.id}')" title="Enviar Lembrete D-1 ao Paciente">📩 D-1</button>
+                  <button class="slot-action-btn" onclick="openExamDispatchModalForAppointment('${apt.id}')" title="Enviar Exame/Laudo pelo WhatsApp">🔬 Exame</button>
                 </div>
                 <div class="dropdown-quick-status">
                   <select class="kanban-card-status-select" onchange="updateAppointmentStatus('${apt.id}', this.value)">
@@ -2560,6 +2564,7 @@ function renderKanbanView(apts) {
             </div>
             <div class="kanban-card-patient">${apt.clientName}</div>
             <div class="kanban-card-meta">
+              ${apt.referralType === 'partner' ? `<span>🏢 <strong style="color: #818cf8;">${apt.partnerName || 'Convênio'}</strong></span>` : ''}
               <span>👨‍⚕️ ${apt.specialistName} (${apt.specialistRole})</span>
               <span>🩺 ${apt.serviceName}</span>
               <span>📱 ${formatPhoneDisplay(apt.clientPhone)}</span>
@@ -2569,6 +2574,7 @@ function renderKanbanView(apts) {
               <div class="d-flex gap-1">
                 <a href="https://wa.me/${(apt.clientPhone || '').replace(/@.*$/, '').replace(/\D/g, '')}" target="_blank" class="slot-action-btn btn-act-whatsapp" title="Abrir WhatsApp">💬</a>
                 <button class="slot-action-btn" onclick="reNotifySpecialist('${apt.id}')" title="Avisar Médico">👨‍⚕️</button>
+                <button class="slot-action-btn" onclick="openExamDispatchModalForAppointment('${apt.id}')" title="Enviar Laudo/Exame">🔬</button>
               </div>
               <select class="kanban-card-status-select" onchange="updateAppointmentStatus('${apt.id}', this.value)">
                 <option value="confirmed" ${apt.status === 'confirmed' ? 'selected' : ''}>Confirmado</option>
@@ -2616,6 +2622,7 @@ function renderTableView(apts) {
         </td>
         <td>
           <strong>${apt.clientName}</strong>
+          ${apt.referralType === 'partner' ? `<br><span class="badge badge-sm badge-indigo" style="font-size:10px;">🏢 ${apt.partnerName || 'Convênio'}</span>` : `<br><span class="badge badge-sm badge-outline" style="font-size:10px;">👤 Particular</span>`}
           ${apt.notes ? `<br><small class="text-muted">${apt.notes}</small>` : ''}
         </td>
         <td>
@@ -2652,6 +2659,7 @@ function renderTableView(apts) {
             </select>
             <button class="btn btn-sm btn-outline" onclick="reNotifySpecialist('${apt.id}')" title="Reenviar Alerta ao Especialista">🔔</button>
             <button class="btn btn-sm btn-outline" onclick="sendIndividualReminder('${apt.id}')" title="Enviar Lembrete D-1">📩</button>
+            <button class="btn btn-sm btn-outline" onclick="openExamDispatchModalForAppointment('${apt.id}')" title="Enviar Laudo/Exame">🔬</button>
             <button class="btn btn-sm btn-danger-outline" onclick="deleteAppointment('${apt.id}')" title="Excluir Definitivamente">🗑️</button>
           </div>
         </td>
@@ -2882,9 +2890,20 @@ document.getElementById('modal-apt-agent')?.addEventListener('change', (e) => {
   loadAvailableSlotsForModal();
 });
 
+// Alternar exibição de clínica parceira no agendamento manual
+document.querySelectorAll('input[name="modal-apt-referral-type"]').forEach(r => {
+  r.addEventListener('change', (e) => {
+    const wrap = document.getElementById('modal-apt-partner-wrap');
+    if (wrap) wrap.style.display = e.target.value === 'partner' ? 'block' : 'none';
+  });
+});
+
 // Submissão do Formulário de Agendamento Manual
 document.getElementById('modal-appointment-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+
+  const referralType = document.querySelector('input[name="modal-apt-referral-type"]:checked')?.value || 'particular';
+  const partnerId = referralType === 'partner' ? document.getElementById('modal-apt-partner')?.value : undefined;
 
   const payload = {
     agentId: document.getElementById('modal-apt-agent')?.value,
@@ -2894,6 +2913,8 @@ document.getElementById('modal-appointment-form')?.addEventListener('submit', as
     startTime: document.getElementById('modal-apt-time')?.value,
     clientName: document.getElementById('modal-apt-name')?.value.trim(),
     clientPhone: document.getElementById('modal-apt-phone')?.value.trim(),
+    referralType,
+    partnerId,
     notes: document.getElementById('modal-apt-notes')?.value.trim(),
     notifySpecialist: document.getElementById('modal-apt-notify')?.checked
   };
@@ -4196,9 +4217,1357 @@ document.getElementById('print-filter-role')?.addEventListener('change', () => {
 });
 
 document.getElementById('print-filter-specialist')?.addEventListener('change', updatePrintPreviewCount);
-document.getElementById('print-filter-status')?.addEventListener('change', updatePrintPreviewCount);
-document.getElementById('print-filter-agent')?.addEventListener('change', updatePrintPreviewCount);
-
 document.getElementById('btn-execute-print')?.addEventListener('click', generateAndPrintReport);
+
+// ============================================================================
+// GESTÃO DE PARCEIROS & CONVÊNIOS (CLÍNICAS PARCEIRAS)
+// ============================================================================
+
+let currentPartnersList = [];
+
+async function loadPartners() {
+  try {
+    const res = await fetchWithAuth('/api/partners');
+    if (!res.ok) throw new Error('Falha ao carregar parceiros.');
+    const data = await res.json();
+    currentPartnersList = data.partners || [];
+    renderPartners(currentPartnersList);
+    populatePartnersDropdowns();
+  } catch (err) {
+    console.error('Erro ao carregar parceiros:', err);
+  }
+}
+
+function renderPartners(partners) {
+  const tbody = document.getElementById('partners-table-body');
+  if (!tbody) return;
+
+  if (partners.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center p-4 text-muted">Nenhum parceiro ou convênio cadastrado.</td></tr>`;
+    return;
+  }
+
+  let html = '';
+  partners.forEach(p => {
+    html += `
+      <tr>
+        <td>
+          <strong>${escapeHtml(p.name)}</strong>
+          ${p.notes ? `<br><small class="text-muted">${escapeHtml(p.notes)}</small>` : ''}
+        </td>
+        <td><small style="font-family: monospace;">${p.document || '-'}</small></td>
+        <td>
+          <a href="https://wa.me/${(p.phone || '').replace(/\D/g, '')}" target="_blank" class="text-emerald" style="text-decoration: none;">
+            📱 ${formatPhoneDisplay(p.phone)}
+          </a>
+        </td>
+        <td>${escapeHtml(p.contactPerson || '-')}</td>
+        <td><small>${escapeHtml(p.email || '-')}</small></td>
+        <td>
+          <span class="badge ${p.active ? 'badge-emerald' : 'badge-rose'}" style="font-size: 11px;">
+            ${p.active ? '✅ Ativo' : '⛔ Inativo'}
+          </span>
+        </td>
+        <td style="text-align: right;">
+          <div class="d-flex justify-end gap-1">
+            <button class="btn btn-sm btn-outline" onclick="openEditPartnerModal('${p.id}')" title="Editar Dados">✏️</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="deletePartnerRecord('${p.id}')" title="Remover Parceiro">🗑️</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+}
+
+function populatePartnersDropdowns() {
+  const selects = [
+    document.getElementById('modal-apt-partner'),
+    document.getElementById('modal-exam-partner-select'),
+    document.getElementById('exam-filter-partner'),
+    document.getElementById('print-exams-filter-partner')
+  ];
+
+  selects.forEach(sel => {
+    if (!sel) return;
+    const isFilter = sel.id.includes('filter');
+    const defaultText = isFilter ? (sel.id.includes('print') ? '🏢 Todas as Clínicas Parceiras & Particulares' : 'Todas as Clínicas') : 'Selecione a empresa conveniada...';
+    const currentVal = sel.value;
+
+    let opts = isFilter ? `<option value="all">${defaultText}</option>` : `<option value="">${defaultText}</option>`;
+    currentPartnersList.forEach(p => {
+      if (isFilter || p.active) {
+        opts += `<option value="${p.id}">${escapeHtml(p.name)} (${formatPhoneDisplay(p.phone)})</option>`;
+      }
+    });
+
+    sel.innerHTML = opts;
+    if (currentVal) sel.value = currentVal;
+  });
+}
+
+function openPartnersModal() {
+  const overlay = document.getElementById('modal-partners-overlay');
+  if (overlay) {
+    overlay.style.display = 'flex';
+    hidePartnerForm();
+    loadPartners();
+  }
+}
+
+function closePartnersModal() {
+  const overlay = document.getElementById('modal-partners-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function showPartnerForm(partner = null) {
+  const card = document.getElementById('partner-form-card');
+  const title = document.getElementById('partner-form-title');
+  const idInput = document.getElementById('partner-form-id');
+  if (!card) return;
+
+  document.getElementById('partner-edit-form').reset();
+
+  if (partner) {
+    title.textContent = 'Editar Empresa Parceira';
+    idInput.value = partner.id;
+    document.getElementById('partner-form-name').value = partner.name || '';
+    document.getElementById('partner-form-phone').value = partner.phone || '';
+    document.getElementById('partner-form-doc').value = partner.document || '';
+    document.getElementById('partner-form-contact').value = partner.contactPerson || '';
+    document.getElementById('partner-form-email').value = partner.email || '';
+    document.getElementById('partner-form-notes').value = partner.notes || '';
+    document.getElementById('partner-form-active').value = partner.active ? 'true' : 'false';
+  } else {
+    title.textContent = 'Cadastrar Nova Empresa Parceira';
+    idInput.value = '';
+    document.getElementById('partner-form-active').value = 'true';
+  }
+
+  card.style.display = 'block';
+  document.getElementById('partner-form-name').focus();
+}
+
+function hidePartnerForm() {
+  const card = document.getElementById('partner-form-card');
+  if (card) card.style.display = 'none';
+}
+
+function openEditPartnerModal(id) {
+  const partner = currentPartnersList.find(p => p.id === id);
+  if (partner) showPartnerForm(partner);
+}
+
+async function handlePartnerFormSubmit(e) {
+  e.preventDefault();
+  const id = document.getElementById('partner-form-id')?.value;
+  const name = document.getElementById('partner-form-name')?.value.trim();
+  const phone = document.getElementById('partner-form-phone')?.value.trim();
+  const documentVal = document.getElementById('partner-form-doc')?.value.trim();
+  const contactPerson = document.getElementById('partner-form-contact')?.value.trim();
+  const email = document.getElementById('partner-form-email')?.value.trim();
+  const notes = document.getElementById('partner-form-notes')?.value.trim();
+  const active = document.getElementById('partner-form-active')?.value === 'true';
+
+  if (!name || !phone) {
+    showToast('Nome e WhatsApp da clínica/empresa são obrigatórios.', 'warning');
+    return;
+  }
+
+  const payload = { name, phone, document: documentVal, contactPerson, email, notes, active };
+
+  try {
+    const url = id ? `/api/partners/${id}` : '/api/partners';
+    const method = id ? 'PUT' : 'POST';
+
+    const res = await fetchWithAuth(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao salvar parceiro.');
+
+    showToast(`Parceiro ${id ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
+    hidePartnerForm();
+    await loadPartners();
+  } catch (err) {
+    showToast(`Erro: ${err.message}`, 'error');
+  }
+}
+
+async function deletePartnerRecord(id) {
+  const partner = currentPartnersList.find(p => p.id === id);
+  const name = partner ? partner.name : 'este parceiro';
+  if (!confirm(`Deseja realmente remover o parceiro "${name}"?`)) return;
+
+  try {
+    const res = await fetchWithAuth(`/api/partners/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Falha ao excluir parceiro.');
+    showToast('Parceiro excluído com sucesso!', 'success');
+    await loadPartners();
+  } catch (err) {
+    showToast(`Erro ao excluir: ${err.message}`, 'error');
+  }
+}
+
+// ============================================================================
+// SISTEMA DE ENVIO & GESTÃO DE EXAMES / LAUDOS
+// ============================================================================
+
+let currentExamsList = [];
+
+async function loadExams() {
+  try {
+    const referralFilter = document.getElementById('exam-filter-referral')?.value || 'all';
+    const partnerFilter = document.getElementById('exam-filter-partner')?.value || 'all';
+    const statusFilter = document.getElementById('exam-filter-status')?.value || 'all';
+    const agentFilter = document.getElementById('exam-filter-agent')?.value || 'all';
+    const searchVal = document.getElementById('exam-search-input')?.value || '';
+
+    const params = new URLSearchParams();
+    if (referralFilter !== 'all') params.append('referralType', referralFilter);
+    if (partnerFilter !== 'all') params.append('partnerId', partnerFilter);
+    if (statusFilter !== 'all') params.append('status', statusFilter);
+    if (agentFilter !== 'all') params.append('agentId', agentFilter);
+    if (searchVal.trim()) params.append('search', searchVal.trim());
+
+    const res = await fetchWithAuth(`/api/exams?${params.toString()}`);
+    if (!res.ok) throw new Error('Falha ao carregar exames.');
+    const data = await res.json();
+    currentExamsList = data.exams || [];
+
+    renderExams(currentExamsList);
+    updateExamKPIs(currentExamsList);
+
+    // Carrega parceiros para dropdowns caso ainda não carregados
+    if (currentPartnersList.length === 0) {
+      loadPartners();
+    }
+  } catch (err) {
+    console.error('Erro ao carregar exames:', err);
+    showToast(`Erro ao carregar exames: ${err.message}`, 'error');
+  }
+}
+
+function updateExamKPIs(exams) {
+  const totalEl = document.getElementById('kpi-exams-total');
+  const successEl = document.getElementById('kpi-exams-success');
+  const partnerEl = document.getElementById('kpi-exams-partner');
+  const particularEl = document.getElementById('kpi-exams-particular');
+  const failedEl = document.getElementById('kpi-exams-failed');
+  const badgeTotal = document.getElementById('badge-total-exams');
+
+  const total = exams.length;
+  const success = exams.filter(e => e.status === 'sent').length;
+  const partnerCount = exams.filter(e => e.referralType === 'partner').length;
+  const particularCount = exams.filter(e => e.referralType !== 'partner').length;
+  const failed = exams.filter(e => e.status === 'failed').length;
+
+  if (totalEl) totalEl.textContent = total;
+  if (successEl) successEl.textContent = success;
+  if (partnerEl) partnerEl.textContent = partnerCount;
+  if (particularEl) particularEl.textContent = particularCount;
+  if (failedEl) failedEl.textContent = failed;
+  if (badgeTotal) badgeTotal.textContent = `${total} Exame(s) Registrado(s)`;
+}
+
+function renderExams(exams) {
+  const tbody = document.getElementById('exams-table-body');
+  if (!tbody) return;
+
+  if (exams.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center p-4 text-muted">Nenhum exame ou laudo encontrado para os filtros selecionados.</td></tr>`;
+    return;
+  }
+
+  let html = '';
+  exams.forEach(exam => {
+    let targetBadge = '';
+    if (exam.target === 'both') {
+      targetBadge = `<span class="exam-badge-target exam-badge-both">👥 Ambos (Paciente + Clínica)</span>`;
+    } else if (exam.target === 'partner') {
+      targetBadge = `<span class="exam-badge-target exam-badge-partner">🏢 Somente Clínica Parceira</span>`;
+    } else {
+      targetBadge = `<span class="exam-badge-target exam-badge-patient">👤 Somente Paciente</span>`;
+    }
+
+    let statusPill = '';
+    if (exam.status === 'sent') {
+      statusPill = `<span class="badge badge-emerald" style="font-size: 11px;">✅ Entregue</span>`;
+    } else if (exam.status === 'partial') {
+      statusPill = `<span class="badge badge-amber" style="font-size: 11px;">⚠️ Parcial</span>`;
+    } else {
+      statusPill = `<span class="badge badge-rose" style="font-size: 11px;">❌ Falha</span>`;
+    }
+
+    const dt = new Date(exam.sentAt);
+    const dateStr = dt.toLocaleDateString('pt-BR');
+    const timeStr = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    const isPdf = exam.fileMimeType?.includes('pdf') || exam.originalName?.toLowerCase().endsWith('.pdf');
+    const fileIcon = isPdf ? '📄' : '🖼️';
+    const fileSizeKb = Math.round(exam.fileSize / 1024);
+
+    html += `
+      <tr>
+        <td>
+          <strong>${dateStr}</strong><br>
+          <span class="text-muted" style="font-family: monospace;">${timeStr}</span>
+        </td>
+        <td>
+          <strong>${escapeHtml(exam.patientName)}</strong>
+          ${exam.caption ? `<br><small class="text-muted" title="${escapeHtml(exam.caption)}">💬 "${escapeHtml(exam.caption.substring(0, 45))}..."</small>` : ''}
+        </td>
+        <td>
+          <a href="https://wa.me/${(exam.patientPhone || '').replace(/\D/g, '')}" target="_blank" class="text-emerald" style="text-decoration: none;">
+            📱 ${formatPhoneDisplay(exam.patientPhone)}
+          </a>
+        </td>
+        <td>
+          ${exam.referralType === 'partner'
+            ? `<span class="badge badge-sm badge-indigo" style="font-size: 11px;">🏢 ${escapeHtml(exam.partnerName || 'Convênio')}</span>`
+            : `<span class="badge badge-sm badge-outline" style="font-size: 11px;">👤 Particular</span>`
+          }
+        </td>
+        <td>${targetBadge}</td>
+        <td>
+          <div class="d-flex align-center gap-1">
+            <span>${fileIcon}</span>
+            <div>
+              <strong style="font-size: 12px;">${escapeHtml(exam.originalName)}</strong><br>
+              <small class="text-muted">${fileSizeKb} KB</small>
+            </div>
+          </div>
+        </td>
+        <td>${statusPill}</td>
+        <td><small>${escapeHtml(exam.sentBy || 'Operador')}</small></td>
+        <td style="text-align: right;">
+          <div class="d-flex justify-end gap-1">
+            <button class="btn btn-sm btn-outline" onclick="downloadExamFile('${exam.id}')" title="Baixar / Visualizar Arquivo">📥</button>
+            <button class="btn btn-sm btn-outline" onclick="openResendExamModal('${exam.id}')" title="Reenviar pelo WhatsApp">🔁</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="deleteExamRecord('${exam.id}')" title="Excluir Registro e Arquivo">🗑️</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+}
+
+function openExamDispatchModal(prefill = {}) {
+  const overlay = document.getElementById('modal-exam-dispatch-overlay');
+  if (!overlay) return;
+
+  document.getElementById('modal-exam-dispatch-form').reset();
+  document.getElementById('modal-exam-appointment-id').value = prefill.appointmentId || '';
+  document.getElementById('modal-exam-file-base64').value = '';
+  document.getElementById('modal-exam-file-name').value = '';
+  document.getElementById('modal-exam-file-mimetype').value = '';
+
+  const emptyState = document.getElementById('dropzone-empty-state');
+  const fileSelectedState = document.getElementById('dropzone-file-selected');
+  if (emptyState) emptyState.style.display = 'block';
+  if (fileSelectedState) fileSelectedState.style.display = 'none';
+
+  if (prefill.clientName) {
+    document.getElementById('modal-exam-patient-name').value = prefill.clientName;
+  }
+  if (prefill.clientPhone) {
+    document.getElementById('modal-exam-patient-phone').value = prefill.clientPhone.replace(/@.*$/, '').replace(/\D/g, '');
+  }
+
+  populatePartnersDropdowns();
+  populateExamAgentsSelect(prefill.agentId);
+  populateAppointmentsPickerForExams(prefill.appointmentId);
+
+  const isPartner = prefill.referralType === 'partner';
+  const partRadio = document.getElementById('exam-ref-particular');
+  const partnerRadio = document.getElementById('exam-ref-partner');
+  if (isPartner && partnerRadio) {
+    partnerRadio.checked = true;
+  } else if (partRadio) {
+    partRadio.checked = true;
+  }
+
+  const partnerWrap = document.getElementById('modal-exam-partner-wrap');
+  if (partnerWrap) {
+    partnerWrap.style.display = isPartner ? 'block' : 'none';
+  }
+
+  if (isPartner && prefill.partnerId) {
+    const partnerSelect = document.getElementById('modal-exam-partner-select');
+    if (partnerSelect) partnerSelect.value = prefill.partnerId;
+  }
+
+  updateExamTargetOptions(isPartner);
+  overlay.style.display = 'flex';
+}
+
+function updateExamTargetOptions(isPartner) {
+  const optPartner = document.getElementById('target-opt-partner');
+  const optBoth = document.getElementById('target-opt-both');
+  const radioPatient = document.querySelector('input[name="modal-exam-target"][value="patient"]');
+  const radioPartner = document.querySelector('input[name="modal-exam-target"][value="partner"]');
+
+  if (isPartner) {
+    if (optPartner) optPartner.style.display = 'block';
+    if (optBoth) optBoth.style.display = 'block';
+    if (radioPartner) radioPartner.checked = true;
+  } else {
+    if (optPartner) optPartner.style.display = 'none';
+    if (optBoth) optBoth.style.display = 'none';
+    if (radioPatient) radioPatient.checked = true;
+  }
+}
+
+function openExamDispatchModalForAppointment(aptId) {
+  const apt = (typeof currentAppointmentsList !== 'undefined' ? currentAppointmentsList : []).find(a => a.id === aptId);
+  if (apt) {
+    openExamDispatchModal({
+      appointmentId: apt.id,
+      clientName: apt.clientName,
+      clientPhone: apt.clientPhone,
+      referralType: apt.referralType || (apt.partnerId ? 'partner' : 'particular'),
+      partnerId: apt.partnerId || '',
+      agentId: apt.agentId || '*'
+    });
+  } else {
+    fetchWithAuth(`/api/appointments/${aptId}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.appointment) {
+          const a = data.appointment;
+          openExamDispatchModal({
+            appointmentId: a.id,
+            clientName: a.clientName,
+            clientPhone: a.clientPhone,
+            referralType: a.referralType || (a.partnerId ? 'partner' : 'particular'),
+            partnerId: a.partnerId || '',
+            agentId: a.agentId || '*'
+          });
+        } else {
+          openExamDispatchModal();
+        }
+      })
+      .catch(() => openExamDispatchModal());
+  }
+}
+
+function closeExamDispatchModal() {
+  const overlay = document.getElementById('modal-exam-dispatch-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function populateExamAgentsSelect(targetAgentId) {
+  const sel = document.getElementById('modal-exam-agent');
+  const filterSel = document.getElementById('exam-filter-agent');
+  if (!sel && !filterSel) return;
+
+  let opts = '<option value="*">🌐 Agente Padrão (Global)</option>';
+  let filterOpts = '<option value="all">Todas as Unidades</option>';
+
+  if (typeof allAgents !== 'undefined' && Array.isArray(allAgents)) {
+    allAgents.forEach(a => {
+      opts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
+      filterOpts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
+    });
+  }
+
+  if (sel) {
+    sel.innerHTML = opts;
+    if (targetAgentId) sel.value = targetAgentId;
+  }
+  if (filterSel) {
+    const curr = filterSel.value;
+    filterSel.innerHTML = filterOpts;
+    if (curr) filterSel.value = curr;
+  }
+}
+
+function populateAppointmentsPickerForExams(selectedAptId) {
+  const sel = document.getElementById('modal-exam-select-appointment');
+  if (!sel) return;
+
+  let opts = '<option value="">✍️ Digitação Manual de Paciente</option>';
+  const list = typeof currentAppointmentsList !== 'undefined' ? currentAppointmentsList : [];
+
+  list.forEach(apt => {
+    const label = `${apt.clientName} • ${formatDateBR(apt.date)} (${apt.startTime}) • ${apt.specialistName}`;
+    opts += `<option value="${apt.id}" ${apt.id === selectedAptId ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  });
+
+  sel.innerHTML = opts;
+
+  sel.onchange = () => {
+    const aptId = sel.value;
+    if (!aptId) return;
+    const found = list.find(a => a.id === aptId);
+    if (!found) return;
+
+    document.getElementById('modal-exam-appointment-id').value = found.id;
+    document.getElementById('modal-exam-patient-name').value = found.clientName;
+    document.getElementById('modal-exam-patient-phone').value = found.clientPhone.replace(/@.*$/, '').replace(/\D/g, '');
+
+    const isPartner = found.referralType === 'partner';
+    const partRadio = document.getElementById('exam-ref-particular');
+    const partnerRadio = document.getElementById('exam-ref-partner');
+    if (isPartner && partnerRadio) partnerRadio.checked = true;
+    else if (partRadio) partRadio.checked = true;
+
+    const partnerWrap = document.getElementById('modal-exam-partner-wrap');
+    if (partnerWrap) partnerWrap.style.display = isPartner ? 'block' : 'none';
+
+    if (isPartner && found.partnerId) {
+      const pSel = document.getElementById('modal-exam-partner-select');
+      if (pSel) pSel.value = found.partnerId;
+    }
+
+    updateExamTargetOptions(isPartner);
+  };
+}
+
+function setupExamDropzone() {
+  const dropzone = document.getElementById('exam-dropzone');
+  const fileInput = document.getElementById('modal-exam-file-input');
+  const emptyState = document.getElementById('dropzone-empty-state');
+  const fileSelectedState = document.getElementById('dropzone-file-selected');
+  const fileNameEl = document.getElementById('dropzone-file-name');
+  const fileSizeEl = document.getElementById('dropzone-file-size');
+  const fileIconEl = document.getElementById('dropzone-file-icon');
+  const btnRemove = document.getElementById('btn-remove-selected-file');
+
+  if (!dropzone || !fileInput) return;
+
+  dropzone.addEventListener('click', (e) => {
+    if (e.target !== btnRemove && !btnRemove?.contains(e.target)) {
+      fileInput.click();
+    }
+  });
+
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropzone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('drag-over');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    dropzone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('drag-over');
+    });
+  });
+
+  dropzone.addEventListener('drop', (e) => {
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      handleExamFile(files[0]);
+    }
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      handleExamFile(files[0]);
+    }
+  });
+
+  if (btnRemove) {
+    btnRemove.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.value = '';
+      document.getElementById('modal-exam-file-base64').value = '';
+      document.getElementById('modal-exam-file-name').value = '';
+      document.getElementById('modal-exam-file-mimetype').value = '';
+      if (emptyState) emptyState.style.display = 'block';
+      if (fileSelectedState) fileSelectedState.style.display = 'none';
+    });
+  }
+
+  function handleExamFile(file) {
+    if (file.size > 30 * 1024 * 1024) {
+      showToast('O arquivo excede o limite máximo de 30MB.', 'warning');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64Data = reader.result;
+      document.getElementById('modal-exam-file-base64').value = base64Data;
+      document.getElementById('modal-exam-file-name').value = file.name;
+      document.getElementById('modal-exam-file-mimetype').value = file.type || 'application/octet-stream';
+
+      if (fileNameEl) fileNameEl.textContent = file.name;
+      if (fileSizeEl) fileSizeEl.textContent = `${Math.round(file.size / 1024)} KB`;
+      if (fileIconEl) {
+        fileIconEl.textContent = file.type?.includes('pdf') || file.name.toLowerCase().endsWith('.pdf') ? '📄' : '🖼️';
+      }
+
+      if (emptyState) emptyState.style.display = 'none';
+      if (fileSelectedState) fileSelectedState.style.display = 'flex';
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+async function handleExamDispatchSubmit(e) {
+  e.preventDefault();
+
+  const patientName = document.getElementById('modal-exam-patient-name')?.value.trim();
+  const patientPhone = document.getElementById('modal-exam-patient-phone')?.value.trim();
+  const referralType = document.querySelector('input[name="modal-exam-referral-type"]:checked')?.value || 'particular';
+  const partnerId = referralType === 'partner' ? document.getElementById('modal-exam-partner-select')?.value : undefined;
+  const target = document.querySelector('input[name="modal-exam-target"]:checked')?.value || 'patient';
+  const fileBase64 = document.getElementById('modal-exam-file-base64')?.value;
+  const fileName = document.getElementById('modal-exam-file-name')?.value;
+  const fileMimeType = document.getElementById('modal-exam-file-mimetype')?.value;
+  const caption = document.getElementById('modal-exam-caption')?.value.trim();
+  const agentId = document.getElementById('modal-exam-agent')?.value || '*';
+  const appointmentId = document.getElementById('modal-exam-appointment-id')?.value || undefined;
+
+  if (!patientName) {
+    showToast('Informe o nome do paciente.', 'warning');
+    return;
+  }
+  if (!patientPhone) {
+    showToast('Informe o WhatsApp do paciente.', 'warning');
+    return;
+  }
+  if (referralType === 'partner' && !partnerId) {
+    showToast('Selecione a empresa/clínica conveniada.', 'warning');
+    return;
+  }
+  if (!fileBase64) {
+    showToast('Por favor, anexe o arquivo do laudo/exame.', 'warning');
+    return;
+  }
+
+  const submitBtn = document.getElementById('btn-submit-exam');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = '⏳ Enviando pelo WhatsApp...';
+  }
+
+  try {
+    showToast('Disparando exame pelo WhatsApp...', 'info');
+    const res = await fetchWithAuth('/api/exams/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appointmentId,
+        agentId,
+        patientName,
+        patientPhone,
+        referralType,
+        partnerId,
+        target,
+        fileBase64,
+        fileName,
+        fileMimeType,
+        caption
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Falha ao enviar exame.');
+    }
+
+    const exam = data.exam;
+    if (exam.status === 'sent') {
+      showToast('Exame e laudo enviados com sucesso pelo WhatsApp! ✅', 'success');
+    } else if (exam.status === 'partial') {
+      showToast('Exame enviado parcialmente. Verifique as tentativas.', 'warning');
+    } else {
+      showToast('Houve falha ao entregar o exame no WhatsApp. O arquivo foi salvo para reenvio.', 'error');
+    }
+
+    closeExamDispatchModal();
+    await loadExams();
+  } catch (err) {
+    showToast(`Erro ao enviar: ${err.message}`, 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '🚀 Enviar Exame pelo WhatsApp';
+    }
+  }
+}
+
+function openResendExamModal(examId) {
+  const exam = currentExamsList.find(e => e.id === examId);
+  if (!exam) return;
+
+  const overlay = document.getElementById('modal-exam-resend-overlay');
+  if (!overlay) return;
+
+  document.getElementById('resend-exam-id').value = exam.id;
+  document.getElementById('resend-patient-name').textContent = exam.patientName;
+  document.getElementById('resend-patient-phone').textContent = formatPhoneDisplay(exam.patientPhone);
+  document.getElementById('resend-file-name').textContent = exam.originalName;
+
+  const partnerInfo = document.getElementById('resend-partner-info');
+  const optPartner = document.getElementById('resend-opt-partner');
+  const optBoth = document.getElementById('resend-opt-both');
+
+  if (exam.referralType === 'partner') {
+    if (partnerInfo) {
+      partnerInfo.style.display = 'block';
+      document.getElementById('resend-partner-name').textContent = exam.partnerName || 'Convênio';
+    }
+    if (optPartner) optPartner.style.display = 'block';
+    if (optBoth) optBoth.style.display = 'block';
+    document.getElementById('resend-target-select').value = exam.target || 'partner';
+  } else {
+    if (partnerInfo) partnerInfo.style.display = 'none';
+    if (optPartner) optPartner.style.display = 'none';
+    if (optBoth) optBoth.style.display = 'none';
+    document.getElementById('resend-target-select').value = 'patient';
+  }
+
+  document.getElementById('resend-caption').value = '';
+  overlay.style.display = 'flex';
+}
+
+function closeResendExamModal() {
+  const overlay = document.getElementById('modal-exam-resend-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function handleResendExamSubmit(e) {
+  e.preventDefault();
+  const examId = document.getElementById('resend-exam-id')?.value;
+  const target = document.getElementById('resend-target-select')?.value;
+  const caption = document.getElementById('resend-caption')?.value.trim();
+
+  if (!examId) return;
+
+  const btn = document.getElementById('btn-confirm-resend');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Reenviando...';
+  }
+
+  try {
+    showToast('Reenviando exame pelo WhatsApp...', 'info');
+    const res = await fetchWithAuth(`/api/exams/${examId}/resend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, caption: caption || undefined })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao reenviar exame.');
+
+    showToast('Exame reenviado com sucesso pelo WhatsApp!', 'success');
+    closeResendExamModal();
+    await loadExams();
+  } catch (err) {
+    showToast(`Erro ao reenviar: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🚀 Reenviar Agora';
+    }
+  }
+}
+
+function downloadExamFile(examId) {
+  window.open(`/api/exams/${examId}/download`, '_blank');
+}
+
+async function deleteExamRecord(examId) {
+  const exam = currentExamsList.find(e => e.id === examId);
+  const name = exam ? exam.patientName : 'este exame';
+  if (!confirm(`Deseja realmente remover o registro e arquivo do exame do paciente "${name}"?`)) return;
+
+  try {
+    const res = await fetchWithAuth(`/api/exams/${examId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Falha ao excluir exame.');
+    showToast('Exame removido com sucesso!', 'success');
+    await loadExams();
+  } catch (err) {
+    showToast(`Erro ao excluir: ${err.message}`, 'error');
+  }
+}
+
+// ============================================================================
+// RELATÓRIO OFICIAL IMPRESSO A4 / PDF DE EXAMES POR PARCEIRO & CONVÊNIO
+// ============================================================================
+
+function openPrintExamsModal() {
+  const overlay = document.getElementById('modal-print-exams-overlay');
+  if (!overlay) return;
+
+  populatePartnersDropdowns();
+
+  const agentSelect = document.getElementById('print-exams-filter-agent');
+  if (agentSelect) {
+    let opts = '<option value="all" selected>🌐 Todas as Unidades (Visão Geral)</option>';
+    if (typeof allAgents !== 'undefined') {
+      allAgents.forEach(a => {
+        opts += `<option value="${a.id}">🏢 ${escapeHtml(a.companyName || a.name)}</option>`;
+      });
+    }
+    agentSelect.innerHTML = opts;
+  }
+
+  const startInput = document.getElementById('print-exams-start-date');
+  const endInput = document.getElementById('print-exams-end-date');
+  const today = getTodayString();
+  if (startInput) startInput.value = today;
+  if (endInput) endInput.value = today;
+
+  overlay.style.display = 'flex';
+  updatePrintExamsPreviewCount();
+}
+
+function closePrintExamsModal() {
+  const overlay = document.getElementById('modal-print-exams-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function getFilteredExamsForReport() {
+  const dateType = document.getElementById('print-exams-date-type')?.value || 'today';
+  const partnerId = document.getElementById('print-exams-filter-partner')?.value || 'all';
+  const referralType = document.getElementById('print-exams-filter-referral')?.value || 'all';
+  const status = document.getElementById('print-exams-filter-status')?.value || 'all';
+  const agentId = document.getElementById('print-exams-filter-agent')?.value || 'all';
+
+  const todayStr = getTodayString();
+  let startDate = '';
+  let endDate = '';
+
+  if (dateType === 'today') {
+    startDate = todayStr;
+    endDate = todayStr;
+  } else if (dateType === 'this_week') {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(d.setDate(diff));
+    startDate = monday.toISOString().split('T')[0];
+    endDate = todayStr;
+  } else if (dateType === 'this_month') {
+    const d = new Date();
+    startDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+    endDate = todayStr;
+  } else if (dateType === 'custom') {
+    startDate = document.getElementById('print-exams-start-date')?.value || '';
+    endDate = document.getElementById('print-exams-end-date')?.value || '';
+  }
+
+  let list = [...currentExamsList];
+
+  if (startDate) {
+    list = list.filter(e => e.sentAt.split('T')[0] >= startDate);
+  }
+  if (endDate) {
+    list = list.filter(e => e.sentAt.split('T')[0] <= endDate);
+  }
+  if (partnerId !== 'all') {
+    list = list.filter(e => e.partnerId === partnerId);
+  }
+  if (referralType !== 'all') {
+    list = list.filter(e => e.referralType === referralType);
+  }
+  if (status !== 'all') {
+    list = list.filter(e => e.status === status);
+  }
+  if (agentId !== 'all') {
+    list = list.filter(e => e.agentId === agentId);
+  }
+
+  return list;
+}
+
+function updatePrintExamsPreviewCount() {
+  const countEl = document.getElementById('print-exams-preview-count');
+  if (!countEl) return;
+  const list = getFilteredExamsForReport();
+  countEl.textContent = `${list.length} exame(s) selecionado(s) para o relatório`;
+}
+
+function generateAndPrintExamsReport() {
+  const executeBtn = document.getElementById('btn-execute-print-exams');
+  if (executeBtn) {
+    executeBtn.disabled = true;
+    executeBtn.textContent = '⏳ Gerando Relatório...';
+  }
+
+  try {
+    const list = getFilteredExamsForReport();
+    if (list.length === 0) {
+      showToast('Nenhum exame localizado com os filtros selecionados.', 'warning');
+      return;
+    }
+
+    const dateType = document.getElementById('print-exams-date-type')?.value || 'today';
+    const partnerSelect = document.getElementById('print-exams-filter-partner');
+    const partnerLabel = partnerSelect && partnerSelect.value !== 'all' ? partnerSelect.options[partnerSelect.selectedIndex].text : 'Todos os Convênios e Parceiros';
+
+    const referralSelect = document.getElementById('print-exams-filter-referral');
+    const referralLabel = referralSelect ? referralSelect.options[referralSelect.selectedIndex].text : 'Todos';
+
+    const agentSelect = document.getElementById('print-exams-filter-agent');
+    const unitLabel = agentSelect && agentSelect.value !== 'all' ? agentSelect.options[agentSelect.selectedIndex].text : 'Todas as Unidades';
+
+    let periodLabel = 'Hoje';
+    if (dateType === 'today') periodLabel = `Hoje (${formatDateBR(getTodayString())})`;
+    else if (dateType === 'this_week') periodLabel = 'Semana Vigente';
+    else if (dateType === 'this_month') periodLabel = 'Mês Atual';
+    else if (dateType === 'custom') {
+      const s = document.getElementById('print-exams-start-date')?.value;
+      const e = document.getElementById('print-exams-end-date')?.value;
+      periodLabel = `${formatDateBR(s)} até ${formatDateBR(e)}`;
+    } else {
+      periodLabel = 'Histórico Geral';
+    }
+
+    const now = new Date();
+    const emitDate = `${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    const emittedBy = currentUser ? (currentUser.name || currentUser.username) : 'Administração';
+
+    const totalExams = list.length;
+    const partnerExams = list.filter(e => e.referralType === 'partner').length;
+    const particularExams = list.filter(e => e.referralType !== 'partner').length;
+    const deliveredSuccess = list.filter(e => e.status === 'sent').length;
+    const failedDeliveries = list.filter(e => e.status === 'failed').length;
+
+    let rowsHtml = '';
+    list.forEach((exam, idx) => {
+      const dt = new Date(exam.sentAt);
+      const dtStr = `${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+
+      let targetText = 'Paciente';
+      if (exam.target === 'both') targetText = 'Ambos (Paciente + Clínica)';
+      else if (exam.target === 'partner') targetText = 'Clínica Parceira';
+
+      const partnerText = exam.referralType === 'partner' ? (exam.partnerName || 'Convênio') : 'Particular';
+      const statusText = exam.status === 'sent' ? 'Entregue (OK)' : (exam.status === 'partial' ? 'Parcial' : 'Falha');
+      const protocol = exam.attempts && exam.attempts[0]?.messageId ? exam.attempts[0].messageId.substring(0, 18) + '...' : 'WPP-' + exam.id;
+
+      rowsHtml += `
+        <tr>
+          <td style="text-align: center; font-weight: bold; width: 30px;">${idx + 1}</td>
+          <td>${dtStr}</td>
+          <td>
+            <strong>${escapeHtml(exam.patientName)}</strong><br>
+            <span style="font-size: 11px; color: #4b5563;">📱 ${formatPhoneDisplay(exam.patientPhone)}</span>
+          </td>
+          <td>
+            <strong>${escapeHtml(partnerText)}</strong>
+          </td>
+          <td>${targetText}</td>
+          <td>
+            <span style="font-weight: 500;">${escapeHtml(exam.originalName)}</span>
+          </td>
+          <td style="font-size: 10px; font-family: monospace; color: #4b5563;">${protocol}</td>
+          <td>
+            <span class="status-badge ${exam.status === 'sent' ? 'badge-success' : 'badge-danger'}">
+              ${statusText}
+            </span>
+          </td>
+        </tr>
+      `;
+    });
+
+    const printHtml = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Relatório Oficial de Exames Realizados e Enviados</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 12mm 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    body {
+      background: white;
+      color: #111827;
+      margin: 0;
+      padding: 0;
+      font-size: 11.5px;
+      line-height: 1.4;
+    }
+    .report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .clinic-info h1 {
+      font-size: 18px;
+      font-weight: 800;
+      color: #1e3a8a;
+      margin: 0 0 4px 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .clinic-info p {
+      margin: 0;
+      font-size: 12px;
+      color: #4b5563;
+    }
+    .meta-info {
+      text-align: right;
+      font-size: 11px;
+      color: #374151;
+    }
+    .meta-info div {
+      margin-bottom: 2px;
+    }
+    .filters-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 11px;
+    }
+    .filter-item strong {
+      color: #1e293b;
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+    .kpi-summary-strip {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .kpi-box {
+      flex: 1;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #ffffff;
+      text-align: center;
+    }
+    .kpi-box .val {
+      font-size: 16px;
+      font-weight: 800;
+      color: #1e3a8a;
+    }
+    .kpi-box .lbl {
+      font-size: 9.5px;
+      color: #64748b;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+    th {
+      background: #f1f5f9;
+      color: #334155;
+      font-weight: 700;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      text-align: left;
+      padding: 7px 8px;
+      border-bottom: 2px solid #cbd5e1;
+    }
+    td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: middle;
+      font-size: 11px;
+    }
+    tr:nth-child(even) td {
+      background: #fcfcfd;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 9.5px;
+      font-weight: 700;
+    }
+    .badge-success {
+      background: #dcfce7;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+    }
+    .badge-danger {
+      background: #fee2e2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+    }
+    .report-footer {
+      margin-top: 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding-top: 10px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 10.5px;
+      color: #6b7280;
+    }
+    .signature-area {
+      text-align: center;
+      width: 250px;
+    }
+    .signature-line {
+      border-bottom: 1px solid #111827;
+      margin-bottom: 4px;
+      height: 30px;
+    }
+    .signature-title {
+      font-size: 10px;
+      color: #4b5563;
+      font-weight: 600;
+    }
+    .no-print-bar {
+      background: #1e293b;
+      color: white;
+      padding: 10px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+    .btn-print {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 4px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    @media print {
+      .no-print-bar {
+        display: none !important;
+      }
+      body {
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print-bar">
+    <span>🖨️ Relatório Oficial de Exames & Laudos • Pressione <strong>Imprimir</strong> ou <code>Ctrl+P</code></span>
+    <button class="btn-print" onclick="window.print()">Imprimir / Salvar PDF</button>
+  </div>
+
+  <div style="padding: 14px 16px;">
+    <div class="report-header">
+      <div class="clinic-info">
+        <h1>Relatório de Exames Enviados • Convênios & Particulares</h1>
+        <p>Unidade: <strong>${unitLabel}</strong></p>
+      </div>
+      <div class="meta-info">
+        <div>Emissão: <strong>${emitDate}</strong></div>
+        <div>Operador: <strong>${emittedBy}</strong></div>
+        <div>Total de Exames: <strong>${totalExams}</strong></div>
+      </div>
+    </div>
+
+    <div class="filters-box">
+      <div class="filter-item">
+        <strong>Período</strong>
+        <span>${periodLabel}</span>
+      </div>
+      <div class="filter-item">
+        <strong>Clínica / Convênio</strong>
+        <span>${partnerLabel}</span>
+      </div>
+      <div class="filter-item">
+        <strong>Tipo de Atendimento</strong>
+        <span>${referralLabel}</span>
+      </div>
+    </div>
+
+    <div class="kpi-summary-strip">
+      <div class="kpi-box">
+        <div class="val">${totalExams}</div>
+        <div class="lbl">Total de Laudos</div>
+      </div>
+      <div class="kpi-box">
+        <div class="val" style="color: #4f46e5;">${partnerExams}</div>
+        <div class="lbl">Convênios / Parceiros</div>
+      </div>
+      <div class="kpi-box">
+        <div class="val" style="color: #0891b2;">${particularExams}</div>
+        <div class="lbl">Particulares</div>
+      </div>
+      <div class="kpi-box">
+        <div class="val" style="color: #16a34a;">${deliveredSuccess}</div>
+        <div class="lbl">Entregues com Sucesso</div>
+      </div>
+      <div class="kpi-box">
+        <div class="val" style="color: #dc2626;">${failedDeliveries}</div>
+        <div class="lbl">Falhas de Envio</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align: center;">#</th>
+          <th>Data / Hora</th>
+          <th>Paciente / WhatsApp</th>
+          <th>Origem / Convênio</th>
+          <th>Destinatário</th>
+          <th>Arquivo / Laudo</th>
+          <th>Protocolo WPP</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+      </tbody>
+    </table>
+
+    <div class="report-footer">
+      <div>
+        <div>Documento oficial expedido via Sistema BotZap Clínica & Diagnósticos.</div>
+        <div>Comprovante auditável com protocolo de entrega no WhatsApp (WAHA).</div>
+      </div>
+      <div class="signature-area">
+        <div class="signature-line"></div>
+        <div class="signature-title">Responsável Técnico / Recepção de Convênios</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        window.print();
+      }, 400);
+    });
+  <\/script>
+</body>
+</html>`;
+
+    const printWin = window.open('', '_blank', 'width=980,height=780');
+    if (!printWin) {
+      showToast('O navegador bloqueou o pop-up de impressão. Permita pop-ups para este site.', 'warning');
+      return;
+    }
+
+    printWin.document.open();
+    printWin.document.write(printHtml);
+    printWin.document.close();
+
+    closePrintExamsModal();
+    showToast('Relatório oficial de exames gerado para impressão!', 'success');
+  } catch (err) {
+    showToast(`Erro ao gerar relatório de exames: ${err.message}`, 'error');
+  } finally {
+    if (executeBtn) {
+      executeBtn.disabled = false;
+      executeBtn.textContent = '🖨️ Visualizar & Imprimir Relatório (PDF)';
+    }
+  }
+}
+
+// ============================================================================
+// EVENT LISTENERS DE PARCEIROS & EXAMES
+// ============================================================================
+
+// Parceiros
+document.getElementById('btn-manage-partners')?.addEventListener('click', openPartnersModal);
+document.getElementById('btn-close-partners-modal')?.addEventListener('click', closePartnersModal);
+document.getElementById('btn-close-partners-footer')?.addEventListener('click', closePartnersModal);
+document.getElementById('modal-partners-overlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-partners-overlay') closePartnersModal();
+});
+document.getElementById('btn-add-new-partner')?.addEventListener('click', () => showPartnerForm());
+document.getElementById('btn-cancel-partner-form')?.addEventListener('click', hidePartnerForm);
+document.getElementById('partner-edit-form')?.addEventListener('submit', handlePartnerFormSubmit);
+document.getElementById('partner-search-input')?.addEventListener('input', (e) => {
+  const q = e.target.value.toLowerCase().trim();
+  if (!q) {
+    renderPartners(currentPartnersList);
+  } else {
+    renderPartners(currentPartnersList.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      (p.phone && p.phone.includes(q)) ||
+      (p.document && p.document.includes(q)) ||
+      (p.contactPerson && p.contactPerson.toLowerCase().includes(q))
+    ));
+  }
+});
+
+// Envio de Exames
+document.getElementById('btn-new-exam')?.addEventListener('click', () => openExamDispatchModal());
+document.getElementById('btn-close-exam-modal')?.addEventListener('click', closeExamDispatchModal);
+document.getElementById('btn-cancel-exam')?.addEventListener('click', closeExamDispatchModal);
+document.getElementById('modal-exam-dispatch-overlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-exam-dispatch-overlay') closeExamDispatchModal();
+});
+document.getElementById('modal-exam-dispatch-form')?.addEventListener('submit', handleExamDispatchSubmit);
+
+document.querySelectorAll('input[name="modal-exam-referral-type"]').forEach(r => {
+  r.addEventListener('change', (e) => {
+    const isPartner = e.target.value === 'partner';
+    const wrap = document.getElementById('modal-exam-partner-wrap');
+    if (wrap) wrap.style.display = isPartner ? 'block' : 'none';
+    updateExamTargetOptions(isPartner);
+  });
+});
+
+// Reenvio de Exame
+document.getElementById('btn-close-resend-modal')?.addEventListener('click', closeResendExamModal);
+document.getElementById('btn-cancel-resend')?.addEventListener('click', closeResendExamModal);
+document.getElementById('modal-exam-resend-overlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-exam-resend-overlay') closeResendExamModal();
+});
+document.getElementById('modal-exam-resend-form')?.addEventListener('submit', handleResendExamSubmit);
+
+// Filtros de Exames
+document.getElementById('exam-search-input')?.addEventListener('input', loadExams);
+document.getElementById('exam-filter-referral')?.addEventListener('change', loadExams);
+document.getElementById('exam-filter-partner')?.addEventListener('change', loadExams);
+document.getElementById('exam-filter-status')?.addEventListener('change', loadExams);
+document.getElementById('exam-filter-agent')?.addEventListener('change', loadExams);
+document.getElementById('btn-refresh-exams')?.addEventListener('click', loadExams);
+
+// Impressão de Relatório de Exames
+document.getElementById('btn-open-print-exams')?.addEventListener('click', openPrintExamsModal);
+document.getElementById('btn-close-print-exams-modal')?.addEventListener('click', closePrintExamsModal);
+document.getElementById('btn-cancel-print-exams')?.addEventListener('click', closePrintExamsModal);
+document.getElementById('modal-print-exams-overlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-print-exams-overlay') closePrintExamsModal();
+});
+
+document.getElementById('print-exams-date-type')?.addEventListener('change', (e) => {
+  const wrap = document.getElementById('print-exams-custom-date-wrap');
+  if (wrap) wrap.style.display = e.target.value === 'custom' ? 'block' : 'none';
+  updatePrintExamsPreviewCount();
+});
+
+document.getElementById('print-exams-start-date')?.addEventListener('change', updatePrintExamsPreviewCount);
+document.getElementById('print-exams-end-date')?.addEventListener('change', updatePrintExamsPreviewCount);
+document.getElementById('print-exams-filter-partner')?.addEventListener('change', updatePrintExamsPreviewCount);
+document.getElementById('print-exams-filter-referral')?.addEventListener('change', updatePrintExamsPreviewCount);
+document.getElementById('print-exams-filter-status')?.addEventListener('change', updatePrintExamsPreviewCount);
+document.getElementById('print-exams-filter-agent')?.addEventListener('change', updatePrintExamsPreviewCount);
+document.getElementById('btn-execute-print-exams')?.addEventListener('click', generateAndPrintExamsReport);
+
+// Inicializa Drag & Drop de exames no carregamento
+setupExamDropzone();
 
 

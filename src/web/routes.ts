@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import fs from 'fs';
 import { orchestrator } from '../orchestrator/engine.js';
 import { loadBotConfig, saveBotConfig, updateEnvFile, env } from '../config/index.js';
 import { agentManager } from '../config/agent-manager.js';
@@ -12,6 +13,8 @@ import { WahaWebhookEvent } from '../waha/types.js';
 import { checkBusinessHoursStatus } from '../orchestrator/schedule-helper.js';
 import { appointmentManager } from '../appointments/appointment-manager.js';
 import { notificationService } from '../appointments/notification-service.js';
+import { partnerManager } from '../appointments/partner-manager.js';
+import { examService } from '../appointments/exam-service.js';
 import { userManager } from '../auth/user-manager.js';
 import { UserSession } from '../auth/user-types.js';
 
@@ -723,7 +726,9 @@ apiRouter.post('/api/appointments', requireAuth, async (req: Request, res: Respo
       date,
       startTime,
       notes,
-      notifySpecialist
+      notifySpecialist,
+      referralType,
+      partnerId
     } = req.body;
 
     if (!specialistId || !date || !startTime || !clientName || !clientPhone) {
@@ -732,6 +737,12 @@ apiRouter.post('/api/appointments', requireAuth, async (req: Request, res: Respo
 
     if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
       agentId = req.user.assignedAgentId;
+    }
+
+    let partnerName: string | undefined;
+    if (partnerId) {
+      const p = partnerManager.getPartner(partnerId);
+      if (p) partnerName = p.name;
     }
 
     const clientChatId = notificationService.formatToWhatsAppChatId(clientPhone);
@@ -746,6 +757,9 @@ apiRouter.post('/api/appointments', requireAuth, async (req: Request, res: Respo
       date,
       startTime,
       notes,
+      referralType: referralType || (partnerId ? 'partner' : 'particular'),
+      partnerId,
+      partnerName,
       bookedVia: 'manual'
     });
 
@@ -1004,6 +1018,177 @@ apiRouter.delete('/api/users/:id', requireAdmin, (req: Request, res: Response) =
       return res.status(404).json({ error: 'Usuário não encontrado.' });
     }
     res.json({ success: true, message: 'Usuário removido com sucesso.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// GESTÃO DE PARCEIROS & CONVÊNIOS (requireAuth)
+// ============================================================================
+
+apiRouter.get('/api/partners', requireAuth, (req: Request, res: Response) => {
+  try {
+    const agentId = (req.query.agentId as string) || (req.user?.role === 'attendant' && req.user?.assignedAgentId !== '*' ? req.user.assignedAgentId : undefined);
+    const partners = partnerManager.listPartners(agentId);
+    res.json({ partners });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/api/partners/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const partner = partnerManager.getPartner(req.params.id);
+    if (!partner) return res.status(404).json({ error: 'Parceiro não encontrado.' });
+    res.json({ partner });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/api/partners', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { name, document, phone, contactPerson, email, notes, active, agentId } = req.body;
+    const partner = partnerManager.createPartner({
+      name,
+      document,
+      phone,
+      contactPerson,
+      email,
+      notes,
+      active,
+      agentId: agentId || '*'
+    });
+    res.status(201).json({ success: true, partner });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/api/partners/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const updated = partnerManager.updatePartner(req.params.id, req.body);
+    res.json({ success: true, partner: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/api/partners/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const ok = partnerManager.deletePartner(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'Parceiro não encontrado.' });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// ENVIO & GESTÃO DE EXAMES / LAUDOS (requireAuth)
+// ============================================================================
+
+apiRouter.get('/api/exams', requireAuth, (req: Request, res: Response) => {
+  try {
+    let agentId = req.query.agentId as string | undefined;
+    if (req.user?.role === 'attendant' && req.user?.assignedAgentId !== '*') {
+      agentId = req.user.assignedAgentId;
+    }
+    const exams = examService.listExams({
+      agentId,
+      partnerId: req.query.partnerId as string,
+      referralType: req.query.referralType as string,
+      status: req.query.status as string,
+      startDate: req.query.startDate as string,
+      endDate: req.query.endDate as string,
+      search: req.query.search as string
+    });
+    res.json({ exams });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/api/exams/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const exam = examService.getExam(req.params.id);
+    if (!exam) return res.status(404).json({ error: 'Exame não encontrado.' });
+    res.json({ exam });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/api/exams/:id/download', requireAuth, (req: Request, res: Response) => {
+  try {
+    const exam = examService.getExam(req.params.id);
+    if (!exam || !fs.existsSync(exam.fileStoredPath)) {
+      return res.status(404).json({ error: 'Arquivo do laudo/exame não encontrado em disco.' });
+    }
+    res.download(exam.fileStoredPath, exam.originalName);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/api/exams/dispatch', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const {
+      appointmentId,
+      agentId,
+      patientName,
+      patientPhone,
+      referralType,
+      partnerId,
+      target,
+      fileBase64,
+      fileName,
+      fileMimeType,
+      caption
+    } = req.body;
+
+    const operatorName = req.user?.name || req.user?.username || 'Atendimento';
+    const effectiveAgentId = (req.user?.role === 'attendant' && req.user?.assignedAgentId !== '*')
+      ? req.user.assignedAgentId
+      : (agentId || '*');
+
+    const result = await examService.dispatchExam({
+      appointmentId,
+      agentId: effectiveAgentId,
+      patientName,
+      patientPhone,
+      referralType,
+      partnerId,
+      target,
+      fileBase64,
+      fileName,
+      fileMimeType,
+      caption,
+      sentBy: operatorName
+    });
+
+    res.status(201).json({ success: true, exam: result });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/api/exams/:id/resend', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { target, caption } = req.body;
+    const exam = await examService.reSendExam(req.params.id, target, caption);
+    res.json({ success: true, exam });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/api/exams/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const ok = examService.deleteExam(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'Exame não encontrado.' });
+    res.json({ success: true, message: 'Exame removido com sucesso.' });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }

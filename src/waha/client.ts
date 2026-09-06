@@ -123,6 +123,80 @@ export class WahaClient {
   }
 
   /**
+   * Envia arquivo (PDF, imagem, documento) para um contato ou grupo no WhatsApp.
+   * Utiliza POST /api/sendFile da WAHA com fallback inteligente do 9º dígito brasileiro.
+   */
+  async sendFile(
+    chatId: string,
+    fileData: {
+      mimetype: string;
+      filename: string;
+      url?: string;
+      base64?: string;
+    },
+    caption?: string,
+    options?: { session?: string }
+  ): Promise<any> {
+    const rawSession = options?.session || this.defaultSession;
+    const session = (rawSession && rawSession !== '*') ? rawSession : (this.defaultSession || 'default');
+
+    let fileUrl = fileData.url;
+    if (!fileUrl && fileData.base64) {
+      fileUrl = fileData.base64.startsWith('data:') 
+        ? fileData.base64 
+        : `data:${fileData.mimetype};base64,${fileData.base64}`;
+    }
+
+    if (!fileUrl) {
+      throw new Error('É necessário fornecer a URL pública ou o Base64 do arquivo.');
+    }
+
+    const body: any = {
+      session,
+      chatId,
+      file: {
+        mimetype: fileData.mimetype,
+        filename: fileData.filename,
+        url: fileUrl
+      }
+    };
+
+    if (caption) {
+      body.caption = caption;
+    }
+
+    try {
+      const response = await this.client.post('/api/sendFile', body);
+      return response.data;
+    } catch (error: any) {
+      const firstErrMsg = this.extractErrorMessage(error);
+      const altChatId = getAlternateBrazilianChatId(chatId);
+
+      // Se for número brasileiro e o envio inicial falhou, tenta o formato alternativo (com/sem 9)
+      if (altChatId) {
+        console.warn(`[WAHA] Primeiro envio de arquivo para ${chatId} falhou (${firstErrMsg}). Tentando formato alternativo do 9º dígito: ${altChatId}...`);
+        try {
+          const altBody = { ...body, chatId: altChatId };
+          const altResponse = await this.client.post('/api/sendFile', altBody);
+          console.log(`[WAHA] ✅ Sucesso no envio de arquivo para o número alternativo ${altChatId}!`);
+          return altResponse.data;
+        } catch (altError: any) {
+          const altErrMsg = this.extractErrorMessage(altError);
+          console.error(`[WAHA] Falha também no envio de arquivo para o número alternativo ${altChatId}: ${altErrMsg}`);
+          const detailedError = new Error(`Erro WAHA ao enviar arquivo para ${chatId} (${firstErrMsg}) e alternativa ${altChatId} (${altErrMsg})`);
+          (detailedError as any).response = error.response || altError.response;
+          throw detailedError;
+        }
+      }
+
+      console.error(`[WAHA] Erro ao enviar arquivo para ${chatId}:`, firstErrMsg);
+      const detailedError = new Error(`Erro WAHA ao enviar arquivo para ${chatId}: ${firstErrMsg}`);
+      (detailedError as any).response = error.response;
+      throw detailedError;
+    }
+  }
+
+  /**
    * Envia confirmação de leitura (dois risquinhos azuis/verdes)
    */
   async sendSeen(chatId: string, session?: string): Promise<void> {

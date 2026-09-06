@@ -58,6 +58,11 @@ export interface Appointment {
   status: AppointmentStatus;
   notes?: string;
 
+  // Informações de Parceria / Encaminhamento
+  referralType?: 'particular' | 'partner';
+  partnerId?: string;
+  partnerName?: string;
+
   notifiedSpecialist: boolean;
   notifiedAt?: string;
 
@@ -65,6 +70,59 @@ export interface Appointment {
   reminderSentAt?: string;
 
   bookedVia: 'whatsapp' | 'manual' | 'simulator';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Partner {
+  id: string;
+  agentId: string; // ID da unidade/agente ou '*' para todas
+  name: string; // Nome da Empresa Parceira ou Clínica
+  document?: string; // CNPJ ou CPF
+  phone: string; // WhatsApp para notificações e envio de exames
+  contactPerson?: string; // Responsável ou contato principal
+  email?: string;
+  notes?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ExamDispatchTarget = 'patient' | 'partner' | 'both';
+
+export interface ExamDispatchAttempt {
+  target: 'patient' | 'partner';
+  recipientName: string;
+  chatId: string;
+  phone: string;
+  success: boolean;
+  error?: string;
+  messageId?: string;
+  sentAt: string;
+}
+
+export interface ExamDispatch {
+  id: string;
+  agentId: string;
+  appointmentId?: string; // Opcional, se vinculado a agendamento
+  patientName: string;
+  patientPhone: string;
+  patientChatId: string;
+  referralType: 'particular' | 'partner';
+  partnerId?: string;
+  partnerName?: string;
+  partnerPhone?: string;
+  target: ExamDispatchTarget;
+  fileName: string;
+  originalName: string;
+  fileStoredPath: string; // Caminho no disco do servidor
+  fileMimeType: string;
+  fileSize: number; // Em bytes
+  caption: string;
+  status: 'sent' | 'partial' | 'failed';
+  sentBy: string; // Nome ou username do operador
+  sentAt: string;
+  attempts: ExamDispatchAttempt[];
   createdAt: string;
   updatedAt: string;
 }

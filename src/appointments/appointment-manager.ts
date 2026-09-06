@@ -250,6 +250,9 @@ export class AppointmentManager {
     date: string;
     startTime: string;
     notes?: string;
+    referralType?: 'particular' | 'partner';
+    partnerId?: string;
+    partnerName?: string;
     bookedVia?: 'whatsapp' | 'manual' | 'simulator';
   }): Appointment {
     const specialist = this.getSpecialist(data.specialistId);
@@ -299,6 +302,9 @@ export class AppointmentManager {
       endTime,
       status: 'confirmed',
       notes: data.notes,
+      referralType: data.referralType || (data.partnerId ? 'partner' : 'particular'),
+      partnerId: data.partnerId,
+      partnerName: data.partnerName,
       notifiedSpecialist: false,
       reminderSent: false,
       bookedVia: data.bookedVia || 'whatsapp',
