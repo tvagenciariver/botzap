@@ -31,13 +31,59 @@ function showLoginModal(errorMsg = '') {
   }
 }
 
-function hideLoginModal(username = 'admin') {
+let currentUser = null;
+
+function applyRolePermissions(user) {
+  currentUser = user;
+  if (!user) return;
+
+  const isAdmin = user.role === 'admin';
+  const isAttendant = user.role === 'attendant';
+
+  // 1. Alterna visibilidade dos elementos exclusivos de administrador
+  document.querySelectorAll('[data-admin-only="true"]').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
+
+  // 2. Se for atendente, redireciona caso esteja em uma aba proibida
+  if (isAttendant) {
+    const activeNav = document.querySelector('.nav-menu .nav-btn.active');
+    const activeTab = activeNav ? activeNav.getAttribute('data-tab') : null;
+    const allowedTabs = ['appointments', 'simulator', 'chats'];
+
+    if (!allowedTabs.includes(activeTab)) {
+      switchToTab('appointments');
+    }
+
+    // Se vinculado a um cliente/agente específico (não '*'), aplica filtro automático
+    if (user.assignedAgentId && user.assignedAgentId !== '*') {
+      currentAppointmentsAgentFilter = user.assignedAgentId;
+    }
+  }
+}
+
+function hideLoginModal(user = 'admin') {
   const overlay = document.getElementById('login-overlay');
   const userBadge = document.getElementById('user-badge-container');
   const userNameEl = document.getElementById('user-badge-name');
   if (overlay) overlay.classList.add('hidden');
   if (userBadge) userBadge.style.display = 'flex';
-  if (userNameEl) userNameEl.textContent = `👤 ${username}`;
+
+  const uObj = (typeof user === 'string')
+    ? { username: user, role: 'admin', name: user }
+    : (user || { username: 'admin', role: 'admin' });
+
+  currentUser = uObj;
+
+  const roleLabel = uObj.role === 'admin' ? '👑 Admin' : '👩‍💼 Atendimento';
+  const roleBadgeClass = uObj.role === 'admin' ? 'badge-primary' : 'badge-emerald';
+  const displayName = uObj.name || uObj.username || 'admin';
+
+  if (userNameEl) {
+    userNameEl.innerHTML = `👤 <strong>${displayName}</strong> <span class="badge ${roleBadgeClass}" style="font-size:10px; margin-left: 5px;">${roleLabel}</span>`;
+  }
+
+  applyRolePermissions(uObj);
 }
 
 /**
@@ -92,38 +138,51 @@ function showToast(message, type = 'info', duration = 3500) {
   }, duration);
 }
 
-// Navegação por Abas
-document.querySelectorAll('.nav-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-
-    btn.classList.add('active');
-    const targetTab = btn.getAttribute('data-tab');
-    document.getElementById(`pane-${targetTab}`).classList.add('active');
-
-    const titles = {
-      simulator: 'Simulador de Atendimento (WhatsApp)',
-      appointments: 'Central de Agendamentos & Agenda Inteligente',
-      agents: 'Gerenciador de Agentes & Clientes (Multi-Agentes)',
-      prompts: 'Configuração Geral & Agente Padrão',
-      schedule: 'Horário Comercial & Mensagem de Ausência',
-      chats: 'Conversas Ativas & Pausa do Bot',
-      logs: 'Logs em Tempo Real do Orquestrador',
-      integration: 'Integração WAHA API & Chatwoot'
-    };
-    document.getElementById('page-title').textContent = titles[targetTab] || 'BotZap';
-
-    if (getAuthToken()) {
-      if (targetTab === 'simulator') loadAgentsForSimulator();
-      if (targetTab === 'appointments') loadAppointments();
-      if (targetTab === 'agents') loadAgents();
-      if (targetTab === 'chats') loadChats();
-      if (targetTab === 'logs') loadLogs();
-      if (targetTab === 'prompts') loadConfig();
-      if (targetTab === 'schedule') loadSchedule();
-      if (targetTab === 'integration') loadWahaConfig();
+function switchToTab(targetTab) {
+  document.querySelectorAll('.nav-menu .nav-btn').forEach(b => {
+    if (b.getAttribute('data-tab') === targetTab) {
+      b.classList.add('active');
+    } else {
+      b.classList.remove('active');
     }
+  });
+
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  const targetPane = document.getElementById(`pane-${targetTab}`);
+  if (targetPane) targetPane.classList.add('active');
+
+  const titles = {
+    simulator: 'Simulador de Atendimento (WhatsApp)',
+    appointments: 'Central de Agendamentos & Agenda Inteligente',
+    agents: 'Gerenciador de Agentes & Clientes (Multi-Agentes)',
+    prompts: 'Configuração Geral & Agente Padrão',
+    schedule: 'Horário Comercial & Mensagem de Ausência',
+    chats: 'Conversas Ativas & Pausa do Bot',
+    logs: 'Logs em Tempo Real do Orquestrador',
+    integration: 'Integração WAHA API & Chatwoot',
+    users: 'Gestão de Usuários & Equipe de Atendimento'
+  };
+  const pageTitle = document.getElementById('page-title');
+  if (pageTitle) pageTitle.textContent = titles[targetTab] || 'BotZap';
+
+  if (getAuthToken()) {
+    if (targetTab === 'simulator') loadAgentsForSimulator();
+    if (targetTab === 'appointments') loadAppointments();
+    if (targetTab === 'agents' && currentUser?.role === 'admin') loadAgents();
+    if (targetTab === 'chats') loadChats();
+    if (targetTab === 'logs' && currentUser?.role === 'admin') loadLogs();
+    if (targetTab === 'prompts' && currentUser?.role === 'admin') loadConfig();
+    if (targetTab === 'schedule' && currentUser?.role === 'admin') loadSchedule();
+    if (targetTab === 'integration' && currentUser?.role === 'admin') loadWahaConfig();
+    if (targetTab === 'users' && currentUser?.role === 'admin') loadUsers();
+  }
+}
+
+// Navegação por Abas
+document.querySelectorAll('.nav-menu .nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const targetTab = btn.getAttribute('data-tab');
+    switchToTab(targetTab);
   });
 });
 
@@ -1086,12 +1145,20 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
     const data = await res.json();
     if (res.ok && data.success && data.token) {
       setAuthToken(data.token);
-      hideLoginModal(data.user?.username || username);
+      hideLoginModal(data.user || { username, role: 'admin' });
       passwordInput.value = '';
       checkStatus();
-      loadConfig();
-      loadSchedule();
-      loadWahaConfig();
+      if (data.user?.role === 'admin') {
+        loadConfig();
+        loadSchedule();
+        loadWahaConfig();
+        loadAgents();
+      }
+      loadAgentsForSimulator();
+      loadAppointments();
+      if (data.user?.role === 'attendant') {
+        switchToTab('appointments');
+      }
     } else {
       errorEl.textContent = data.error || 'Credenciais inválidas. Verifique usuário e senha.';
       errorEl.style.display = 'block';
@@ -1803,6 +1870,7 @@ document.getElementById('btn-logout')?.addEventListener('click', async () => {
     await fetchWithAuth('/api/auth/logout', { method: 'POST' });
   } catch (_) {}
   clearAuthToken();
+  currentUser = null;
   showLoginModal();
 });
 
@@ -2008,23 +2076,43 @@ function populateAgentsDropdowns(agents) {
   const modalSelect = document.getElementById('modal-apt-agent');
   const specAgentSelect = document.getElementById('spec-agent');
   const srvAgentSelect = document.getElementById('service-agent');
+  const userAgentSelect = document.getElementById('modal-user-agent');
+
+  const isAttendantScoped = currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*';
 
   if (filterSelect) {
-    const current = filterSelect.value;
-    filterSelect.innerHTML = '<option value="all">🌐 Todos os Clientes (Visão Geral)</option>';
-    agents.forEach(a => {
-      filterSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
-    });
-    if (current) filterSelect.value = current;
+    if (isAttendantScoped) {
+      const myAgent = agents.find(a => a.id === currentUser.assignedAgentId);
+      filterSelect.innerHTML = `<option value="${currentUser.assignedAgentId}">🏢 ${myAgent ? myAgent.name : 'Minha Unidade'}</option>`;
+      filterSelect.value = currentUser.assignedAgentId;
+      filterSelect.disabled = true;
+      currentAppointmentsAgentFilter = currentUser.assignedAgentId;
+    } else {
+      filterSelect.disabled = false;
+      const current = filterSelect.value;
+      filterSelect.innerHTML = '<option value="all">🌐 Todos os Clientes (Visão Geral)</option>';
+      agents.forEach(a => {
+        filterSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
+      });
+      if (current) filterSelect.value = current;
+    }
   }
 
   if (modalSelect) {
-    const current = modalSelect.value;
-    modalSelect.innerHTML = '';
-    agents.forEach(a => {
-      modalSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} - ${a.companyName || 'Empresa'}</option>`;
-    });
-    if (current) modalSelect.value = current;
+    if (isAttendantScoped) {
+      const myAgent = agents.find(a => a.id === currentUser.assignedAgentId);
+      modalSelect.innerHTML = `<option value="${currentUser.assignedAgentId}">🏢 ${myAgent ? myAgent.name : 'Minha Unidade'}</option>`;
+      modalSelect.value = currentUser.assignedAgentId;
+      modalSelect.disabled = true;
+    } else {
+      modalSelect.disabled = false;
+      const current = modalSelect.value;
+      modalSelect.innerHTML = '';
+      agents.forEach(a => {
+        modalSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} - ${a.companyName || 'Empresa'}</option>`;
+      });
+      if (current) modalSelect.value = current;
+    }
   }
 
   if (specAgentSelect) {
@@ -2043,6 +2131,15 @@ function populateAgentsDropdowns(agents) {
       srvAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
     });
     if (current) srvAgentSelect.value = current;
+  }
+
+  if (userAgentSelect) {
+    const current = userAgentSelect.value;
+    userAgentSelect.innerHTML = '<option value="*">🌐 Todas as Agendas (Global)</option>';
+    agents.forEach(a => {
+      userAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
+    });
+    if (current) userAgentSelect.value = current;
   }
 }
 
@@ -3053,14 +3150,19 @@ async function initApp() {
     });
     if (res.ok) {
       const data = await res.json();
-      hideLoginModal(data.user?.username || 'admin');
+      hideLoginModal(data.user || { username: 'admin', role: 'admin' });
       checkStatus();
-      loadConfig();
-      loadSchedule();
-      loadWahaConfig();
-      loadAgents();
+      if (data.user?.role === 'admin') {
+        loadConfig();
+        loadSchedule();
+        loadWahaConfig();
+        loadAgents();
+      }
       loadAgentsForSimulator();
       loadAppointments();
+      if (data.user?.role === 'attendant') {
+        switchToTab('appointments');
+      }
     } else {
       clearAuthToken();
       showLoginModal();
@@ -3079,4 +3181,230 @@ setInterval(() => {
 }, 15000);
 
 initApp();
+
+// ============================================================================
+// GESTÃO DE USUÁRIOS & EQUIPE (RBAC - EXCLUSIVO ADMIN)
+// ============================================================================
+let allUsers = [];
+
+async function loadUsers() {
+  if (!getAuthToken() || currentUser?.role !== 'admin') return;
+  try {
+    const res = await fetchWithAuth('/api/users');
+    if (!res.ok) throw new Error('Não foi possível carregar a lista de usuários.');
+    const data = await res.json();
+    allUsers = data.users || [];
+    renderUsersTable();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function renderUsersTable() {
+  const tbody = document.getElementById('users-table-body');
+  const countBadge = document.getElementById('users-count-badge');
+  if (!tbody) return;
+
+  if (countBadge) {
+    countBadge.textContent = `${allUsers.length} usuário${allUsers.length === 1 ? '' : 's'}`;
+  }
+
+  if (allUsers.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">Nenhum usuário cadastrado.</td></tr>`;
+    return;
+  }
+
+  let html = '';
+  allUsers.forEach(u => {
+    const isSelf = currentUser && (currentUser.userId === u.id || currentUser.username === u.username);
+    const roleBadge = u.role === 'admin'
+      ? `<span class="badge badge-purple" style="font-size: 11px;">👑 Administrador Geral</span>`
+      : `<span class="badge badge-emerald" style="font-size: 11px;">👩‍💼 Atendimento / Recepção</span>`;
+
+    let agentLabel = '<span class="badge badge-info" style="font-size: 11px;">🌐 Todas as Agendas</span>';
+    if (u.assignedAgentId && u.assignedAgentId !== '*') {
+      const agentObj = allAgentsCache.find(a => a.id === u.assignedAgentId);
+      agentLabel = `<span class="badge badge-purple" style="font-size: 11px;">🏢 ${agentObj ? agentObj.name : u.assignedAgentId}</span>`;
+    }
+
+    const statusBadge = u.active
+      ? `<span class="badge badge-success">Ativo</span>`
+      : `<span class="badge badge-danger">Inativo</span>`;
+
+    const dateFormatted = u.createdAt ? formatDateBR(u.createdAt.substring(0, 10)) : '--';
+
+    html += `
+      <tr>
+        <td>
+          <div style="font-weight: 600;">${u.name || u.username} ${isSelf ? '<span class="badge badge-primary" style="font-size: 10px; margin-left: 4px;">Você</span>' : ''}</div>
+        </td>
+        <td><code>${u.username}</code></td>
+        <td>${roleBadge}</td>
+        <td>${agentLabel}</td>
+        <td>${statusBadge}</td>
+        <td><small class="text-muted">${dateFormatted}</small></td>
+        <td style="text-align: right;">
+          <div class="d-flex justify-end gap-1">
+            <button class="btn btn-sm btn-outline" onclick="openEditUserModal('${u.id}')" title="Editar Usuário">✏️ Editar</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="deleteUser('${u.id}')" title="Excluir Usuário" ${isSelf || (u.username === 'admin') ? 'disabled style="opacity:0.4; cursor:not-allowed;"' : ''}>🗑️ Excluir</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+}
+
+function openNewUserModal() {
+  document.getElementById('modal-user-id').value = '';
+  document.getElementById('modal-user-title').textContent = 'Cadastrar Novo Membro da Equipe';
+  document.getElementById('modal-user-subtitle').textContent = 'Defina o nome, credenciais e permissão de acesso à agenda.';
+  document.getElementById('modal-user-name').value = '';
+  document.getElementById('modal-user-username').value = '';
+  document.getElementById('modal-user-username').disabled = false;
+  
+  const passInput = document.getElementById('modal-user-password');
+  passInput.value = '';
+  passInput.required = true;
+  document.getElementById('modal-user-pass-label').innerHTML = 'Senha de Acesso <span class="text-danger">*</span>';
+  document.getElementById('modal-user-pass-hint').textContent = 'Mínimo de 4 caracteres.';
+  
+  document.getElementById('modal-user-role').value = 'attendant';
+  document.getElementById('modal-user-agent').value = '*';
+  document.getElementById('modal-user-active').value = 'true';
+
+  populateUserAgentDropdown('*');
+
+  const overlay = document.getElementById('modal-user-overlay');
+  if (overlay) overlay.style.display = 'flex';
+}
+
+function openEditUserModal(userId) {
+  const user = allUsers.find(u => u.id === userId);
+  if (!user) return;
+
+  document.getElementById('modal-user-id').value = user.id;
+  document.getElementById('modal-user-title').textContent = `Editar Membro: ${user.name || user.username}`;
+  document.getElementById('modal-user-subtitle').textContent = 'Altere permissões, vínculo ou redefina a senha de acesso.';
+  document.getElementById('modal-user-name').value = user.name || '';
+  document.getElementById('modal-user-username').value = user.username;
+  document.getElementById('modal-user-username').disabled = (user.username === 'admin');
+
+  const passInput = document.getElementById('modal-user-password');
+  passInput.value = '';
+  passInput.required = false;
+  document.getElementById('modal-user-pass-label').textContent = 'Nova Senha (Opcional)';
+  document.getElementById('modal-user-pass-hint').textContent = 'Deixe em branco para manter a senha atual do membro.';
+
+  document.getElementById('modal-user-role').value = user.role || 'attendant';
+  document.getElementById('modal-user-active').value = user.active ? 'true' : 'false';
+
+  populateUserAgentDropdown(user.assignedAgentId || '*');
+
+  const overlay = document.getElementById('modal-user-overlay');
+  if (overlay) overlay.style.display = 'flex';
+}
+
+function populateUserAgentDropdown(selectedVal = '*') {
+  const select = document.getElementById('modal-user-agent');
+  if (!select) return;
+  select.innerHTML = '<option value="*">🌐 Todas as Agendas (Global)</option>';
+  allAgentsCache.forEach(a => {
+    select.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
+  });
+  select.value = selectedVal;
+}
+
+function closeUserModal() {
+  const overlay = document.getElementById('modal-user-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function saveUser(e) {
+  e.preventDefault();
+  const id = document.getElementById('modal-user-id').value;
+  const name = document.getElementById('modal-user-name').value.trim();
+  const username = document.getElementById('modal-user-username').value.trim();
+  const password = document.getElementById('modal-user-password').value;
+  const role = document.getElementById('modal-user-role').value;
+  const assignedAgentId = document.getElementById('modal-user-agent').value;
+  const active = document.getElementById('modal-user-active').value === 'true';
+
+  if (!name || !username) {
+    showToast('Informe o nome completo e usuário.', 'error');
+    return;
+  }
+
+  const submitBtn = document.getElementById('btn-save-user');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Salvando... ⏳';
+
+  try {
+    const payload = { name, username, role, assignedAgentId, active };
+    if (password && password.trim()) {
+      payload.password = password.trim();
+    }
+
+    let res;
+    if (id) {
+      res = await fetchWithAuth(`/api/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } else {
+      if (!password || password.length < 4) {
+        throw new Error('A senha inicial deve ter pelo menos 4 caracteres.');
+      }
+      res = await fetchWithAuth('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Erro ao salvar usuário.');
+    }
+
+    showToast(id ? 'Membro atualizado com sucesso!' : 'Novo membro cadastrado com sucesso!', 'success');
+    closeUserModal();
+    await loadUsers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = '💾 Salvar Membro';
+  }
+}
+
+async function deleteUser(userId) {
+  const user = allUsers.find(u => u.id === userId);
+  const name = user ? (user.name || user.username) : 'este usuário';
+  if (!confirm(`Deseja realmente remover o usuário "${name}"? Esta ação não pode ser desfeita.`)) return;
+
+  try {
+    const res = await fetchWithAuth(`/api/users/${userId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Erro ao remover usuário.');
+    }
+    showToast('Usuário removido com sucesso.', 'success');
+    await loadUsers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// Event Listeners de Gestão de Usuários
+document.getElementById('btn-create-user')?.addEventListener('click', openNewUserModal);
+document.getElementById('btn-close-user-modal')?.addEventListener('click', closeUserModal);
+document.getElementById('btn-cancel-user')?.addEventListener('click', closeUserModal);
+document.getElementById('modal-user-form')?.addEventListener('submit', saveUser);
+document.getElementById('modal-user-overlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-user-overlay') closeUserModal();
+});
+
 

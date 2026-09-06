@@ -78,23 +78,26 @@
         <button class="nav-btn" data-tab="appointments">
           <span class="nav-icon">📅</span> Agendamentos & Agenda
         </button>
-        <button class="nav-btn" data-tab="agents">
+        <button class="nav-btn" data-tab="agents" data-admin-only="true">
           <span class="nav-icon">🤖</span> Agentes & Clientes
         </button>
-        <button class="nav-btn" data-tab="prompts">
+        <button class="nav-btn" data-tab="prompts" data-admin-only="true">
           <span class="nav-icon">⚙️</span> Agente Padrão & Prompts
         </button>
-        <button class="nav-btn" data-tab="schedule">
+        <button class="nav-btn" data-tab="schedule" data-admin-only="true">
           <span class="nav-icon">🕒</span> Horário Comercial
         </button>
         <button class="nav-btn" data-tab="chats">
           <span class="nav-icon">👥</span> Conversas & Pausa
         </button>
-        <button class="nav-btn" data-tab="logs">
+        <button class="nav-btn" data-tab="logs" data-admin-only="true">
           <span class="nav-icon">📋</span> Logs em Tempo Real
         </button>
-        <button class="nav-btn" data-tab="integration">
+        <button class="nav-btn" data-tab="integration" data-admin-only="true">
           <span class="nav-icon">🔌</span> Conectar WAHA / Chatwoot
+        </button>
+        <button class="nav-btn" data-tab="users" data-admin-only="true">
+          <span class="nav-icon">👥</span> Usuários & Equipe
         </button>
       </nav>
 
@@ -1184,6 +1187,62 @@
           </div>
         </div>
       </section>
+
+      <!-- TAB: Gestão de Usuários & Equipe -->
+      <section class="tab-pane" id="pane-users">
+        <div class="card tab-header-card">
+          <div class="tab-header-left">
+            <div class="tab-header-title">
+              <span class="tab-header-icon">👥</span>
+              <div>
+                <h2>Gestão de Usuários & Equipe de Atendimento</h2>
+                <p>Controle de acesso baseado em funções (RBAC). Crie operadores de atendimento dedicados com foco exclusivo na gestão da agenda e recepção.</p>
+              </div>
+            </div>
+          </div>
+          <div class="tab-header-actions">
+            <button class="btn btn-primary btn-glow" id="btn-create-user">
+              ➕ Novo Membro da Equipe
+            </button>
+          </div>
+        </div>
+
+        <!-- Info / Tip Card -->
+        <div class="card mb-4" style="border-left: 4px solid var(--primary); background: rgba(59, 130, 246, 0.05);">
+          <div class="card-body py-3 d-flex align-center gap-3">
+            <span style="font-size: 26px;">💡</span>
+            <div style="font-size: 13px; line-height: 1.5; color: var(--text-muted);">
+              <strong>Perfis de Acesso:</strong> Usuários com perfil <span class="badge badge-emerald">Atendimento</span> têm acesso exclusivo e otimizado para gestão de agendamentos, lista de espera, confirmações e simulador, ficando protegidos de credenciais de APIs (Gemini/OpenAI), WAHA e configurações de prompt. Se vinculado a um cliente específico, o atendente gerencia apenas os agendamentos daquela clínica ou negócio.
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabela de Usuários -->
+        <div class="card">
+          <div class="card-header d-flex justify-between align-center">
+            <h3>Membros e Atendentes Cadastrados</h3>
+            <span class="badge badge-primary" id="users-count-badge">0 usuários</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Nome Completo</th>
+                  <th>Login (Usuário)</th>
+                  <th>Perfil / Função</th>
+                  <th>Agenda Vinculada</th>
+                  <th>Status</th>
+                  <th>Data de Cadastro</th>
+                  <th style="text-align: right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="users-table-body">
+                <!-- Preenchido via app.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -1471,6 +1530,75 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-outline" id="btn-close-specs-bottom">Fechar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Novo / Editar Membro da Equipe -->
+  <div id="modal-user-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">👤</span>
+          <div>
+            <h3 id="modal-user-title">Cadastrar Novo Membro</h3>
+            <p id="modal-user-subtitle">Defina o nome, credenciais e permissão de acesso à agenda.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" id="btn-close-user-modal">&times;</button>
+      </div>
+
+      <form id="modal-user-form">
+        <input type="hidden" id="modal-user-id" value="">
+
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="modal-user-name">Nome Completo <span class="text-danger">*</span></label>
+            <input type="text" id="modal-user-name" class="form-control" placeholder="Ex: Patrícia Lima" required>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="modal-user-username">Usuário de Login <span class="text-danger">*</span></label>
+              <input type="text" id="modal-user-username" class="form-control" placeholder="Ex: patricialima" required autocomplete="off">
+            </div>
+            <div class="form-group col-6">
+              <label for="modal-user-password" id="modal-user-pass-label">Senha de Acesso <span class="text-danger">*</span></label>
+              <input type="password" id="modal-user-password" class="form-control" placeholder="Mínimo 4 caracteres" autocomplete="new-password">
+              <small class="form-hint" id="modal-user-pass-hint">Informe a senha inicial do operador.</small>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-6">
+              <label for="modal-user-role">Função / Perfil <span class="text-danger">*</span></label>
+              <select id="modal-user-role" class="form-control" required>
+                <option value="attendant" selected>👩‍💼 Atendimento / Recepção (Agenda)</option>
+                <option value="admin">👑 Administrador Geral (Acesso Total)</option>
+              </select>
+            </div>
+            <div class="form-group col-6">
+              <label for="modal-user-agent">Agenda Vinculada <span class="text-danger">*</span></label>
+              <select id="modal-user-agent" class="form-control" required>
+                <option value="*">🌐 Todas as Agendas (Global)</option>
+              </select>
+              <small class="form-hint">O atendente verá apenas agendamentos deste cliente.</small>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="modal-user-active">Status da Conta</label>
+            <select id="modal-user-active" class="form-control">
+              <option value="true" selected>✅ Ativo (Permite acesso ao painel)</option>
+              <option value="false">⛔ Inativo (Bloquear acesso)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btn-cancel-user">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-glow" id="btn-save-user">💾 Salvar Membro</button>
+        </div>
+      </form>
     </div>
   </div>
 

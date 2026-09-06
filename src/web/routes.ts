@@ -12,6 +12,16 @@ import { WahaWebhookEvent } from '../waha/types.js';
 import { checkBusinessHoursStatus } from '../orchestrator/schedule-helper.js';
 import { appointmentManager } from '../appointments/appointment-manager.js';
 import { notificationService } from '../appointments/notification-service.js';
+import { userManager } from '../auth/user-manager.js';
+import { UserSession } from '../auth/user-types.js';
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: UserSession;
+    }
+  }
+}
 
 export const apiRouter = Router();
 
@@ -34,9 +44,6 @@ function sanitizeAgentProfile(agent: AgentProfile) {
   };
 }
 
-// Sessões de autenticação ativas (Tokens de sessão em memória)
-const activeSessions = new Set<string>();
-
 /**
  * Middleware de Autenticação para rotas protegidas da API
  */
@@ -47,38 +54,57 @@ const requireAuth = (req: Request, res: Response, next: () => void) => {
   }
 
   const token = authHeader.split(' ')[1];
-  if (!token || !activeSessions.has(token)) {
+  const session = token ? userManager.getSession(token) : undefined;
+  if (!token || !session) {
     return res.status(401).json({ error: 'Sessão expirada ou inválida. Faça login novamente.', unauthorized: true });
   }
 
+  req.user = session;
   next();
 };
 
 /**
- * Endpoint de Login (Usuário e Senha)
+ * Middleware de Autorização de Administrador (Acesso total)
+ */
+const requireAdmin = (req: Request, res: Response, next: () => void) => {
+  requireAuth(req, res, () => {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({
+        error: 'Acesso restrito para administradores.',
+        forbidden: true
+      });
+    }
+    next();
+  });
+};
+
+/**
+ * Endpoint de Login (Usuário e Senha com RBAC)
  */
 apiRouter.post('/api/auth/login', (req: Request, res: Response) => {
   const { username, password } = req.body;
-  const config = loadBotConfig();
+  if (!username || !password) {
+    return res.status(400).json({ success: false, error: 'Informe usuário e senha.' });
+  }
 
-  const expectedUser = config.adminUser || env.adminUser || 'admin';
-  const expectedPass = config.adminPassword || env.adminPassword || 'File@152341';
-
-  if (username === expectedUser && password === expectedPass) {
-    const token = crypto.randomBytes(32).toString('hex');
-    activeSessions.add(token);
-    return res.json({
-      success: true,
-      token,
-      user: {
-        username: expectedUser
-      }
+  const session = userManager.validateLogin(username, password);
+  if (!session) {
+    return res.status(401).json({
+      success: false,
+      error: 'Usuário ou senha incorretos ou usuário desativado.'
     });
   }
 
-  return res.status(401).json({
-    success: false,
-    error: 'Usuário ou senha incorretos.'
+  return res.json({
+    success: true,
+    token: session.token,
+    user: {
+      userId: session.userId,
+      username: session.username,
+      name: session.name,
+      role: session.role,
+      assignedAgentId: session.assignedAgentId
+    }
   });
 });
 
@@ -89,7 +115,7 @@ apiRouter.post('/api/auth/logout', (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
-    activeSessions.delete(token);
+    if (token) userManager.deleteSession(token);
   }
   return res.json({ success: true, message: 'Logout realizado com sucesso.' });
 });
@@ -101,12 +127,16 @@ apiRouter.get('/api/auth/me', (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
-    if (token && activeSessions.has(token)) {
-      const config = loadBotConfig();
+    const session = token ? userManager.getSession(token) : undefined;
+    if (session) {
       return res.json({
         authenticated: true,
         user: {
-          username: config.adminUser || env.adminUser || 'admin'
+          userId: session.userId,
+          username: session.username,
+          name: session.name,
+          role: session.role,
+          assignedAgentId: session.assignedAgentId
         }
       });
     }
@@ -270,7 +300,7 @@ apiRouter.get('/api/business-hours/status', requireAuth, (_req: Request, res: Re
 /**
  * 3.2 Salvar configuração de Horário Comercial
  */
-apiRouter.post('/api/business-hours', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/business-hours', requireAdmin, (req: Request, res: Response) => {
   try {
     const { businessHours } = req.body;
     if (!businessHours) {
@@ -312,7 +342,7 @@ apiRouter.get('/api/config', requireAuth, (_req: Request, res: Response) => {
 /**
  * 5. Salvar configurações do bot
  */
-apiRouter.post('/api/config', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/config', requireAdmin, (req: Request, res: Response) => {
   try {
     const { apiKey, openaiApiKey, adminPassword, ...botSettings } = req.body;
 
@@ -373,7 +403,7 @@ apiRouter.post('/api/config', requireAuth, (req: Request, res: Response) => {
 /**
  * 5.1 Testar chave da OpenAI
  */
-apiRouter.post('/api/openai/test-connection', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/openai/test-connection', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { apiKey } = req.body;
     const result = await openAIService.testConnection(apiKey);
@@ -386,7 +416,7 @@ apiRouter.post('/api/openai/test-connection', requireAuth, async (req: Request, 
 /**
  * 6. Testar conexão com a WAHA API
  */
-apiRouter.post('/api/waha/test-connection', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/waha/test-connection', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { baseUrl, apiKey, session } = req.body;
     if (baseUrl) {
@@ -402,7 +432,7 @@ apiRouter.post('/api/waha/test-connection', requireAuth, async (req: Request, re
 /**
  * 7. Salvar dados de conexão com a WAHA
  */
-apiRouter.post('/api/waha/save-connection', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/waha/save-connection', requireAdmin, (req: Request, res: Response) => {
   try {
     const { baseUrl, apiKey, session, webhookPublicUrl } = req.body;
     const toUpdate: Record<string, any> = {};
@@ -439,7 +469,7 @@ apiRouter.post('/api/waha/save-connection', requireAuth, (req: Request, res: Res
 /**
  * 8. Auto-registro de Webhook na WAHA
  */
-apiRouter.post('/api/waha/setup-webhook', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/waha/setup-webhook', requireAdmin, async (req: Request, res: Response) => {
   try {
     const rawTarget = req.body.url || env.webhookPublicUrl;
     const baseTarget = (rawTarget || '').replace(/(\/webhook\/(waha|chatwoot))+/gi, '').replace(/\/$/, '');
@@ -525,7 +555,7 @@ apiRouter.get('/api/logs', requireAuth, (_req: Request, res: Response) => {
 /**
  * 13. Limpar logs
  */
-apiRouter.delete('/api/logs', requireAuth, (_req: Request, res: Response) => {
+apiRouter.delete('/api/logs', requireAdmin, (_req: Request, res: Response) => {
   orchestrator.clearLogs();
   res.json({ success: true });
 });
@@ -546,7 +576,7 @@ apiRouter.get('/api/agents/:id', requireAuth, (req: Request, res: Response) => {
   res.json({ agent: sanitizeAgentProfile(agent) });
 });
 
-apiRouter.post('/api/agents', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/agents', requireAdmin, (req: Request, res: Response) => {
   try {
     const data = req.body;
     const created = agentManager.createAgent(data);
@@ -556,7 +586,7 @@ apiRouter.post('/api/agents', requireAuth, (req: Request, res: Response) => {
   }
 });
 
-apiRouter.put('/api/agents/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.put('/api/agents/:id', requireAdmin, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const updates = { ...req.body };
@@ -579,7 +609,7 @@ apiRouter.put('/api/agents/:id', requireAuth, (req: Request, res: Response) => {
   }
 });
 
-apiRouter.delete('/api/agents/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.delete('/api/agents/:id', requireAdmin, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const success = agentManager.deleteAgent(id);
@@ -589,7 +619,7 @@ apiRouter.delete('/api/agents/:id', requireAuth, (req: Request, res: Response) =
   }
 });
 
-apiRouter.post('/api/agents/:id/duplicate', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/agents/:id/duplicate', requireAdmin, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const duplicated = agentManager.duplicateAgent(id);
@@ -608,12 +638,18 @@ apiRouter.post('/api/agents/:id/duplicate', requireAuth, (req: Request, res: Res
  */
 apiRouter.get('/api/appointments', requireAuth, (req: Request, res: Response) => {
   try {
-    const { agentId, date, specialistId, status } = req.query as {
+    let { agentId, date, specialistId, status } = req.query as {
       agentId?: string;
       date?: string;
       specialistId?: string;
       status?: string;
     };
+
+    // Se o usuário for atendente vinculado a um cliente específico, restringe a busca
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      agentId = req.user.assignedAgentId;
+    }
+
     const appointments = appointmentManager.listAppointments({ agentId, date, specialistId, status });
     res.json({ appointments });
   } catch (err: any) {
@@ -626,7 +662,12 @@ apiRouter.get('/api/appointments', requireAuth, (req: Request, res: Response) =>
  */
 apiRouter.get('/api/appointments/summary', requireAuth, (req: Request, res: Response) => {
   try {
-    const { agentId, date } = req.query as { agentId?: string; date?: string };
+    let { agentId, date } = req.query as { agentId?: string; date?: string };
+
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      agentId = req.user.assignedAgentId;
+    }
+
     const summary = appointmentManager.getAppointmentsSummary(agentId, date);
     res.json({ summary });
   } catch (err: any) {
@@ -655,7 +696,12 @@ apiRouter.get('/api/appointments/slots', requireAuth, (req: Request, res: Respon
  */
 apiRouter.get('/api/appointments/encaixes', requireAuth, (req: Request, res: Response) => {
   try {
-    const { agentId } = req.query as { agentId?: string };
+    let { agentId } = req.query as { agentId?: string };
+
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      agentId = req.user.assignedAgentId;
+    }
+
     const encaixes = appointmentManager.getEncaixes(agentId);
     res.json({ encaixes });
   } catch (err: any) {
@@ -668,7 +714,7 @@ apiRouter.get('/api/appointments/encaixes', requireAuth, (req: Request, res: Res
  */
 apiRouter.post('/api/appointments', requireAuth, async (req: Request, res: Response) => {
   try {
-    const {
+    let {
       agentId,
       specialistId,
       serviceId,
@@ -682,6 +728,10 @@ apiRouter.post('/api/appointments', requireAuth, async (req: Request, res: Respo
 
     if (!specialistId || !date || !startTime || !clientName || !clientPhone) {
       return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
+    }
+
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      agentId = req.user.assignedAgentId;
     }
 
     const clientChatId = notificationService.formatToWhatsAppChatId(clientPhone);
@@ -777,7 +827,10 @@ apiRouter.post('/api/appointments/:id/notify', requireAuth, async (req: Request,
  */
 apiRouter.post('/api/appointments/send-reminders', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { agentId } = req.body;
+    let { agentId } = req.body;
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      agentId = req.user.assignedAgentId;
+    }
     const result = await notificationService.sendRemindersForTomorrow(agentId);
     res.json({ success: true, ...result });
   } catch (err: any) {
@@ -808,14 +861,21 @@ apiRouter.post('/api/appointments/:id/send-reminder', requireAuth, async (req: R
 // ============================================================================
 
 apiRouter.get('/api/specialists', requireAuth, (req: Request, res: Response) => {
-  const { agentId } = req.query as { agentId?: string };
+  let { agentId } = req.query as { agentId?: string };
+  if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+    agentId = req.user.assignedAgentId;
+  }
   const specialists = appointmentManager.listSpecialists(agentId);
   res.json({ specialists });
 });
 
 apiRouter.post('/api/specialists', requireAuth, (req: Request, res: Response) => {
   try {
-    const created = appointmentManager.createSpecialist(req.body);
+    const data = req.body;
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      data.agentId = req.user.assignedAgentId;
+    }
+    const created = appointmentManager.createSpecialist(data);
     res.status(201).json({ success: true, specialist: created });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -841,14 +901,21 @@ apiRouter.delete('/api/specialists/:id', requireAuth, (req: Request, res: Respon
 });
 
 apiRouter.get('/api/services', requireAuth, (req: Request, res: Response) => {
-  const { agentId } = req.query as { agentId?: string };
+  let { agentId } = req.query as { agentId?: string };
+  if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+    agentId = req.user.assignedAgentId;
+  }
   const services = appointmentManager.listServices(agentId);
   res.json({ services });
 });
 
 apiRouter.post('/api/services', requireAuth, (req: Request, res: Response) => {
   try {
-    const created = appointmentManager.createService(req.body);
+    const data = req.body;
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      data.agentId = req.user.assignedAgentId;
+    }
+    const created = appointmentManager.createService(data);
     res.status(201).json({ success: true, service: created });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -872,4 +939,60 @@ apiRouter.delete('/api/services/:id', requireAuth, (req: Request, res: Response)
     res.status(400).json({ error: err.message });
   }
 });
+
+// ============================================================================
+// GESTÃO DE USUÁRIOS & EQUIPE (RBAC - Exclusivo Administradores)
+// ============================================================================
+
+apiRouter.get('/api/users', requireAdmin, (_req: Request, res: Response) => {
+  try {
+    const users = userManager.listUsers();
+    res.json({ users });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/api/users', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { username, password, name, role, assignedAgentId } = req.body;
+    if (!username || !password || !name) {
+      return res.status(400).json({ error: 'Nome, usuário e senha são obrigatórios.' });
+    }
+    const created = userManager.createUser({
+      username,
+      password,
+      name,
+      role: role || 'attendant',
+      assignedAgentId: assignedAgentId || '*'
+    });
+    res.status(201).json({ success: true, user: created });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/api/users/:id', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updated = userManager.updateUser(id, req.body);
+    res.json({ success: true, user: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/api/users/:id', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const ok = userManager.deleteUser(id);
+    if (!ok) {
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+    res.json({ success: true, message: 'Usuário removido com sucesso.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 
