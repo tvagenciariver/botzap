@@ -1814,6 +1814,7 @@ let appointmentsState = [];
 let specialistsState = [];
 let servicesState = [];
 let encaixesState = [];
+let allAgentsCache = [];
 let currentAppointmentsView = 'timeline'; // 'timeline' | 'kanban' | 'table'
 let currentAppointmentsDateFilter = 'today';
 let currentAppointmentsDateValue = '';
@@ -1880,28 +1881,29 @@ async function loadAppointments() {
   }
 
   try {
-    // 1. Carrega Especialistas e Serviços se ainda não carregados
+    // 1. Carrega Especialistas, Serviços e Agentes
     const [specRes, srvRes, agentsRes] = await Promise.all([
       fetchWithAuth('/api/specialists'),
       fetchWithAuth('/api/services'),
       fetchWithAuth('/api/agents')
     ]);
 
+    if (agentsRes.ok) {
+      const data = await agentsRes.json();
+      allAgentsCache = data.agents || [];
+      populateAgentsDropdowns(allAgentsCache);
+    }
+
     if (specRes.ok) {
       const data = await specRes.json();
       specialistsState = data.specialists || [];
-      populateSpecialistsDropdowns();
+      populateSpecialistsDropdowns(currentAppointmentsAgentFilter);
     }
 
     if (srvRes.ok) {
       const data = await srvRes.json();
       servicesState = data.services || [];
-      populateServicesDropdowns();
-    }
-
-    if (agentsRes.ok) {
-      const data = await agentsRes.json();
-      populateAgentsDropdowns(data.agents || []);
+      populateServicesDropdowns(currentAppointmentsAgentFilter);
     }
 
     // 2. Parâmetros de busca de agendamentos
@@ -1945,14 +1947,20 @@ async function loadAppointments() {
     // Atualiza badge de data
     const dateBadge = document.getElementById('badge-appointments-date');
     if (dateBadge) {
+      let clientPrefix = '';
+      if (currentAppointmentsAgentFilter !== 'all') {
+        const found = allAgentsCache.find(a => a.id === currentAppointmentsAgentFilter);
+        if (found) clientPrefix = `[${found.name}] `;
+      }
+
       if (currentAppointmentsDateFilter === 'today') {
-        dateBadge.textContent = `📅 Hoje: ${formatDateBR(currentAppointmentsDateValue)}`;
+        dateBadge.textContent = `${clientPrefix}📅 Hoje: ${formatDateBR(currentAppointmentsDateValue)}`;
       } else if (currentAppointmentsDateFilter === 'tomorrow') {
-        dateBadge.textContent = `📅 Amanhã: ${formatDateBR(currentAppointmentsDateValue)}`;
+        dateBadge.textContent = `${clientPrefix}📅 Amanhã: ${formatDateBR(currentAppointmentsDateValue)}`;
       } else if (currentAppointmentsDateFilter === 'all') {
-        dateBadge.textContent = `📅 Todas as Datas`;
+        dateBadge.textContent = `${clientPrefix}📅 Todas as Datas`;
       } else {
-        dateBadge.textContent = `📅 Data: ${formatDateBR(currentAppointmentsDateValue)}`;
+        dateBadge.textContent = `${clientPrefix}📅 Data: ${formatDateBR(currentAppointmentsDateValue)}`;
       }
     }
 
@@ -1993,63 +2001,100 @@ function renderEncaixeBanner() {
 }
 
 /**
- * Preenche dropdowns de agentes
+ * Preenche dropdowns de agentes em todas as áreas
  */
 function populateAgentsDropdowns(agents) {
   const filterSelect = document.getElementById('apt-filter-agent');
   const modalSelect = document.getElementById('modal-apt-agent');
+  const specAgentSelect = document.getElementById('spec-agent');
+  const srvAgentSelect = document.getElementById('service-agent');
 
   if (filterSelect) {
     const current = filterSelect.value;
-    filterSelect.innerHTML = '<option value="all">Todos os Clientes</option>';
+    filterSelect.innerHTML = '<option value="all">🌐 Todos os Clientes (Visão Geral)</option>';
     agents.forEach(a => {
-      filterSelect.innerHTML += `<option value="${a.id}">${a.name} (${a.companyName || 'Empresa'})</option>`;
+      filterSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
     });
     if (current) filterSelect.value = current;
   }
 
   if (modalSelect) {
+    const current = modalSelect.value;
     modalSelect.innerHTML = '';
     agents.forEach(a => {
-      modalSelect.innerHTML += `<option value="${a.id}">${a.name} - ${a.companyName || 'Empresa'}</option>`;
+      modalSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} - ${a.companyName || 'Empresa'}</option>`;
     });
+    if (current) modalSelect.value = current;
+  }
+
+  if (specAgentSelect) {
+    const current = specAgentSelect.value;
+    specAgentSelect.innerHTML = '<option value="*">🌐 Todos os Clientes (Global)</option>';
+    agents.forEach(a => {
+      specAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
+    });
+    if (current) specAgentSelect.value = current;
+  }
+
+  if (srvAgentSelect) {
+    const current = srvAgentSelect.value;
+    srvAgentSelect.innerHTML = '<option value="*">🌐 Todos os Clientes (Global)</option>';
+    agents.forEach(a => {
+      srvAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${a.name} (${a.companyName || 'Empresa'})</option>`;
+    });
+    if (current) srvAgentSelect.value = current;
   }
 }
 
 /**
- * Preenche dropdowns de especialistas
+ * Preenche dropdowns de especialistas (opcionalmente filtrado por agente/cliente)
  */
-function populateSpecialistsDropdowns() {
+function populateSpecialistsDropdowns(forAgentId) {
   const filterSelect = document.getElementById('apt-filter-specialist');
   const modalSelect = document.getElementById('modal-apt-specialist');
+
+  let list = specialistsState.filter(s => s.active);
+  if (forAgentId && forAgentId !== 'all') {
+    list = list.filter(s => s.agentId === forAgentId || s.agentId === '*' || !s.agentId);
+  }
 
   if (filterSelect) {
     const current = filterSelect.value;
     filterSelect.innerHTML = '<option value="all">Todos os Especialistas</option>';
-    specialistsState.forEach(s => {
+    list.forEach(s => {
       filterSelect.innerHTML += `<option value="${s.id}">${s.name} (${s.role})</option>`;
     });
-    if (current) filterSelect.value = current;
+    if (current && list.some(s => s.id === current)) filterSelect.value = current;
+    else filterSelect.value = 'all';
   }
 
   if (modalSelect) {
+    const current = modalSelect.value;
     modalSelect.innerHTML = '<option value="">Selecione um profissional...</option>';
-    specialistsState.filter(s => s.active).forEach(s => {
+    list.forEach(s => {
       modalSelect.innerHTML += `<option value="${s.id}">${s.name} - ${s.role}</option>`;
     });
+    if (current && list.some(s => s.id === current)) modalSelect.value = current;
   }
 }
 
 /**
- * Preenche dropdowns de serviços
+ * Preenche dropdowns de serviços (opcionalmente filtrado por agente/cliente)
  */
-function populateServicesDropdowns() {
+function populateServicesDropdowns(forAgentId) {
   const modalSelect = document.getElementById('modal-apt-service');
   if (modalSelect) {
+    let list = servicesState.filter(s => s.active);
+    if (forAgentId && forAgentId !== 'all') {
+      list = list.filter(s => s.agentId === forAgentId || s.agentId === '*' || !s.agentId);
+    }
+
+    const current = modalSelect.value;
     modalSelect.innerHTML = '<option value="">Consulta Padrão</option>';
-    servicesState.filter(s => s.active).forEach(s => {
+    list.forEach(s => {
       modalSelect.innerHTML += `<option value="${s.id}">${s.name} (${s.durationMinutes} min) ${s.price ? `- R$ ${s.price.toFixed(2)}` : ''}</option>`;
     });
+    if (current && list.some(s => s.id === current)) modalSelect.value = current;
   }
 }
 
@@ -2097,14 +2142,20 @@ async function renderTimelineView(apts) {
   if (!container) return;
 
   const targetDate = currentAppointmentsDateValue || getTodayString();
-  const specialists = currentAppointmentsSpecialistFilter === 'all'
-    ? specialistsState.filter(s => s.active)
-    : specialistsState.filter(s => s.id === currentAppointmentsSpecialistFilter);
+  let specialists = specialistsState.filter(s => s.active);
+
+  if (currentAppointmentsAgentFilter !== 'all') {
+    specialists = specialists.filter(s => s.agentId === currentAppointmentsAgentFilter || s.agentId === '*' || !s.agentId);
+  }
+
+  if (currentAppointmentsSpecialistFilter !== 'all') {
+    specialists = specialists.filter(s => s.id === currentAppointmentsSpecialistFilter);
+  }
 
   if (specialists.length === 0) {
     container.innerHTML = `
       <div class="card text-center p-5">
-        <p class="text-muted">Nenhum especialista cadastrado ou ativo.</p>
+        <p class="text-muted">Nenhum especialista cadastrado ou ativo para o cliente selecionado.</p>
         <button class="btn btn-primary btn-sm mt-2" onclick="openSpecialistsModal()">Cadastrar Especialista</button>
       </div>`;
     return;
@@ -2114,6 +2165,10 @@ async function renderTimelineView(apts) {
 
   for (const spec of specialists) {
     const specApts = apts.filter(a => a.specialistId === spec.id);
+    const specAgent = allAgentsCache.find(a => a.id === spec.agentId);
+    const agentTag = spec.agentId && spec.agentId !== '*'
+      ? `<span class="badge badge-purple" style="font-size: 11px;">🏢 ${specAgent ? specAgent.name : spec.agentId}</span>`
+      : `<span class="badge badge-info" style="font-size: 11px;">🌐 Global</span>`;
 
     html += `
       <div class="timeline-specialist-block">
@@ -2126,8 +2181,9 @@ async function renderTimelineView(apts) {
             </div>
           </div>
           <div class="timeline-spec-badges">
+            ${agentTag}
             <span class="badge badge-info">${specApts.length} atendimento(s) no dia</span>
-            <button class="btn btn-sm btn-outline" onclick="openNewAppointmentModal({ specialistId: '${spec.id}', date: '${targetDate}' })">
+            <button class="btn btn-sm btn-outline" onclick="openNewAppointmentModal({ specialistId: '${spec.id}', agentId: '${spec.agentId !== '*' ? spec.agentId : ''}', date: '${targetDate}' })">
               ➕ Agendar com ${spec.name.split(' ')[0]}
             </button>
           </div>
@@ -2513,9 +2569,17 @@ async function openNewAppointmentModal(prefill = {}) {
   const agentSelect = document.getElementById('modal-apt-agent');
   const serviceSelect = document.getElementById('modal-apt-service');
 
-  if (agentSelect && agentSelect.options.length > 0) {
+  // Seleciona o cliente/agente apropriado
+  const targetAgentId = prefill.agentId || (currentAppointmentsAgentFilter !== 'all' ? currentAppointmentsAgentFilter : '');
+  if (targetAgentId && agentSelect) {
+    agentSelect.value = targetAgentId;
+  } else if (agentSelect && agentSelect.options.length > 0) {
     agentSelect.selectedIndex = 0;
   }
+
+  const effectiveAgent = agentSelect?.value || 'default';
+  populateSpecialistsDropdowns(effectiveAgent);
+  populateServicesDropdowns(effectiveAgent);
 
   // Preenche especialista
   if (prefill.specialistId && specSelect) {
@@ -2591,6 +2655,14 @@ async function loadAvailableSlotsForModal(preferredSlot = '') {
 // Event Listeners para recarregar slots livres no modal
 document.getElementById('modal-apt-specialist')?.addEventListener('change', () => loadAvailableSlotsForModal());
 document.getElementById('modal-apt-date')?.addEventListener('change', () => loadAvailableSlotsForModal());
+
+// Atualiza especialistas e serviços quando trocar o cliente no modal
+document.getElementById('modal-apt-agent')?.addEventListener('change', (e) => {
+  const agentId = e.target.value;
+  populateSpecialistsDropdowns(agentId);
+  populateServicesDropdowns(agentId);
+  loadAvailableSlotsForModal();
+});
 
 // Submissão do Formulário de Agendamento Manual
 document.getElementById('modal-appointment-form')?.addEventListener('submit', async (e) => {
@@ -2694,6 +2766,7 @@ document.getElementById('form-specialist')?.addEventListener('submit', async (e)
   const daysChecked = Array.from(document.querySelectorAll('input[name="spec-days"]:checked')).map(c => c.value);
 
   const payload = {
+    agentId: document.getElementById('spec-agent')?.value || '*',
     name: document.getElementById('spec-name')?.value.trim(),
     role: document.getElementById('spec-role')?.value.trim(),
     phone: document.getElementById('spec-phone')?.value.trim(),
@@ -2733,14 +2806,20 @@ function renderSpecialistsTable() {
   if (!tbody) return;
 
   if (specialistsState.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center p-3 text-muted">Nenhum especialista cadastrado.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center p-3 text-muted">Nenhum especialista cadastrado.</td></tr>`;
     return;
   }
 
   let html = '';
   specialistsState.forEach(s => {
+    const agentObj = allAgentsCache.find(a => a.id === s.agentId);
+    const agentLabel = s.agentId === '*' || !s.agentId
+      ? '<span class="badge badge-info" style="font-size: 11px;">🌐 Global (Todos)</span>'
+      : `<span class="badge badge-purple" style="font-size: 11px;">🏢 ${agentObj ? agentObj.name : s.agentId}</span>`;
+
     html += `
       <tr>
+        <td>${agentLabel}</td>
         <td><strong>${s.name}</strong></td>
         <td>${s.role}</td>
         <td>📱 ${s.phone}</td>
@@ -2786,6 +2865,7 @@ document.getElementById('form-service')?.addEventListener('submit', async (e) =>
   e.preventDefault();
 
   const payload = {
+    agentId: document.getElementById('service-agent')?.value || '*',
     name: document.getElementById('service-name')?.value.trim(),
     durationMinutes: parseInt(document.getElementById('service-duration')?.value || '30', 10),
     price: parseFloat(document.getElementById('service-price')?.value || '0'),
@@ -2816,14 +2896,20 @@ function renderServicesTable() {
   if (!tbody) return;
 
   if (servicesState.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="text-center p-3 text-muted">Nenhum procedimento cadastrado.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center p-3 text-muted">Nenhum procedimento cadastrado.</td></tr>`;
     return;
   }
 
   let html = '';
   servicesState.forEach(srv => {
+    const agentObj = allAgentsCache.find(a => a.id === srv.agentId);
+    const agentLabel = srv.agentId === '*' || !srv.agentId
+      ? '<span class="badge badge-info" style="font-size: 11px;">🌐 Global (Todos)</span>'
+      : `<span class="badge badge-purple" style="font-size: 11px;">🏢 ${agentObj ? agentObj.name : srv.agentId}</span>`;
+
     html += `
       <tr>
+        <td>${agentLabel}</td>
         <td><strong>${srv.name}</strong></td>
         <td>${srv.durationMinutes} min</td>
         <td>${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Não definido'}</td>

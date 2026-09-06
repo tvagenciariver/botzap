@@ -1313,18 +1313,25 @@
             <form id="form-specialist">
               <input type="hidden" id="spec-id" value="">
               <div class="form-row">
-                <div class="form-group col-4">
+                <div class="form-group col-3">
+                  <label>Cliente / Agente <span class="text-danger">*</span></label>
+                  <select id="spec-agent" class="form-control" required>
+                    <option value="*">🌐 Todos os Clientes (Global)</option>
+                  </select>
+                  <small class="form-hint">Disponível para este cliente.</small>
+                </div>
+                <div class="form-group col-3">
                   <label>Nome do Profissional <span class="text-danger">*</span></label>
                   <input type="text" id="spec-name" class="form-control" placeholder="Dr. Lucas Mendes" required>
                 </div>
-                <div class="form-group col-4">
+                <div class="form-group col-3">
                   <label>Especialidade / Cargo <span class="text-danger">*</span></label>
                   <input type="text" id="spec-role" class="form-control" placeholder="Clínico Geral / Psicólogo" required>
                 </div>
-                <div class="form-group col-4">
-                  <label>WhatsApp para Alertas <span class="text-danger">*</span></label>
+                <div class="form-group col-3">
+                  <label>WhatsApp Alertas <span class="text-danger">*</span></label>
                   <input type="text" id="spec-phone" class="form-control" placeholder="5511999998888" required>
-                  <small class="form-hint">Recebe avisos automáticos de novas consultas e cancelamentos.</small>
+                  <small class="form-hint">Recebe avisos automáticos.</small>
                 </div>
               </div>
 
@@ -1384,6 +1391,7 @@
             <table class="data-table">
               <thead>
                 <tr>
+                  <th>Cliente / Agente</th>
                   <th>Profissional</th>
                   <th>Especialidade</th>
                   <th>WhatsApp Alertas</th>
@@ -1413,15 +1421,21 @@
             <form id="form-service">
               <input type="hidden" id="service-id" value="">
               <div class="form-row">
-                <div class="form-group col-4">
+                <div class="form-group col-3">
+                  <label>Cliente / Agente <span class="text-danger">*</span></label>
+                  <select id="service-agent" class="form-control" required>
+                    <option value="*">🌐 Todos os Clientes (Global)</option>
+                  </select>
+                </div>
+                <div class="form-group col-3">
                   <label>Nome do Procedimento <span class="text-danger">*</span></label>
                   <input type="text" id="service-name" class="form-control" placeholder="Consulta Cardiológica" required>
                 </div>
-                <div class="form-group col-4">
+                <div class="form-group col-3">
                   <label>Duração (minutos)</label>
                   <input type="number" id="service-duration" class="form-control" value="30" min="10" max="180">
                 </div>
-                <div class="form-group col-4">
+                <div class="form-group col-3">
                   <label>Valor (R$)</label>
                   <input type="number" id="service-price" class="form-control" placeholder="150.00" step="0.01">
                 </div>
@@ -1438,6 +1452,7 @@
             <table class="data-table">
               <thead>
                 <tr>
+                  <th>Cliente / Agente</th>
                   <th>Procedimento</th>
                   <th>Duração</th>
                   <th>Preço Estimado</th>
