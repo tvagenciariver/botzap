@@ -128,39 +128,393 @@
 
       <!-- TAB: Agentes & Clientes Multi-Tenant -->
       <section class="tab-pane" id="pane-agents">
-        <div class="card tab-header-card">
-          <div class="tab-header-left">
-            <div class="tab-header-title">
-              <span class="tab-header-icon">🤖</span>
-              <div>
-                <h2>Gerenciador de Agentes & Clientes</h2>
-                <p>Crie e gerencie múltiplos agentes independentes, um para cada cliente, com IA (OpenAI / Gemini), prompts, horários e sessões da WAHA dedicados.</p>
+        <!-- VISÃO 1: Lista de Agentes / Clientes -->
+        <div id="agents-list-view">
+          <div class="card tab-header-card">
+            <div class="tab-header-left">
+              <div class="tab-header-title">
+                <span class="tab-header-icon">🤖</span>
+                <div>
+                  <h2>Gerenciador de Agentes & Clientes</h2>
+                  <p>Crie e gerencie múltiplos agentes independentes, um para cada cliente, com IA (OpenAI / Gemini), prompts, horários e sessões da WAHA dedicados.</p>
+                </div>
+              </div>
+              <div class="tab-header-meta">
+                <span class="badge" id="badge-total-agents" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border-color: rgba(99, 102, 241, 0.3);">
+                  Carregando agentes...
+                </span>
               </div>
             </div>
-            <div class="tab-header-meta">
-              <span class="badge" id="badge-total-agents" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border-color: rgba(99, 102, 241, 0.3);">
-                Carregando agentes...
-              </span>
+            <div class="tab-header-actions">
+              <button class="btn btn-primary btn-glow" id="btn-create-agent">
+                ➕ Criar Novo Agente
+              </button>
             </div>
           </div>
-          <div class="tab-header-actions">
-            <button class="btn btn-primary" id="btn-create-agent">
-              ➕ Criar Novo Agente
-            </button>
+
+          <!-- Barra de Busca e Filtro -->
+          <div class="agents-toolbar">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="agents-search-input" class="form-control" placeholder="Buscar por nome do bot, empresa, sessão WAHA ou IA...">
+            </div>
+          </div>
+
+          <!-- Grade de Cartões de Agentes -->
+          <div class="agents-grid" id="agents-grid">
+            <!-- Renderizado dinamicamente via app.js -->
           </div>
         </div>
 
-        <!-- Filter bar -->
-        <div class="agents-toolbar">
-          <div class="search-box">
-            <span class="search-icon">🔍</span>
-            <input type="text" id="agents-search-input" class="form-control" placeholder="Buscar por nome do bot, empresa, sessão WAHA ou IA...">
-          </div>
-        </div>
+        <!-- VISÃO 2: Editor Dedicado de Agente (Tela Cheia / Amplo) -->
+        <div id="agents-editor-view" style="display: none;">
+          <form id="agent-modal-form">
+            <input type="hidden" id="modal-agent-id" value="">
 
-        <!-- Grid of Agent Cards -->
-        <div class="agents-grid" id="agents-grid">
-          <!-- Renderizado dinamicamente via app.js -->
+            <!-- Barra Superior Fixa (Sticky Header) -->
+            <div class="card editor-sticky-header">
+              <div class="editor-header-left">
+                <button type="button" class="btn btn-outline" id="btn-back-to-agents" title="Voltar para Lista de Agentes">
+                  ← Voltar para Agentes
+                </button>
+                <div class="editor-header-title-box">
+                  <span class="editor-header-icon">🤖</span>
+                  <div>
+                    <h2 id="agent-modal-title">Novo Agente / Cliente</h2>
+                    <p id="agent-modal-subtitle">Configure as regras, IA e conexões para este cliente</p>
+                  </div>
+                </div>
+              </div>
+              <div class="editor-header-actions">
+                <button type="button" class="btn btn-outline" id="btn-cancel-agent-top">Descartar</button>
+                <button type="submit" class="btn btn-primary btn-glow" id="btn-save-agent-top">💾 Salvar Agente</button>
+              </div>
+            </div>
+
+            <!-- Barra de Abas Amplas com Ícones e Subtítulos -->
+            <div class="card editor-tabs-bar">
+              <button type="button" class="editor-tab-btn active" data-modaltab="general">
+                <span class="tab-num">1</span>
+                <div class="tab-label-group">
+                  <strong>🏢 Identificação & Sessão</strong>
+                  <small>Nome, cliente e sessão WAHA</small>
+                </div>
+              </button>
+              <button type="button" class="editor-tab-btn" data-modaltab="ai">
+                <span class="tab-num">2</span>
+                <div class="tab-label-group">
+                  <strong>🧠 IA & Modelos</strong>
+                  <small>OpenAI ChatGPT ou Gemini</small>
+                </div>
+              </button>
+              <button type="button" class="editor-tab-btn" data-modaltab="prompts">
+                <span class="tab-num">3</span>
+                <div class="tab-label-group">
+                  <strong>📝 Prompts & Base FAQ</strong>
+                  <small>Persona, regras e preços</small>
+                </div>
+              </button>
+              <button type="button" class="editor-tab-btn" data-modaltab="handoff">
+                <span class="tab-num">4</span>
+                <div class="tab-label-group">
+                  <strong>🤝 Transbordo & Pausa</strong>
+                  <small>Transferência e buffer</small>
+                </div>
+              </button>
+              <button type="button" class="editor-tab-btn" data-modaltab="schedule">
+                <span class="tab-num">5</span>
+                <div class="tab-label-group">
+                  <strong>🕒 Horário Comercial</strong>
+                  <small>Turnos e aviso de ausência</small>
+                </div>
+              </button>
+            </div>
+
+            <!-- Conteúdo das Abas em Telas Amplas -->
+            <div class="editor-content-container">
+              <!-- SUB-TAB 1: IDENTIFICAÇÃO & SESSÃO -->
+              <div class="modal-tab-pane active" id="modal-pane-general">
+                <div class="card editor-section-card">
+                  <div class="card-header">
+                    <h3>🏢 Identificação e Vínculo com a Sessão do WhatsApp</h3>
+                    <p>Defina o nome do atendente virtual, a empresa contratante e qual sessão da WAHA este bot irá atender.</p>
+                  </div>
+                  <div class="card-body">
+                    <div class="form-row">
+                      <div class="form-group col-6">
+                        <label for="modal-agent-name">Nome do Bot / Atendente *</label>
+                        <input type="text" id="modal-agent-name" class="form-control form-control-lg" placeholder="Ex: Sofia, Lucas, Dra. Mariana" required>
+                        <small class="form-hint">Como o robô se identificará nas mensagens para os clientes.</small>
+                      </div>
+                      <div class="form-group col-6">
+                        <label for="modal-agent-company">Nome da Empresa / Cliente *</label>
+                        <input type="text" id="modal-agent-company" class="form-control form-control-lg" placeholder="Ex: Unimagem, Clínica Odonto, Barbearia Silva" required>
+                        <small class="form-hint">Nome institucional que será utilizado nas mensagens e saudações.</small>
+                      </div>
+                    </div>
+
+                    <div class="form-row" style="margin-top: 15px;">
+                      <div class="form-group col-8">
+                        <label for="modal-agent-session">Sessão da WAHA Vinculada *</label>
+                        <input type="text" id="modal-agent-session" class="form-control" placeholder="Ex: unimagem ou clinica_odonto (Use * para capturar qualquer sessão)">
+                        <small class="form-hint">
+                          O webhook da WAHA enviará mensagens identificando a sessão conectada. Este agente responderá apenas pelas mensagens desta sessão. Se tiver apenas 1 cliente ou for padrão, utilize <code>*</code>.
+                        </small>
+                      </div>
+                      <div class="form-group col-4">
+                        <label for="modal-agent-description">Observações Internas (Opcional)</label>
+                        <input type="text" id="modal-agent-description" class="form-control" placeholder="Ex: Plano Anual - Unidade Centro">
+                        <small class="form-hint">Identificação interna para organização da sua equipe.</small>
+                      </div>
+                    </div>
+
+                    <div class="agent-toggles-grid" style="margin-top: 25px;">
+                      <label class="setting-toggle-card">
+                        <input type="checkbox" id="modal-agent-active" checked>
+                        <div class="setting-toggle-info">
+                          <strong>⚡ Agente Ativo</strong>
+                          <p>Habilita respostas automáticas para mensagens recebidas nesta sessão do WhatsApp.</p>
+                        </div>
+                      </label>
+                      <label class="setting-toggle-card">
+                        <input type="checkbox" id="modal-agent-isDefault">
+                        <div class="setting-toggle-info">
+                          <strong>🛡️ Agente Padrão (Fallback)</strong>
+                          <p>Assume o atendimento automaticamente caso uma mensagem chegue por uma sessão não cadastrada.</p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SUB-TAB 2: INTELIGÊNCIA ARTIFICIAL -->
+              <div class="modal-tab-pane" id="modal-pane-ai">
+                <div class="card editor-section-card">
+                  <div class="card-header">
+                    <h3>🧠 Motor de Inteligência Artificial e Modelos LLM</h3>
+                    <p>Defina se este cliente utilizará OpenAI (ChatGPT) ou Google Gemini, suas chaves de API e temperatura de resposta.</p>
+                  </div>
+                  <div class="card-body">
+                    <div class="form-group">
+                      <label class="section-title">Selecione o Provedor de IA do Agente</label>
+                      <select id="modal-agent-llmProvider" class="form-control form-control-lg">
+                        <option value="openai">⚡ OpenAI (ChatGPT: GPT-4o Mini / GPT-4o)</option>
+                        <option value="gemini">💎 Google Gemini (Gemini Flash Lite / Gemini 2.5 Flash)</option>
+                      </select>
+                      <small class="form-hint">Você pode alternar o provedor de cada cliente individualmente a qualquer momento.</small>
+                    </div>
+
+                    <!-- Configurações OpenAI -->
+                    <div class="llm-box" id="modal-openai-box" style="margin-top: 20px;">
+                      <div class="llm-box-title">
+                        <span class="llm-dot dot-openai"></span>
+                        <h4>Configurações OpenAI (ChatGPT) para este Cliente</h4>
+                      </div>
+                      <div class="form-row">
+                        <div class="form-group col-7">
+                          <label for="modal-agent-openaiApiKey">Chave de API OpenAI Exclusiva do Cliente (Opcional)</label>
+                          <input type="password" id="modal-agent-openaiApiKey" class="form-control" placeholder="sk-proj-... (deixe em branco para usar a chave padrão do painel)">
+                          <small class="form-hint">Se preenchida, o custo do modelo será faturado direto na conta deste cliente.</small>
+                        </div>
+                        <div class="form-group col-5">
+                          <label for="modal-agent-openaiModel">Modelo OpenAI</label>
+                          <select id="modal-agent-openaiModel" class="form-control">
+                            <option value="gpt-4o-mini">gpt-4o-mini (Recomendado - Ultrarrápido, Inteligente e Barato)</option>
+                            <option value="gpt-4.1-mini">gpt-4.1-mini (Nova Geração)</option>
+                            <option value="gpt-4o">gpt-4o (Maior Precisão & Raciocínio)</option>
+                            <option value="gpt-3.5-turbo">gpt-3.5-turbo (Legado)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Configurações Gemini -->
+                    <div class="llm-box" id="modal-gemini-box" style="margin-top: 20px; display: none;">
+                      <div class="llm-box-title">
+                        <span class="llm-dot dot-gemini"></span>
+                        <h4>Configurações Google Gemini para este Cliente</h4>
+                      </div>
+                      <div class="form-row">
+                        <div class="form-group col-7">
+                          <label for="modal-agent-geminiApiKey">Chave de API Google Gemini do Cliente (Opcional)</label>
+                          <input type="password" id="modal-agent-geminiApiKey" class="form-control" placeholder="AIzaSy... (deixe em branco para usar a chave padrão do painel)">
+                          <small class="form-hint">Se preenchida, utiliza a cota da conta de Google AI Studio do próprio cliente.</small>
+                        </div>
+                        <div class="form-group col-5">
+                          <label for="modal-agent-model">Modelo Gemini</label>
+                          <select id="modal-agent-model" class="form-control">
+                            <option value="gemini-flash-lite-latest">gemini-flash-lite-latest (Mais Rápido & Alto Limite de Requisições)</option>
+                            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                            <option value="gemini-flash-latest">gemini-flash-latest (Maior Janela de Contexto)</option>
+                            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 20px;">
+                      <label for="modal-agent-temperature">Criatividade / Temperatura da IA (0.0 a 1.0)</label>
+                      <input type="number" step="0.05" min="0" max="1" id="modal-agent-temperature" class="form-control" value="0.4" style="max-width: 200px;">
+                      <small class="form-hint">Valores baixos (0.2 a 0.4) geram respostas mais seguras, diretas e precisas com base na tabela de preços e FAQ.</small>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SUB-TAB 3: PROMPTS E BASE DE CONHECIMENTO -->
+              <div class="modal-tab-pane" id="modal-pane-prompts">
+                <div class="card editor-section-card">
+                  <div class="card-header">
+                    <h3>📝 Prompts do Sistema e Base de Conhecimento (FAQ)</h3>
+                    <p>Espaço amplo e confortável para configurar a persona da IA, regras de atendimento e todo o catálogo de serviços, preços e procedimentos.</p>
+                  </div>
+                  <div class="card-body">
+                    <div class="form-group">
+                      <div class="label-with-tip">
+                        <label for="modal-agent-systemInstruction">
+                          <strong>Prompt do Sistema (Persona, Tom de Voz e Instruções de Atendimento) *</strong>
+                        </label>
+                        <span class="label-tag">Tag dinâmica: <code>{companyName}</code></span>
+                      </div>
+                      <textarea id="modal-agent-systemInstruction" rows="10" class="form-control form-control-textarea editor-prompt-textarea" placeholder="Defina detalhadamente como o bot deve se comportar, tom de voz (acolhedor, profissional), regras de saudação, orientações sobre como responder dúvidas..."></textarea>
+                      <small class="form-hint">Dica: use a tag <code>{companyName}</code> para substituir pelo nome da empresa automaticamente.</small>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 25px;">
+                      <div class="label-with-tip">
+                        <label for="modal-agent-businessInfo">
+                          <strong>Base de Conhecimento e FAQ da Empresa (Tabela de Preços, Serviços, Endereço e Regras)</strong>
+                        </label>
+                        <span class="label-badge">Fonte da Verdade da IA</span>
+                      </div>
+                      <textarea id="modal-agent-businessInfo" rows="14" class="form-control form-control-textarea editor-faq-textarea" placeholder="Cole aqui todas as informações que o bot precisa dominar:
+- Catálogo de exames/serviços e seus respectivos valores
+- Endereço completo, pontos de referência e orientações de chegada
+- Formas de pagamento aceitas (Pix, Dinheiro, Cartões, Convênios)
+- Preparo e recomendações para procedimentos/exames
+- Perguntas frequentes e dúvidas comuns dos clientes..."></textarea>
+                      <small class="form-hint">A IA consultará rigorosamente estas informações para sanar as dúvidas e orientar os clientes com 100% de exatidão.</small>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SUB-TAB 4: TRANSBORDO E REGRAS -->
+              <div class="modal-tab-pane" id="modal-pane-handoff">
+                <div class="card editor-section-card">
+                  <div class="card-header">
+                    <h3>🤝 Transbordo Humano e Regras de Mensageria</h3>
+                    <p>Configure a passagem de bastão para operadores humanos (Chatwoot / WhatsApp) e a experiência de digitação.</p>
+                  </div>
+                  <div class="card-body">
+                    <div class="form-group">
+                      <label for="modal-agent-handoffKeywords">Palavras-chave de Transbordo Humano (separadas por vírgula)</label>
+                      <input type="text" id="modal-agent-handoffKeywords" class="form-control form-control-lg" placeholder="atendente, humano, falar com pessoa, atendente humano, suporte, financeiro">
+                      <small class="form-hint">Se o cliente digitar qualquer uma dessas palavras, o bot responderá com a mensagem de transbordo e pausará o atendimento automático.</small>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 20px;">
+                      <label for="modal-agent-handoffMessage">Mensagem de Transbordo Humano</label>
+                      <textarea id="modal-agent-handoffMessage" rows="3" class="form-control" placeholder="Entendido! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que um de nossos consultores já irá te atender! 👩‍💼"></textarea>
+                      <small class="form-hint">Mensagem cordial enviada ao cliente antes do bot pausar.</small>
+                    </div>
+
+                    <div class="form-row" style="margin-top: 25px;">
+                      <div class="form-group col-4">
+                        <label for="modal-agent-pauseHours">Tempo de Pausa do Bot (Horas)</label>
+                        <input type="number" step="0.5" min="0.5" max="168" id="modal-agent-pauseHours" class="form-control" value="6">
+                        <small class="form-hint">Tempo que o bot permanece pausado após uma intervenção humana.</small>
+                      </div>
+                      <div class="form-group col-4">
+                        <label for="modal-agent-debounce">Buffer Anti-Mensagens Picadas (Segundos)</label>
+                        <input type="number" step="0.5" min="1" max="10" id="modal-agent-debounce" class="form-control" value="2.5">
+                        <small class="form-hint">Espera o cliente terminar de mandar frases picadas antes de processar.</small>
+                      </div>
+                      <div class="form-group col-4">
+                        <label>Efeitos Humanizados no WhatsApp</label>
+                        <div class="checkbox-group" style="padding-top: 8px; display: flex; flex-direction: column; gap: 10px;">
+                          <label class="switch-row">
+                            <input type="checkbox" id="modal-agent-typing" checked>
+                            <span>Simular "Digitando..."</span>
+                          </label>
+                          <label class="switch-row">
+                            <input type="checkbox" id="modal-agent-seen" checked>
+                            <span>Marcar Mensagem como "Lida" (Check Azul)</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SUB-TAB 5: HORÁRIO COMERCIAL -->
+              <div class="modal-tab-pane" id="modal-pane-schedule">
+                <div class="card editor-section-card">
+                  <div class="card-header">
+                    <h3>🕒 Horário Comercial e Mensagem de Ausência</h3>
+                    <p>Controle os dias e horários de funcionamento deste cliente. Fora do expediente, o bot enviará uma mensagem avisando que a empresa está fechada.</p>
+                  </div>
+                  <div class="card-body">
+                    <div class="schedule-master-toggle-row">
+                      <div class="schedule-master-info">
+                        <strong>Habilitar Horário Comercial para este Agente</strong>
+                        <p>Quando ativo, mensagens recebidas fora dos turnos definidos na grade semanal receberão a mensagem de ausência automática.</p>
+                      </div>
+                      <label class="switch-control">
+                        <input type="checkbox" id="modal-sched-enabled">
+                        <span class="switch-slider"></span>
+                      </label>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 20px;">
+                      <label for="modal-sched-outOfHoursMessage">Mensagem de Ausência (Fora de Expediente)</label>
+                      <textarea id="modal-sched-outOfHoursMessage" rows="3" class="form-control" placeholder="Olá! Nosso horário de atendimento encerrou. Deixe sua dúvida ou pedido de agendamento que responderemos assim que nossa equipe retornar! 🕒"></textarea>
+                    </div>
+
+                    <div class="schedule-table-card" style="margin-top: 25px;">
+                      <div class="schedule-table-header">
+                        <h4>📅 Grade Semanal de Atendimento do Cliente</h4>
+                        <p>Configure os turnos de funcionamento e intervalos de almoço com folga e total visibilidade.</p>
+                      </div>
+
+                      <div class="table-responsive">
+                        <table class="data-table schedule-table wide-schedule-table">
+                          <thead>
+                            <tr>
+                              <th style="width: 160px;">Dia da Semana</th>
+                              <th style="width: 110px;">Ativo</th>
+                              <th style="width: 260px;">Turno de Atendimento</th>
+                              <th style="width: 110px;">Pausa Almoço</th>
+                              <th>Horário do Almoço</th>
+                            </tr>
+                          </thead>
+                          <tbody id="modal-schedule-tbody">
+                            <!-- Linhas dos 7 dias geradas via JS -->
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Barra Inferior de Ações (Bottom Bar) -->
+            <div class="card editor-bottom-bar">
+              <div class="editor-bottom-left">
+                <button type="button" class="btn btn-outline" id="btn-cancel-agent-bottom">
+                  Cancelar Alterações
+                </button>
+              </div>
+              <div class="editor-bottom-actions">
+                <button type="submit" class="btn btn-primary btn-glow" id="btn-save-agent-modal">
+                  💾 Salvar Agente
+                </button>
+              </div>
+            </div>
+          </form>
         </div>
       </section>
 
@@ -625,222 +979,7 @@
   <!-- Toast Notification Container -->
   <div id="toast-container"></div>
 
-  <!-- Modal de Edição / Criação de Agente -->
-  <div id="agent-modal-overlay" class="modal-overlay" style="display: none;">
-    <div class="modal-card modal-lg">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <span class="modal-icon">🤖</span>
-          <div>
-            <h2 id="agent-modal-title">Novo Agente / Cliente</h2>
-            <p id="agent-modal-subtitle">Configure as regras, IA e conexões para este cliente</p>
-          </div>
-        </div>
-        <button class="modal-close-btn" id="btn-close-agent-modal" type="button">&times;</button>
-      </div>
 
-      <!-- Navigation Tabs inside Modal -->
-      <div class="modal-tab-bar">
-        <button type="button" class="modal-tab-btn active" data-modaltab="general">🏢 Identificação & Sessão</button>
-        <button type="button" class="modal-tab-btn" data-modaltab="ai">🧠 IA & Modelos</button>
-        <button type="button" class="modal-tab-btn" data-modaltab="prompts">📝 Prompts & Base FAQ</button>
-        <button type="button" class="modal-tab-btn" data-modaltab="handoff">🤝 Transbordo & Pausa</button>
-        <button type="button" class="modal-tab-btn" data-modaltab="schedule">🕒 Horário Comercial</button>
-      </div>
-
-      <form id="agent-modal-form">
-        <input type="hidden" id="modal-agent-id" value="">
-
-        <div class="modal-body">
-          <!-- SUB-TAB 1: IDENTIFICAÇÃO -->
-          <div class="modal-tab-pane active" id="modal-pane-general">
-            <div class="form-row">
-              <div class="form-group col-6">
-                <label for="modal-agent-name">Nome do Bot / Atendente *</label>
-                <input type="text" id="modal-agent-name" class="form-control" placeholder="Ex: Sofia, Lucas, Dra. Mariana" required>
-              </div>
-              <div class="form-group col-6">
-                <label for="modal-agent-company">Nome da Empresa / Cliente *</label>
-                <input type="text" id="modal-agent-company" class="form-control" placeholder="Ex: Unimagem, Clínica Sorriso" required>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="modal-agent-session">Sessão da WAHA Vinculada *</label>
-              <input type="text" id="modal-agent-session" class="form-control" placeholder="Ex: unimagem ou clinica_odonto (Use * para capturar qualquer sessão)">
-              <small class="form-hint">O webhook da WAHA enviará mensagens com o nome da sessão conectada. Este agente responderá apenas pelas mensagens desta sessão.</small>
-            </div>
-
-            <div class="form-group">
-              <label for="modal-agent-description">Observações Internas (Opcional)</label>
-              <input type="text" id="modal-agent-description" class="form-control" placeholder="Ex: Contrato Plano Anual - Unidade Centro">
-            </div>
-
-            <div class="form-row" style="margin-top: 15px;">
-              <div class="form-group col-6">
-                <label class="switch-row">
-                  <input type="checkbox" id="modal-agent-active" checked>
-                  <span><strong>Agente Ativo</strong> (responder mensagens recebidas)</span>
-                </label>
-              </div>
-              <div class="form-group col-6">
-                <label class="switch-row">
-                  <input type="checkbox" id="modal-agent-isDefault">
-                  <span><strong>Agente Padrão</strong> (contingência se sessão não for encontrada)</span>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <!-- SUB-TAB 2: INTELIGÊNCIA ARTIFICIAL -->
-          <div class="modal-tab-pane" id="modal-pane-ai">
-            <div class="form-group">
-              <label for="modal-agent-llmProvider">Provedor Principal de IA *</label>
-              <select id="modal-agent-llmProvider" class="form-control">
-                <option value="openai">OpenAI (ChatGPT / GPT-4o-mini)</option>
-                <option value="gemini">Google Gemini (Gemini Flash)</option>
-              </select>
-              <small class="form-hint">Você pode alternar o provedor de cada cliente individualmente a qualquer momento.</small>
-            </div>
-
-            <!-- Configs OpenAI -->
-            <div class="llm-box" id="modal-openai-box">
-              <h4 style="margin: 0 0 10px 0; color: #10a37f; font-size: 13px;">🟢 Configurações OpenAI (ChatGPT)</h4>
-              <div class="form-group">
-                <label for="modal-agent-openaiApiKey">Chave de API OpenAI do Cliente (Opcional)</label>
-                <input type="password" id="modal-agent-openaiApiKey" class="form-control" placeholder="sk-proj-... (deixe em branco para usar a chave global do painel)">
-                <small class="form-hint">Se preenchida, o custo do modelo será cobrado direto na conta deste cliente.</small>
-              </div>
-              <div class="form-group">
-                <label for="modal-agent-openaiModel">Modelo OpenAI</label>
-                <select id="modal-agent-openaiModel" class="form-control">
-                  <option value="gpt-4o-mini">gpt-4o-mini (Recomendado - Ultrarrápido e Econômico)</option>
-                  <option value="gpt-4.1-mini">gpt-4.1-mini (Nova Geração)</option>
-                  <option value="gpt-4o">gpt-4o (Maior Precisão / Raciocínio)</option>
-                  <option value="gpt-3.5-turbo">gpt-3.5-turbo (Legado)</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Configs Gemini -->
-            <div class="llm-box" id="modal-gemini-box" style="margin-top: 15px;">
-              <h4 style="margin: 0 0 10px 0; color: #38bdf8; font-size: 13px;">🔵 Configurações Google Gemini</h4>
-              <div class="form-group">
-                <label for="modal-agent-geminiApiKey">Chave de API Google Gemini do Cliente (Opcional)</label>
-                <input type="password" id="modal-agent-geminiApiKey" class="form-control" placeholder="AIzaSy... (deixe em branco para usar a chave global do painel)">
-                <small class="form-hint">Se preenchida, utiliza a cota da conta do próprio cliente.</small>
-              </div>
-              <div class="form-group">
-                <label for="modal-agent-model">Modelo Gemini</label>
-                <select id="modal-agent-model" class="form-control">
-                  <option value="gemini-flash-lite-latest">gemini-flash-lite-latest (Mais Rápido & Econômico)</option>
-                  <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-                  <option value="gemini-flash-latest">gemini-flash-latest (Alta Precisão)</option>
-                  <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-group" style="margin-top: 15px;">
-              <label for="modal-agent-temperature">Criatividade / Temperatura (0.0 a 1.0)</label>
-              <input type="number" step="0.05" min="0" max="1" id="modal-agent-temperature" class="form-control" value="0.4">
-              <small class="form-hint">Valores mais baixos (0.2 - 0.4) geram respostas mais objetivas e focadas. Valores altos (0.7) são mais criativos.</small>
-            </div>
-          </div>
-
-          <!-- SUB-TAB 3: PROMPTS E BASE DE CONHECIMENTO -->
-          <div class="modal-tab-pane" id="modal-pane-prompts">
-            <div class="form-group">
-              <label for="modal-agent-systemInstruction">Prompt do Sistema (Persona e Diretrizes) *</label>
-              <textarea id="modal-agent-systemInstruction" rows="5" class="form-control" placeholder="Defina a personalidade do bot, modo de falar e objetivo..."></textarea>
-              <small class="form-hint">Dica: use a tag <code>{companyName}</code> para substituir pelo nome da empresa automaticamente.</small>
-            </div>
-
-            <div class="form-group">
-              <label for="modal-agent-businessInfo">Base de Conhecimento e FAQ da Empresa</label>
-              <textarea id="modal-agent-businessInfo" rows="7" class="form-control" placeholder="Cole aqui regras de agendamento, tabela de preços, serviços, perguntas frequentes, endereços, links úteis..."></textarea>
-              <small class="form-hint">A IA usará este texto como a fonte da verdade para tirar as dúvidas dos clientes.</small>
-            </div>
-          </div>
-
-          <!-- SUB-TAB 4: TRANSBORDO E REGRAS -->
-          <div class="modal-tab-pane" id="modal-pane-handoff">
-            <div class="form-group">
-              <label for="modal-agent-handoffKeywords">Palavras de Transbordo Humano (separadas por vírgula)</label>
-              <input type="text" id="modal-agent-handoffKeywords" class="form-control" placeholder="atendente, humano, falar com pessoa, atendente humano, suporte">
-              <small class="form-hint">Se o cliente digitar alguma dessas palavras, o bot responde com a mensagem de transbordo e pausa o atendimento automático.</small>
-            </div>
-
-            <div class="form-group">
-              <label for="modal-agent-handoffMessage">Mensagem de Transbordo Humano</label>
-              <textarea id="modal-agent-handoffMessage" rows="2" class="form-control" placeholder="Entendido! Estou transferindo seu atendimento para nossa equipe humana..."></textarea>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group col-4">
-                <label for="modal-agent-pauseHours">Pausa do Bot (Horas)</label>
-                <input type="number" step="0.5" min="0.5" max="168" id="modal-agent-pauseHours" class="form-control" value="6">
-                <small class="form-hint">Tempo que o bot fica pausado após intervenção humana.</small>
-              </div>
-              <div class="form-group col-4">
-                <label for="modal-agent-debounce">Buffer de Mensagens (Segundos)</label>
-                <input type="number" step="0.5" min="1" max="10" id="modal-agent-debounce" class="form-control" value="2.5">
-                <small class="form-hint">Espera mensagens picadas antes de processar.</small>
-              </div>
-              <div class="form-group col-4">
-                <label>Efeitos no WhatsApp</label>
-                <div class="checkbox-group" style="padding-top: 5px;">
-                  <label><input type="checkbox" id="modal-agent-typing" checked> Simular "Digitando..."</label>
-                  <label><input type="checkbox" id="modal-agent-seen" checked> Marcar "Visto" (Check Azul)</label>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- SUB-TAB 5: HORÁRIO COMERCIAL -->
-          <div class="modal-tab-pane" id="modal-pane-schedule">
-            <div class="schedule-master-toggle-row" style="padding: 12px; background: var(--bg-hover); border-radius: var(--radius-sm); margin-bottom: 15px;">
-              <div class="schedule-master-info">
-                <strong>Habilitar Horário Comercial para este Agente</strong>
-                <p style="margin: 0; font-size: 12px; color: var(--text-muted);">Quando ativo, envia mensagem automática fora dos horários definidos abaixo.</p>
-              </div>
-              <label class="switch-control">
-                <input type="checkbox" id="modal-sched-enabled">
-                <span class="switch-slider"></span>
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label for="modal-sched-outOfHoursMessage">Mensagem de Ausência (Fora de Expediente)</label>
-              <textarea id="modal-sched-outOfHoursMessage" rows="3" class="form-control" placeholder="Olá! Nosso horário de atendimento encerrou. Deixe sua dúvida que responderemos assim que retornarmos! 🕒"></textarea>
-            </div>
-
-            <div class="table-responsive" style="margin-top: 15px;">
-              <table class="data-table schedule-table">
-                <thead>
-                  <tr>
-                    <th>Dia</th>
-                    <th>Ativo</th>
-                    <th>Expediente</th>
-                    <th>Almoço</th>
-                    <th>Horário de Almoço</th>
-                  </tr>
-                </thead>
-                <tbody id="modal-schedule-tbody">
-                  <!-- Linhas dos 7 dias geradas via JS -->
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <button type="button" class="btn btn-outline" id="btn-cancel-agent-modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary" id="btn-save-agent-modal">💾 Salvar Agente</button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <!-- Modal / Tela de Login com Usuário e Senha -->
   <div id="login-overlay" class="login-overlay">

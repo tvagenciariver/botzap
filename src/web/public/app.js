@@ -1327,13 +1327,14 @@ async function loadAgentsForSimulator() {
 }
 
 // ==========================================================================
-// MODAL DE AGENTE (CRIAÇÃO / EDIÇÃO)
+// ==========================================================================
+// EDITOR DEDICADO DE AGENTE (CRIAÇÃO / EDIÇÃO)
 // ==========================================================================
 
-// Alternância de abas internas do modal
-document.querySelectorAll('.modal-tab-btn').forEach(btn => {
+// Alternância de abas do editor dedicado
+document.querySelectorAll('.editor-tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.modal-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.editor-tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.modal-tab-pane').forEach(p => p.classList.remove('active'));
 
     btn.classList.add('active');
@@ -1343,7 +1344,7 @@ document.querySelectorAll('.modal-tab-btn').forEach(btn => {
   });
 });
 
-// Alternância visual de OpenAI / Gemini no modal
+// Alternância visual de OpenAI / Gemini no editor
 function setModalLLMProviderUI(provider) {
   const openaiBox = document.getElementById('modal-openai-box');
   const geminiBox = document.getElementById('modal-gemini-box');
@@ -1360,7 +1361,7 @@ document.getElementById('modal-agent-llmProvider')?.addEventListener('change', (
   setModalLLMProviderUI(e.target.value);
 });
 
-// Renderização da tabela de horários dentro do modal
+// Renderização da tabela de horários dentro do editor
 function renderModalScheduleTable(schedule = {}) {
   const tbody = document.getElementById('modal-schedule-tbody');
   if (!tbody) return;
@@ -1434,10 +1435,33 @@ function renderModalScheduleTable(schedule = {}) {
   });
 }
 
+function showAgentEditor() {
+  const listView = document.getElementById('agents-list-view');
+  const editorView = document.getElementById('agents-editor-view');
+  if (listView) listView.style.display = 'none';
+  if (editorView) editorView.style.display = 'block';
+
+  // Rola para o topo suavemente
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  const main = document.querySelector('.main-content');
+  if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function closeAgentModal() {
+  const listView = document.getElementById('agents-list-view');
+  const editorView = document.getElementById('agents-editor-view');
+  if (listView) listView.style.display = 'block';
+  if (editorView) editorView.style.display = 'none';
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  const main = document.querySelector('.main-content');
+  if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function openNewAgentModal() {
   document.getElementById('modal-agent-id').value = '';
   document.getElementById('agent-modal-title').textContent = '➕ Criar Novo Agente / Cliente';
-  document.getElementById('agent-modal-subtitle').textContent = 'Defina os dados, IA e horários exclusivos deste cliente.';
+  document.getElementById('agent-modal-subtitle').textContent = 'Defina os dados, IA, prompts e horários exclusivos deste cliente com amplo conforto.';
 
   // Default values
   document.getElementById('modal-agent-name').value = '';
@@ -1457,11 +1481,11 @@ function openNewAgentModal() {
   document.getElementById('modal-agent-temperature').value = 0.4;
 
   document.getElementById('modal-agent-systemInstruction').value =
-    'Você é o assistente virtual da {companyName} no WhatsApp.\nSeja atencioso, cortês, humanizado e conciso. Responda às dúvidas com clareza.';
+    'Você é Sofia, assistente virtual humanizada da {companyName} no WhatsApp.\nSeja atenciosa, cortês, empática e concisa. Responda às dúvidas dos clientes com clareza com base exclusivamente na Base de Conhecimento.';
   document.getElementById('modal-agent-businessInfo').value = '';
 
-  document.getElementById('modal-agent-handoffKeywords').value = 'atendente, humano, falar com pessoa, suporte';
-  document.getElementById('modal-agent-handoffMessage').value = 'Entendido! Estou transferindo seu atendimento para nossa equipe humana.';
+  document.getElementById('modal-agent-handoffKeywords').value = 'atendente, humano, falar com pessoa, suporte, financeiro';
+  document.getElementById('modal-agent-handoffMessage').value = 'Entendido! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que já iremos te atender! 👩‍💼';
   document.getElementById('modal-agent-pauseHours').value = 6;
   document.getElementById('modal-agent-debounce').value = 2.5;
   document.getElementById('modal-agent-typing').checked = true;
@@ -1473,9 +1497,9 @@ function openNewAgentModal() {
 
   renderModalScheduleTable({});
 
-  // Reset to first tab
-  document.querySelector('.modal-tab-btn[data-modaltab="general"]')?.click();
-  document.getElementById('agent-modal-overlay').style.display = 'flex';
+  // Reset para a primeira aba e exibe o editor
+  document.querySelector('.editor-tab-btn[data-modaltab="general"]')?.click();
+  showAgentEditor();
 }
 
 async function openEditAgentModal(agentId) {
@@ -1486,8 +1510,8 @@ async function openEditAgentModal(agentId) {
     if (!agent) throw new Error('Agente não encontrado.');
 
     document.getElementById('modal-agent-id').value = agent.id;
-    document.getElementById('agent-modal-title').textContent = `✏️ Editar Agente: ${agent.name}`;
-    document.getElementById('agent-modal-subtitle').textContent = `Empresa: ${agent.companyName} | ID: ${agent.id}`;
+    document.getElementById('agent-modal-title').textContent = `✏️ Editando Agente: ${agent.name}`;
+    document.getElementById('agent-modal-subtitle').textContent = `Empresa: ${agent.companyName} | Sessão: ${agent.wahaSession || '*'} | ID: ${agent.id}`;
 
     document.getElementById('modal-agent-name').value = agent.name || '';
     document.getElementById('modal-agent-company').value = agent.companyName || '';
@@ -1522,31 +1546,38 @@ async function openEditAgentModal(agentId) {
 
     renderModalScheduleTable(bh.schedule || {});
 
-    document.querySelector('.modal-tab-btn[data-modaltab="general"]')?.click();
-    document.getElementById('agent-modal-overlay').style.display = 'flex';
+    document.querySelector('.editor-tab-btn[data-modaltab="general"]')?.click();
+    showAgentEditor();
   } catch (err) {
     showToast(`Erro ao carregar agente: ${err.message}`, 'error');
   }
 }
 
-function closeAgentModal() {
-  const overlay = document.getElementById('agent-modal-overlay');
-  if (overlay) overlay.style.display = 'none';
-}
-
+// Event Listeners de Botões
 document.getElementById('btn-create-agent')?.addEventListener('click', openNewAgentModal);
-document.getElementById('btn-close-agent-modal')?.addEventListener('click', closeAgentModal);
-document.getElementById('btn-cancel-agent-modal')?.addEventListener('click', closeAgentModal);
+document.getElementById('btn-back-to-agents')?.addEventListener('click', closeAgentModal);
+document.getElementById('btn-cancel-agent-top')?.addEventListener('click', closeAgentModal);
+document.getElementById('btn-cancel-agent-bottom')?.addEventListener('click', closeAgentModal);
 
-// Salvar Agente no Modal
+// Salvar Agente no Formulário (Top ou Bottom)
 document.getElementById('agent-modal-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = document.getElementById('modal-agent-id').value.trim();
   const saveBtn = document.getElementById('btn-save-agent-modal');
-  if (saveBtn) {
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Salvando...';
-  }
+  const saveBtnTop = document.getElementById('btn-save-agent-top');
+
+  const setSaving = (saving) => {
+    if (saveBtn) {
+      saveBtn.disabled = saving;
+      saveBtn.textContent = saving ? 'Salvando...' : '💾 Salvar Agente';
+    }
+    if (saveBtnTop) {
+      saveBtnTop.disabled = saving;
+      saveBtnTop.textContent = saving ? 'Salvando...' : '💾 Salvar Agente';
+    }
+  };
+
+  setSaving(true);
 
   try {
     // Coleta dias da semana
@@ -1615,10 +1646,7 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
   } catch (err) {
     showToast(`Erro ao salvar: ${err.message}`, 'error');
   } finally {
-    if (saveBtn) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = '💾 Salvar Agente';
-    }
+    setSaving(false);
   }
 });
 

@@ -1821,5 +1821,421 @@ textarea.form-control {
   cursor: pointer;
 }
 
+/* ==========================================================================
+   DEDICATED FULL-PAGE AGENT EDITOR
+   ========================================================================== */
+#agents-editor-view {
+  animation: fadeIn 0.25s ease-out;
+}
+
+.editor-sticky-header {
+  position: sticky;
+  top: 10px;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.94) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 24px;
+  border: 1px solid rgba(99, 102, 241, 0.3) !important;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  margin-bottom: 20px;
+}
+
+.editor-header-left {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.editor-header-title-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.editor-header-icon {
+  font-size: 30px;
+}
+
+.editor-header-title-box h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+  color: #f8fafc;
+}
+
+.editor-header-title-box p {
+  margin: 2px 0 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.editor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Abas Amplas de Navegação do Editor */
+.editor-tabs-bar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.75) !important;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 1200px) {
+  .editor-tabs-bar {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+}
+
+.editor-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.editor-tab-btn:hover {
+  background: rgba(30, 41, 59, 0.85);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.editor-tab-btn.active {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(59, 130, 246, 0.16));
+  border-color: #6366f1;
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.25);
+}
+
+.editor-tab-btn .tab-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.editor-tab-btn.active .tab-num {
+  background: #6366f1;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
+}
+
+.editor-tab-btn .tab-label-group {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editor-tab-btn .tab-label-group strong {
+  font-size: 13px;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-tab-btn.active .tab-label-group strong {
+  color: #ffffff;
+}
+
+.editor-tab-btn .tab-label-group small {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.editor-tab-btn.active .tab-label-group small {
+  color: #a5b4fc;
+}
+
+/* Painéis de Conteúdo do Editor */
+.editor-section-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.65) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.editor-section-card .card-header {
+  padding: 22px 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.editor-section-card .card-header h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0 0 6px 0;
+  color: #f8fafc;
+}
+
+.editor-section-card .card-header p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.editor-section-card .card-body {
+  padding: 28px;
+}
+
+/* Campos de Texto Amplos para Prompts e Base de Conhecimento */
+.editor-prompt-textarea {
+  min-height: 230px !important;
+  font-family: 'Fira Code', monospace;
+  font-size: 13.5px;
+  line-height: 1.6;
+  resize: vertical;
+  background-color: #070d19 !important;
+  color: #e2e8f0 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  padding: 14px 16px !important;
+}
+
+.editor-faq-textarea {
+  min-height: 350px !important;
+  font-family: 'Fira Code', monospace;
+  font-size: 13.5px;
+  line-height: 1.6;
+  resize: vertical;
+  background-color: #070d19 !important;
+  color: #38bdf8 !important;
+  border-color: rgba(56, 189, 248, 0.3) !important;
+  padding: 14px 16px !important;
+}
+
+.label-with-tip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Grid de Switches de Ativação */
+.agent-toggles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.setting-toggle-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 20px;
+  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.setting-toggle-card:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: rgba(30, 41, 59, 0.75);
+}
+
+.setting-toggle-card input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: #6366f1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.setting-toggle-info strong {
+  font-size: 14px;
+  color: #f1f5f9;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.setting-toggle-info p {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Caixa de Provedores de IA */
+.llm-box {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+
+.llm-box-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.llm-box-title h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f8fafc;
+  margin: 0;
+}
+
+.llm-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.dot-openai {
+  background: #10a37f;
+  box-shadow: 0 0 8px #10a37f;
+}
+
+.dot-gemini {
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+}
+
+/* Tabela Semanal de Horários Espaçosa */
+.schedule-table-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px;
+}
+
+.schedule-table-header {
+  margin-bottom: 18px;
+}
+
+.schedule-table-header h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.schedule-table-header p {
+  margin: 4px 0 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.wide-schedule-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 8px;
+}
+
+.wide-schedule-table th {
+  padding: 12px 18px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  font-weight: 600;
+}
+
+.wide-schedule-table td {
+  padding: 14px 18px;
+  background: rgba(30, 41, 59, 0.45);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  vertical-align: middle;
+}
+
+.wide-schedule-table tr td:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 13.5px;
+}
+
+.wide-schedule-table tr td:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.wide-schedule-table .time-range-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wide-schedule-table .time-input {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: 'Fira Code', monospace;
+  border-radius: 8px;
+  background: #070d19;
+  border: 1px solid var(--border);
+  color: #fff;
+  width: 110px;
+}
+
+.wide-schedule-table .time-input:focus {
+  border-color: #6366f1;
+  outline: none;
+}
+
+.wide-schedule-table .time-sep {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Barra Inferior Fixada/Espaçosa de Ações */
+.editor-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 28px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.9) !important;
+  margin-top: 24px;
+}
+
+.editor-bottom-actions {
+  display: flex;
+  gap: 12px;
+}
+
 
 
