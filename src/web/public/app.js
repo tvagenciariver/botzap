@@ -507,14 +507,28 @@ async function checkStatus() {
     // Status Geral de Agentes (Infraestrutura)
     const agentsCountText = document.getElementById('status-agents-count');
     const agentsCountDot = document.getElementById('dot-agents-count');
+    const summaryPill = document.getElementById('status-card-summary-pill');
     if (data.agentsCount) {
       if (agentsCountText) {
         agentsCountText.textContent = `${data.agentsCount.active}/${data.agentsCount.total} Ativos`;
         agentsCountText.className = data.agentsCount.active > 0 ? 'status-val text-indigo' : 'status-val text-muted';
       }
+      if (summaryPill) {
+        summaryPill.textContent = `${data.agentsCount.active}/${data.agentsCount.total} Ativos`;
+      }
       if (agentsCountDot) {
         agentsCountDot.className = data.agentsCount.active > 0 ? 'status-dot online' : 'status-dot offline';
       }
+    }
+
+    // Versão da Aplicação
+    if (data.version) {
+      const vText = data.version.startsWith('v') ? data.version : `v${data.version}`;
+      const versionBadges = ['app-version-badge', 'footer-version-num', 'topbar-version-pill'];
+      versionBadges.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = vText;
+      });
     }
 
     // Atualiza status do agente em foco na barra lateral se já selecionado
@@ -6580,6 +6594,31 @@ document.getElementById('modal-company-picker-overlay')?.addEventListener('click
 document.getElementById('company-picker-search')?.addEventListener('input', (e) => {
   renderCompanyPickerCards(e.target.value);
 });
+
+// ============================================================================
+// Status Card Colapsável / Minimizado (Sidebar)
+// ============================================================================
+const STATUS_CARD_COLLAPSED_KEY = 'botzap_status_card_collapsed';
+const statusCardEl = document.getElementById('sidebar-status-card');
+
+function initStatusCardState() {
+  if (!statusCardEl) return;
+  const savedState = localStorage.getItem(STATUS_CARD_COLLAPSED_KEY);
+  // Padrão: colapsado (minimizado). Só expande se o usuário tiver explicitamente aberto.
+  if (savedState === 'expanded') {
+    statusCardEl.classList.remove('collapsed');
+  } else {
+    statusCardEl.classList.add('collapsed');
+  }
+}
+
+document.getElementById('btn-toggle-status-card')?.addEventListener('click', () => {
+  if (!statusCardEl) return;
+  const isNowCollapsed = statusCardEl.classList.toggle('collapsed');
+  localStorage.setItem(STATUS_CARD_COLLAPSED_KEY, isNowCollapsed ? 'collapsed' : 'expanded');
+});
+
+initStatusCardState();
 
 // Inicializa Drag & Drop de exames no carregamento
 setupExamDropzone();

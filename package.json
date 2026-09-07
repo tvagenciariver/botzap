@@ -1,6 +1,6 @@
 {
   "name": "botzap-orchestrator",
-  "version": "1.0.0",
+  "version": "2.5.0",
   "description": "Sistema Orquestrador de Agentes Inteligentes com WAHA API, Google Gemini Flash e Chatwoot",
   "main": "dist/index.js",
   "type": "module",

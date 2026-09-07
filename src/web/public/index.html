@@ -16,57 +16,73 @@
       <div class="brand">
         <div class="brand-icon">⚡</div>
         <div class="brand-text">
-          <h1>BotZap</h1>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h1>BotZap</h1>
+            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.5.0</span>
+          </div>
           <span>Orquestrador IA</span>
         </div>
       </div>
 
-      <!-- Status Bar: Infraestrutura Global + Agente em Foco -->
-      <div class="status-card">
-        <div class="status-group-title">
-          <span>🌐 Infraestrutura</span>
-        </div>
-        <div class="status-item">
-          <span class="status-dot online"></span>
-          <span class="status-label">Orquestrador:</span>
-          <span class="status-val text-green" id="status-orch">Online</span>
-        </div>
-        <div class="status-item">
-          <span class="status-dot" id="dot-waha"></span>
-          <span class="status-label">WAHA API:</span>
-          <span class="status-val" id="status-waha">Checando...</span>
-        </div>
-        <div class="status-item">
-          <span class="status-dot online" id="dot-agents-count"></span>
-          <span class="status-label">Agentes:</span>
-          <span class="status-val text-indigo" id="status-agents-count">Carregando...</span>
-        </div>
+      <!-- Status Bar: Infraestrutura Global + Agente em Foco (Minimizada por padrão) -->
+      <div class="status-card collapsed" id="sidebar-status-card">
+        <button type="button" class="status-card-header" id="btn-toggle-status-card" title="Clique para expandir/minimizar o status da infraestrutura">
+          <div class="status-header-left">
+            <span class="status-dot online" id="status-card-dot"></span>
+            <span class="status-card-header-title">🌐 Infraestrutura</span>
+          </div>
+          <div class="status-header-right">
+            <span class="status-card-pill" id="status-card-summary-pill">4/4 Ativos</span>
+            <span class="status-card-chevron" id="status-card-chevron">▼</span>
+          </div>
+        </button>
 
-        <div class="status-divider"></div>
+        <div class="status-card-body" id="status-card-body">
+          <div class="status-group-title">
+            <span>🌐 Infraestrutura</span>
+          </div>
+          <div class="status-item">
+            <span class="status-dot online"></span>
+            <span class="status-label">Orquestrador:</span>
+            <span class="status-val text-green" id="status-orch">Online</span>
+          </div>
+          <div class="status-item">
+            <span class="status-dot" id="dot-waha"></span>
+            <span class="status-label">WAHA API:</span>
+            <span class="status-val" id="status-waha">Checando...</span>
+          </div>
+          <div class="status-item">
+            <span class="status-dot online" id="dot-agents-count"></span>
+            <span class="status-label">Agentes:</span>
+            <span class="status-val text-indigo" id="status-agents-count">Carregando...</span>
+          </div>
 
-        <!-- Seção do Agente em Foco -->
-        <div class="status-group-title">
-          <span>🤖 Agente em Foco</span>
-        </div>
-        <div class="sidebar-agent-select-wrap">
-          <select id="sidebar-agent-select" class="sidebar-agent-select" title="Selecione o agente para inspecionar">
-            <option value="">Carregando agentes...</option>
-          </select>
-        </div>
-        <div class="status-item">
-          <span class="status-dot" id="dot-agent-ai"></span>
-          <span class="status-label">IA do Bot:</span>
-          <span class="status-val" id="status-agent-ai">Checando...</span>
-        </div>
-        <div class="status-item">
-          <span class="status-dot" id="dot-agent-schedule"></span>
-          <span class="status-label">Expediente:</span>
-          <span class="status-val" id="status-agent-schedule">Checando...</span>
-        </div>
-        <div class="status-item">
-          <span class="status-dot online" id="dot-agent-session"></span>
-          <span class="status-label">Sessão:</span>
-          <span class="status-val text-cyan" id="status-agent-session">--</span>
+          <div class="status-divider"></div>
+
+          <!-- Seção do Agente em Foco -->
+          <div class="status-group-title">
+            <span>🤖 Agente em Foco</span>
+          </div>
+          <div class="sidebar-agent-select-wrap">
+            <select id="sidebar-agent-select" class="sidebar-agent-select" title="Selecione o agente para inspecionar">
+              <option value="">Carregando agentes...</option>
+            </select>
+          </div>
+          <div class="status-item">
+            <span class="status-dot" id="dot-agent-ai"></span>
+            <span class="status-label">IA do Bot:</span>
+            <span class="status-val" id="status-agent-ai">Checando...</span>
+          </div>
+          <div class="status-item">
+            <span class="status-dot" id="dot-agent-schedule"></span>
+            <span class="status-label">Expediente:</span>
+            <span class="status-val" id="status-agent-schedule">Checando...</span>
+          </div>
+          <div class="status-item">
+            <span class="status-dot online" id="dot-agent-session"></span>
+            <span class="status-label">Sessão:</span>
+            <span class="status-val text-cyan" id="status-agent-session">--</span>
+          </div>
         </div>
       </div>
 
@@ -108,6 +124,10 @@
       </nav>
 
       <div class="sidebar-footer">
+        <div class="footer-version-row">
+          <span class="footer-version-tag">⚡ BotZap <strong id="footer-version-num">v2.5.0</strong></span>
+          <span class="footer-build-tag" title="Compilação de deploy">build 2026.09.07</span>
+        </div>
         <small>WAHA + Gemini / OpenAI GPT</small>
       </div>
     </aside>
@@ -142,6 +162,7 @@
         </div>
 
         <div class="topbar-actions">
+          <span class="topbar-version-pill" id="topbar-version-pill" title="Versão oficial instalada do BotZap">v2.5.0</span>
           <div class="user-badge-container" id="user-badge-container" style="display: none;">
             <span class="user-badge-name" id="user-badge-name">👤 admin</span>
             <button class="btn btn-outline btn-sm" id="btn-logout" title="Encerrar Sessão">🚪 Sair</button>
