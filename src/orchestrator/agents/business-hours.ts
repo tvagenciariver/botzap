@@ -21,8 +21,14 @@ export class BusinessHoursAgent implements IAgent {
     const bh = context.agent?.businessHours || loadBotConfig().businessHours;
     const status = checkBusinessHoursStatus(bh);
 
-    const outOfHoursMessage = bh?.outOfHoursMessage || 
+    let outOfHoursMessage = bh?.outOfHoursMessage || 
       'Olá! Nosso horário de atendimento encerrou. Deixe sua dúvida que responderemos assim que retornarmos! 🕒';
+
+    if (status.reason === 'holiday') {
+      outOfHoursMessage = status.holidayMessage ||
+        `Olá! Agradecemos sua mensagem. Informamos que hoje estamos com o atendimento suspenso devido ao feriado: *${status.holidayName || 'Feriado'}*. 🏖️✨\n\n` +
+        `Retornaremos nosso expediente no próximo dia útil. Deixe sua mensagem ou dúvida por aqui que responderemos com prioridade assim que retornarmos! 🕒🤝`;
+    }
 
     const canSendNotice = memoryStore.canSendOutOfHoursNotice(context.chatId, 2, context.agent?.id);
 

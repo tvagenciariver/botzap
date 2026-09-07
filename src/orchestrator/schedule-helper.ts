@@ -1,17 +1,20 @@
-import { BotConfig, BusinessHoursConfig } from '../config/index.js';
+import { BotConfig, BusinessHoursConfig, HolidayItem } from '../config/index.js';
 
 export type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
 export interface BusinessHoursStatus {
   isOpen: boolean;
-  reason?: 'disabled' | 'day_closed' | 'before_hours' | 'after_hours' | 'lunch';
+  reason?: 'disabled' | 'day_closed' | 'before_hours' | 'after_hours' | 'lunch' | 'holiday';
   dayKey: DayKey;
   currentDayName: string;
   currentTime: string;
+  currentDate?: string;
   timezone: string;
   openTime?: string;
   closeTime?: string;
   lunchEnd?: string;
+  holidayName?: string;
+  holidayMessage?: string;
 }
 
 const dayNameMap: Record<DayKey, string> = {
@@ -41,6 +44,64 @@ function parseTimeToMinutes(timeStr: string): number {
 }
 
 /**
+ * Normaliza qualquer formato de data (YYYY-MM-DD, DD/MM/YYYY, MM-DD, DD/MM) para comparação
+ */
+export function isHolidayDate(targetDateStr: string, holidays?: HolidayItem[]): HolidayItem | undefined {
+  if (!holidays || !Array.isArray(holidays) || holidays.length === 0) return undefined;
+  if (!targetDateStr) return undefined;
+
+  // Normaliza targetDateStr para YYYY-MM-DD e MM-DD
+  let cleanTarget = targetDateStr.trim();
+  let targetIso = '';
+  let targetMonthDay = '';
+
+  if (cleanTarget.includes('/')) {
+    const parts = cleanTarget.split('/');
+    if (parts.length === 2) {
+      const [d, m] = parts;
+      targetMonthDay = `${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    } else if (parts.length === 3) {
+      const [d, m, y] = parts;
+      targetIso = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      targetMonthDay = `${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+  } else if (cleanTarget.includes('-')) {
+    if (cleanTarget.length === 10) {
+      targetIso = cleanTarget;
+      targetMonthDay = cleanTarget.substring(5);
+    } else if (cleanTarget.length === 5) {
+      targetMonthDay = cleanTarget;
+    }
+  }
+
+  return holidays.find(h => {
+    if (h.enabled === false) return false;
+    const hDate = (h.date || '').trim();
+    if (!hDate) return false;
+
+    // Correspondência direta com YYYY-MM-DD ou MM-DD
+    if (targetIso && hDate === targetIso) return true;
+    if (targetMonthDay && hDate === targetMonthDay) return true;
+
+    // Se o feriado foi cadastrado como DD/MM ou DD/MM/YYYY
+    if (hDate.includes('/')) {
+      const p = hDate.split('/');
+      if (p.length === 2) {
+        const [d, m] = p;
+        const hMonthDay = `${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        if (targetMonthDay && targetMonthDay === hMonthDay) return true;
+      } else if (p.length === 3) {
+        const [d, m, y] = p;
+        const hIso = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        if (targetIso && targetIso === hIso) return true;
+      }
+    }
+
+    return false;
+  });
+}
+
+/**
  * Avalia se o momento atual (ou data informada) está dentro do horário comercial configurado
  */
 export function checkBusinessHoursStatus(
@@ -56,6 +117,9 @@ export function checkBusinessHoursStatus(
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     weekday: 'long',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false
@@ -63,11 +127,17 @@ export function checkBusinessHoursStatus(
 
   const parts = formatter.formatToParts(targetDate);
   let weekdayStr = '';
+  let yearStr = '2026';
+  let monthStr = '01';
+  let dayStr = '01';
   let hourStr = '00';
   let minuteStr = '00';
 
   for (const part of parts) {
     if (part.type === 'weekday') weekdayStr = part.value.toLowerCase();
+    if (part.type === 'year') yearStr = part.value;
+    if (part.type === 'month') monthStr = part.value;
+    if (part.type === 'day') dayStr = part.value;
     if (part.type === 'hour') hourStr = part.value;
     if (part.type === 'minute') minuteStr = part.value;
   }
@@ -78,6 +148,7 @@ export function checkBusinessHoursStatus(
   const dayKey: DayKey = englishWeekdayToDayKey[weekdayStr] || 'monday';
   const currentDayName = dayNameMap[dayKey] || weekdayStr;
   const currentTime = `${hourStr.padStart(2, '0')}:${minuteStr.padStart(2, '0')}`;
+  const currentDate = `${yearStr}-${monthStr.padStart(2, '0')}-${dayStr.padStart(2, '0')}`;
   const currentMinutes = parseInt(hourStr, 10) * 60 + parseInt(minuteStr, 10);
 
   // 1. Se a funcionalidade estiver desabilitada
@@ -88,13 +159,30 @@ export function checkBusinessHoursStatus(
       dayKey,
       currentDayName,
       currentTime,
+      currentDate,
       timezone
+    };
+  }
+
+  // 2. Verificação prioritária de Feriados Municipais / Nacionais / Indisponibilidades
+  const holiday = isHolidayDate(currentDate, bh.holidays);
+  if (holiday) {
+    return {
+      isOpen: false,
+      reason: 'holiday',
+      dayKey,
+      currentDayName,
+      currentTime,
+      currentDate,
+      timezone,
+      holidayName: holiday.name,
+      holidayMessage: holiday.outOfHoursMessage
     };
   }
 
   const daySchedule = bh.schedule?.[dayKey];
 
-  // 2. Se o dia específico estiver desativado (fechado)
+  // 3. Se o dia específico da semana estiver desativado (fechado)
   if (!daySchedule || !daySchedule.enabled) {
     return {
       isOpen: false,
@@ -102,6 +190,7 @@ export function checkBusinessHoursStatus(
       dayKey,
       currentDayName,
       currentTime,
+      currentDate,
       timezone
     };
   }
@@ -109,7 +198,7 @@ export function checkBusinessHoursStatus(
   const startMinutes = parseTimeToMinutes(daySchedule.start || '08:00');
   const endMinutes = parseTimeToMinutes(daySchedule.end || '18:00');
 
-  // 3. Antes do horário de abertura
+  // 4. Antes do horário de abertura
   if (currentMinutes < startMinutes) {
     return {
       isOpen: false,
@@ -117,12 +206,13 @@ export function checkBusinessHoursStatus(
       dayKey,
       currentDayName,
       currentTime,
+      currentDate,
       timezone,
       openTime: daySchedule.start
     };
   }
 
-  // 4. Depois do horário de fechamento
+  // 5. Depois do horário de fechamento
   if (currentMinutes >= endMinutes) {
     return {
       isOpen: false,
@@ -130,12 +220,13 @@ export function checkBusinessHoursStatus(
       dayKey,
       currentDayName,
       currentTime,
+      currentDate,
       timezone,
       closeTime: daySchedule.end
     };
   }
 
-  // 5. Intervalo de almoço
+  // 6. Intervalo de almoço
   if (daySchedule.hasLunch && daySchedule.lunchStart && daySchedule.lunchEnd) {
     const lunchStartMinutes = parseTimeToMinutes(daySchedule.lunchStart);
     const lunchEndMinutes = parseTimeToMinutes(daySchedule.lunchEnd);
@@ -147,18 +238,20 @@ export function checkBusinessHoursStatus(
         dayKey,
         currentDayName,
         currentTime,
+        currentDate,
         timezone,
         lunchEnd: daySchedule.lunchEnd
       };
     }
   }
 
-  // 6. Aberto dentro do expediente
+  // 7. Aberto dentro do expediente
   return {
     isOpen: true,
     dayKey,
     currentDayName,
     currentTime,
+    currentDate,
     timezone,
     openTime: daySchedule.start,
     closeTime: daySchedule.end

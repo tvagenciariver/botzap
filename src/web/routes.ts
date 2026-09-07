@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
 import { orchestrator } from '../orchestrator/engine.js';
-import { loadBotConfig, saveBotConfig, updateEnvFile, env } from '../config/index.js';
+import { loadBotConfig, saveBotConfig, updateEnvFile, env, defaultBrazilianHolidays, HolidayItem } from '../config/index.js';
+import { commandExecutor } from '../orchestrator/command-executor.js';
 import { agentManager } from '../config/agent-manager.js';
 import { AgentProfile } from '../config/agent-types.js';
 import { memoryStore } from '../gemini/memory.js';
@@ -312,6 +313,159 @@ apiRouter.post('/api/business-hours', requireAdmin, (req: Request, res: Response
     const updated = saveBotConfig({ businessHours });
     const status = checkBusinessHoursStatus(updated);
     res.json({ success: true, message: 'Horário comercial salvo com sucesso!', businessHours: updated.businessHours, status });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 3.3 Feriados & Indisponibilidades - Listar
+ */
+apiRouter.get('/api/business-hours/holidays', requireAuth, (req: Request, res: Response) => {
+  try {
+    const agentId = req.query.agentId as string;
+    const agent = (agentId && agentId !== '*') ? agentManager.getAgent(agentId) : null;
+    const holidays = agent?.businessHours?.holidays || loadBotConfig().businessHours?.holidays || [];
+    res.json({ success: true, holidays });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 3.4 Feriados & Indisponibilidades - Adicionar
+ */
+apiRouter.post('/api/business-hours/holidays', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { name, date, type, outOfHoursMessage, agentId } = req.body;
+    if (!name || !date) {
+      return res.status(400).json({ error: 'Nome e data do feriado são obrigatórios.' });
+    }
+
+    const newHoliday: HolidayItem = {
+      id: 'hol_' + Math.random().toString(36).substring(2, 9),
+      name: name.trim(),
+      date: date.trim(),
+      type: type || 'municipal',
+      enabled: true,
+      outOfHoursMessage: outOfHoursMessage ? outOfHoursMessage.trim() : undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    if (agentId && agentId !== '*') {
+      const agent = agentManager.getAgent(agentId);
+      if (agent) {
+        const list = Array.isArray(agent.businessHours?.holidays) ? [...agent.businessHours.holidays] : [];
+        list.push(newHoliday);
+        agentManager.updateAgent(agentId, {
+          businessHours: { ...agent.businessHours, holidays: list }
+        });
+      }
+    }
+
+    // Atualiza também na configuração global
+    const cfg = loadBotConfig();
+    const globalList = Array.isArray(cfg.businessHours?.holidays) ? [...cfg.businessHours.holidays] : [];
+    globalList.push(newHoliday);
+    saveBotConfig({ businessHours: { ...cfg.businessHours, holidays: globalList } });
+
+    res.status(201).json({ success: true, holiday: newHoliday, message: 'Feriado/Indisponibilidade cadastrado com sucesso!' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 3.5 Feriados & Indisponibilidades - Remover
+ */
+apiRouter.delete('/api/business-hours/holidays/:id', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const agentId = req.query.agentId as string;
+
+    if (agentId && agentId !== '*') {
+      const agent = agentManager.getAgent(agentId);
+      if (agent && Array.isArray(agent.businessHours?.holidays)) {
+        const filtered = agent.businessHours.holidays.filter(h => h.id !== id);
+        agentManager.updateAgent(agentId, {
+          businessHours: { ...agent.businessHours, holidays: filtered }
+        });
+      }
+    }
+
+    const cfg = loadBotConfig();
+    if (Array.isArray(cfg.businessHours?.holidays)) {
+      const filtered = cfg.businessHours.holidays.filter(h => h.id !== id);
+      saveBotConfig({ businessHours: { ...cfg.businessHours, holidays: filtered } });
+    }
+
+    res.json({ success: true, message: 'Feriado removido com sucesso!' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 3.6 Feriados & Indisponibilidades - Carregar Feriados Nacionais Padrão
+ */
+apiRouter.post('/api/business-hours/holidays/load-national', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { agentId } = req.body;
+    const cfg = loadBotConfig();
+    const currentList = Array.isArray(cfg.businessHours?.holidays) ? [...cfg.businessHours.holidays] : [];
+
+    let count = 0;
+    for (const def of defaultBrazilianHolidays) {
+      if (!currentList.some(h => h.date === def.date && h.name === def.name)) {
+        currentList.push({
+          id: 'hol_' + Math.random().toString(36).substring(2, 9),
+          ...def,
+          createdAt: new Date().toISOString()
+        });
+        count++;
+      }
+    }
+
+    saveBotConfig({ businessHours: { ...cfg.businessHours, holidays: currentList } });
+
+    if (agentId && agentId !== '*') {
+      const agent = agentManager.getAgent(agentId);
+      if (agent) {
+        const agentList = Array.isArray(agent.businessHours?.holidays) ? [...agent.businessHours.holidays] : [];
+        for (const def of defaultBrazilianHolidays) {
+          if (!agentList.some(h => h.date === def.date && h.name === def.name)) {
+            agentList.push({
+              id: 'hol_' + Math.random().toString(36).substring(2, 9),
+              ...def,
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+        agentManager.updateAgent(agentId, {
+          businessHours: { ...agent.businessHours, holidays: agentList }
+        });
+      }
+    }
+
+    res.json({ success: true, addedCount: count, message: `${count} feriados nacionais carregados com sucesso!` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 3.7 Console de Comandos do Administrador em Tempo Real
+ */
+apiRouter.post('/api/admin/command', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { command, agentId } = req.body;
+    if (!command || !command.trim()) {
+      return res.status(400).json({ error: 'Comando não fornecido.' });
+    }
+
+    const user = req.user || { name: 'Admin', username: 'admin', role: 'admin' };
+    const result = await commandExecutor.execute(command, user, agentId);
+    res.json({ success: result.success, result });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

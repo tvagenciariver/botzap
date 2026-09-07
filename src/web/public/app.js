@@ -425,6 +425,7 @@ function switchToTab(targetTab) {
     agents: 'Gerenciador de Agentes & Clientes (Multi-Agentes)',
     prompts: 'Configuração Geral & Agente Padrão',
     schedule: 'Horário Comercial & Mensagem de Ausência',
+    terminal: 'Console de Comandos em Tempo Real (Admin CLI)',
     chats: 'Conversas Ativas & Pausa do Bot',
     logs: 'Logs em Tempo Real do Orquestrador',
     integration: 'Integração WAHA API & Chatwoot',
@@ -441,7 +442,13 @@ function switchToTab(targetTab) {
     if (targetTab === 'chats') loadChats();
     if (targetTab === 'logs' && currentUser?.role === 'admin') loadLogs();
     if (targetTab === 'prompts' && currentUser?.role === 'admin') loadConfig();
-    if (targetTab === 'schedule' && currentUser?.role === 'admin') loadSchedule();
+    if (targetTab === 'schedule' && currentUser?.role === 'admin') {
+      loadSchedule();
+      loadHolidays();
+    }
+    if (targetTab === 'terminal' && currentUser?.role === 'admin') {
+      setTimeout(() => document.getElementById('terminal-input')?.focus(), 50);
+    }
     if (targetTab === 'integration' && currentUser?.role === 'admin') loadWahaConfig();
     if (targetTab === 'users' && currentUser?.role === 'admin') loadUsers();
   }
@@ -1015,6 +1022,371 @@ async function handleSaveSchedule() {
 
 document.getElementById('btn-save-schedule')?.addEventListener('click', handleSaveSchedule);
 document.getElementById('btn-save-schedule-top')?.addEventListener('click', handleSaveSchedule);
+
+// ==========================================
+// Gestão de Feriados & Recessos
+// ==========================================
+let holidaysState = [];
+
+async function loadHolidays() {
+  if (!getAuthToken()) return;
+  const tbody = document.getElementById('holidays-table-body');
+  if (!tbody) return;
+
+  try {
+    const res = await fetchWithAuth('/api/business-hours/holidays');
+    const data = await res.json();
+    holidaysState = data.holidays || [];
+    renderHolidaysTable(holidaysState);
+  } catch (err) {
+    console.error('Erro ao carregar feriados:', err);
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Erro ao carregar feriados.</td></tr>';
+  }
+}
+
+function renderHolidaysTable(holidays) {
+  const tbody = document.getElementById('holidays-table-body');
+  if (!tbody) return;
+
+  if (!holidays || holidays.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="text-center text-muted" style="padding: 24px;">
+          Nenhum feriado cadastrado ainda. Clique em "<strong>Adicionar Feriado</strong>" ou "<strong>Carregar Feriados Nacionais</strong>" para começar.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  // Ordena por data
+  const sorted = [...holidays].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  tbody.innerHTML = sorted.map(h => {
+    let typeBadge = '<span class="badge-municipal">🏙️ Municipal</span>';
+    if (h.type === 'national') {
+      typeBadge = '<span class="badge-national">🇧🇷 Nacional</span>';
+    } else if (h.type === 'recess') {
+      typeBadge = '<span class="badge-recess">🏖️ Recesso</span>';
+    }
+
+    // Formata data
+    let displayDate = h.date;
+    if (h.date && h.date.length === 10 && h.date.includes('-')) {
+      const [y, m, d] = h.date.split('-');
+      displayDate = `${d}/${m}/${y}`;
+    } else if (h.date && h.date.length === 5 && h.date.includes('-')) {
+      const [m, d] = h.date.split('-');
+      displayDate = `${d}/${m} (Anual)`;
+    }
+
+    const isEnabled = h.enabled !== false;
+    const statusBadge = isEnabled
+      ? '<span class="badge badge-emerald">✅ Ativo</span>'
+      : '<span class="badge badge-secondary">⏸️ Inativo</span>';
+
+    const customMsg = h.outOfHoursMessage ? escapeHtml(h.outOfHoursMessage) : '<span class="text-muted">Mensagem Padrão</span>';
+
+    return `
+      <tr>
+        <td>${statusBadge}</td>
+        <td><strong>${displayDate}</strong></td>
+        <td><strong>${escapeHtml(h.name)}</strong></td>
+        <td>${typeBadge}</td>
+        <td style="font-size: 12px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(h.outOfHoursMessage || '')}">${customMsg}</td>
+        <td style="text-align: right;">
+          <button type="button" class="btn btn-sm btn-outline text-danger" onclick="deleteHoliday('${h.id}', '${escapeHtml(h.name)}')" title="Excluir feriado">🗑️</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openHolidayModal(holiday = null) {
+  const overlay = document.getElementById('modal-holiday-overlay');
+  if (!overlay) return;
+
+  const idInput = document.getElementById('modal-holiday-id');
+  const nameInput = document.getElementById('modal-holiday-name');
+  const dateInput = document.getElementById('modal-holiday-date');
+  const typeSelect = document.getElementById('modal-holiday-type');
+  const msgInput = document.getElementById('modal-holiday-message');
+  const enabledInput = document.getElementById('modal-holiday-enabled');
+  const titleEl = document.getElementById('modal-holiday-title');
+
+  if (holiday) {
+    if (titleEl) titleEl.textContent = 'Editar Feriado / Recesso';
+    if (idInput) idInput.value = holiday.id || '';
+    if (nameInput) nameInput.value = holiday.name || '';
+    if (dateInput) dateInput.value = holiday.date || '';
+    if (typeSelect) typeSelect.value = holiday.type || 'municipal';
+    if (msgInput) msgInput.value = holiday.outOfHoursMessage || '';
+    if (enabledInput) enabledInput.checked = holiday.enabled !== false;
+  } else {
+    if (titleEl) titleEl.textContent = 'Adicionar Feriado / Recesso';
+    if (idInput) idInput.value = '';
+    if (nameInput) nameInput.value = '';
+    if (dateInput) dateInput.value = '';
+    if (typeSelect) typeSelect.value = 'municipal';
+    if (msgInput) msgInput.value = '';
+    if (enabledInput) enabledInput.checked = true;
+  }
+
+  overlay.style.display = 'flex';
+  nameInput?.focus();
+}
+
+function closeHolidayModal() {
+  const overlay = document.getElementById('modal-holiday-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+async function saveHolidaySubmit(e) {
+  e.preventDefault();
+  const id = document.getElementById('modal-holiday-id')?.value.trim();
+  const name = document.getElementById('modal-holiday-name')?.value.trim();
+  const date = document.getElementById('modal-holiday-date')?.value.trim();
+  const type = document.getElementById('modal-holiday-type')?.value || 'municipal';
+  const outOfHoursMessage = document.getElementById('modal-holiday-message')?.value.trim();
+  const enabled = document.getElementById('modal-holiday-enabled')?.checked ?? true;
+
+  if (!name || !date) {
+    showToast('Informe o nome e a data do feriado.', 'warning');
+    return;
+  }
+
+  const payload = { id: id || undefined, name, date, type, outOfHoursMessage, enabled };
+
+  try {
+    const res = await fetchWithAuth('/api/business-hours/holidays', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Feriado "${name}" salvo com sucesso!`, 'success');
+      closeHolidayModal();
+      loadHolidays();
+    } else {
+      showToast(`Erro ao salvar: ${data.error}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Erro ao salvar feriado: ${err.message}`, 'error');
+  }
+}
+
+window.deleteHoliday = async function(id, name) {
+  if (!confirm(`Deseja realmente remover o feriado "${name}"?`)) return;
+
+  try {
+    const res = await fetchWithAuth(`/api/business-hours/holidays/${id}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Feriado "${name}" removido com sucesso.`, 'success');
+      loadHolidays();
+    } else {
+      showToast(`Erro ao remover: ${data.error}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Erro ao excluir: ${err.message}`, 'error');
+  }
+};
+
+async function loadNationalHolidays() {
+  if (!confirm('Deseja carregar os 9 feriados nacionais oficiais do Brasil?\nFeriados já cadastrados com a mesma data serão preservados.')) {
+    return;
+  }
+
+  try {
+    const res = await fetchWithAuth('/api/business-hours/holidays/load-national', {
+      method: 'POST'
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Feriados nacionais carregados! (${data.count} cadastrados)`, 'success');
+      loadHolidays();
+    } else {
+      showToast(`Erro ao carregar: ${data.error}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Erro: ${err.message}`, 'error');
+  }
+}
+
+// Event Listeners de Feriados
+document.getElementById('btn-add-holiday')?.addEventListener('click', () => openHolidayModal());
+document.getElementById('btn-load-national-holidays')?.addEventListener('click', loadNationalHolidays);
+document.getElementById('btn-close-holiday-modal')?.addEventListener('click', closeHolidayModal);
+document.getElementById('btn-cancel-holiday')?.addEventListener('click', closeHolidayModal);
+document.getElementById('modal-holiday-form')?.addEventListener('submit', saveHolidaySubmit);
+document.getElementById('modal-holiday-overlay')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modal-holiday-overlay') closeHolidayModal();
+});
+
+// ==========================================
+// Terminal & Console de Comandos em Tempo Real (Admin CLI)
+// ==========================================
+let terminalHistory = [];
+let terminalHistoryIndex = -1;
+
+function appendTerminalLine(text, type = 'system') {
+  const screen = document.getElementById('terminal-screen');
+  if (!screen) return;
+
+  const line = document.createElement('div');
+  line.className = `terminal-line ${type}`;
+  line.innerHTML = formatWhatsAppText(text);
+  screen.appendChild(line);
+
+  // Auto-scroll para o final
+  screen.scrollTop = screen.scrollHeight;
+}
+
+async function executeAdminCommand(cmdText, fromTopbar = false) {
+  const cleanCmd = (cmdText || '').trim();
+  if (!cleanCmd) return;
+
+  // Adiciona ao histórico
+  terminalHistory.push(cleanCmd);
+  terminalHistoryIndex = terminalHistory.length;
+
+  // Eco do comando no terminal
+  appendTerminalLine(`botzap> ${cleanCmd}`, 'cmd');
+
+  try {
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const res = await fetchWithAuth('/api/admin/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: cleanCmd,
+        agentId: effectiveCompany
+      })
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      appendTerminalLine(data.message, 'success');
+
+      if (fromTopbar) {
+        showToast(data.message.split('\n')[0], 'success');
+      }
+
+      // Se o comando alterou dados de feriados, recarrega feriados
+      if (cleanCmd.toLowerCase().includes('feriado')) {
+        loadHolidays();
+      }
+      // Se alterou conversas ou pausa, recarrega chats
+      if (cleanCmd.toLowerCase().includes('pausar') || cleanCmd.toLowerCase().includes('despausar') || cleanCmd.toLowerCase().includes('memoria')) {
+        loadChats();
+      }
+      // Se alterou configuração de empresa ou horário
+      if (cleanCmd.toLowerCase().includes('horario') || cleanCmd.toLowerCase().includes('empresa') || cleanCmd.toLowerCase().includes('modelo') || cleanCmd.toLowerCase().includes('temperatura')) {
+        checkStatus();
+      }
+    } else {
+      const errMsg = data.error || data.message || 'Erro ao executar comando.';
+      appendTerminalLine(`❌ ${errMsg}`, 'error');
+      if (fromTopbar) {
+        showToast(errMsg, 'error');
+      }
+    }
+  } catch (err) {
+    appendTerminalLine(`❌ Erro de comunicação: ${err.message}`, 'error');
+    if (fromTopbar) {
+      showToast(`Erro: ${err.message}`, 'error');
+    }
+  }
+}
+
+// Submissão do Terminal
+document.getElementById('terminal-form')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = document.getElementById('terminal-input');
+  if (!input) return;
+  const cmd = input.value;
+  input.value = '';
+  executeAdminCommand(cmd, false);
+});
+
+// Navegação de histórico com setas Up/Down no terminal
+document.getElementById('terminal-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (terminalHistory.length > 0 && terminalHistoryIndex > 0) {
+      terminalHistoryIndex--;
+      e.target.value = terminalHistory[terminalHistoryIndex];
+    }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (terminalHistoryIndex < terminalHistory.length - 1) {
+      terminalHistoryIndex++;
+      e.target.value = terminalHistory[terminalHistoryIndex];
+    } else {
+      terminalHistoryIndex = terminalHistory.length;
+      e.target.value = '';
+    }
+  }
+});
+
+// Botão Limpar Terminal
+document.getElementById('btn-clear-terminal')?.addEventListener('click', () => {
+  const screen = document.getElementById('terminal-screen');
+  if (screen) {
+    screen.innerHTML = `
+      <div class="terminal-line system">BotZap Admin Console [Versão 2.4.0-Production]</div>
+      <div class="terminal-line system">Tela limpa. Digite <strong>ajuda</strong> para ver os comandos disponíveis.</div>
+      <div class="terminal-line system">--------------------------------------------------------------------------------</div>
+    `;
+  }
+  document.getElementById('terminal-input')?.focus();
+});
+
+// Botão Ajuda no Terminal
+document.getElementById('btn-help-terminal')?.addEventListener('click', () => {
+  executeAdminCommand('ajuda', false);
+});
+
+// Chips de Ação Rápida
+document.querySelectorAll('.terminal-chips-bar .btn-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const cmd = chip.getAttribute('data-cmd');
+    if (cmd) {
+      const input = document.getElementById('terminal-input');
+      if (input) {
+        input.value = cmd;
+        input.focus();
+      }
+      executeAdminCommand(cmd, false);
+    }
+  });
+});
+
+// Topbar Quick Command Execution
+document.getElementById('btn-topbar-run-cmd')?.addEventListener('click', () => {
+  const input = document.getElementById('topbar-command-input');
+  if (!input) return;
+  const cmd = input.value.trim();
+  if (cmd) {
+    input.value = '';
+    executeAdminCommand(cmd, true);
+  }
+});
+
+document.getElementById('topbar-command-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const cmd = e.target.value.trim();
+    if (cmd) {
+      e.target.value = '';
+      executeAdminCommand(cmd, true);
+    }
+  }
+});
 
 // 4. Conversas Ativas & Pausa
 async function loadChats() {

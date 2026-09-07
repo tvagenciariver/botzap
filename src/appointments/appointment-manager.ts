@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { Specialist, ServiceItem, Appointment, AppointmentStatus } from './types.js';
 import { matchPhoneOrChatId } from './phone-utils.js';
+import { isHolidayDate } from '../orchestrator/schedule-helper.js';
+import { agentManager } from '../config/agent-manager.js';
+import { loadBotConfig } from '../config/index.js';
 
 export class AppointmentManager {
   private appointmentsFile: string;
@@ -388,6 +391,13 @@ export class AppointmentManager {
     const specialist = this.getSpecialist(specialistId);
     if (!specialist || !specialist.active) {
       return [];
+    }
+
+    // Verifica se a data é feriado municipal, nacional ou indisponibilidade configurada
+    const agent = agentManager.getAgent(specialist.agentId) || agentManager.getDefaultAgent();
+    const bh = agent?.businessHours || loadBotConfig().businessHours;
+    if (isHolidayDate(dateStr, bh?.holidays)) {
+      return []; // Não há vagas em feriados
     }
 
     // Converte YYYY-MM-DD para dia da semana

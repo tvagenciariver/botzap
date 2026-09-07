@@ -87,10 +87,27 @@ export class AgentOrchestrator {
       }
     }
 
+    // REGRA ESTRITA: Nossos bots e assistentes NUNCA interagem em grupos do WhatsApp (@g.us).
+    // Apenas conversas diretas e individuais com clientes/pacientes (@c.us / @s.whatsapp.net) são atendidas.
+    const isGroupMessage =
+      (from && from.includes('@g.us')) ||
+      (to && to.includes('@g.us')) ||
+      ((payload as any).participant !== undefined && (payload as any).participant !== null) ||
+      (payload._data?.id?.remote && payload._data.id.remote.includes('@g.us')) ||
+      (payload._data?.from && payload._data.from.includes('@g.us'));
+
+    if (isGroupMessage) {
+      return;
+    }
+
     // Determina o chatId remoto do cliente
     let chatId = from;
     if (fromMe) {
       chatId = to || payload._data?.to || payload._data?.id?.remote || from;
+    }
+
+    if (chatId && chatId.includes('@g.us')) {
+      return;
     }
 
     // Remove sufixo de dispositivo multi-device (:1, :0, etc) antes de @

@@ -13,6 +13,28 @@ export interface DaySchedule {
   lunchEnd?: string;
 }
 
+export interface HolidayItem {
+  id: string;
+  name: string; // Ex: "Feriado Municipal - Padroeiro de Petrolina"
+  date: string; // "YYYY-MM-DD" para data específica ou "MM-DD" para recorrente anual (ex: "12-25")
+  type?: 'municipal' | 'national' | 'state' | 'custom';
+  enabled?: boolean;
+  outOfHoursMessage?: string; // Mensagem específica personalizada para este feriado
+  createdAt?: string;
+}
+
+export const defaultBrazilianHolidays: Omit<HolidayItem, 'id'>[] = [
+  { name: 'Confraternização Universal (Ano Novo)', date: '01-01', type: 'national', enabled: true },
+  { name: 'Tiradentes', date: '04-21', type: 'national', enabled: true },
+  { name: 'Dia do Trabalho', date: '05-01', type: 'national', enabled: true },
+  { name: 'Independência do Brasil', date: '09-07', type: 'national', enabled: true },
+  { name: 'Nossa Senhora Aparecida', date: '10-12', type: 'national', enabled: true },
+  { name: 'Finados', date: '11-02', type: 'national', enabled: true },
+  { name: 'Proclamação da República', date: '11-15', type: 'national', enabled: true },
+  { name: 'Dia Nacional de Zumbi e da Consciência Negra', date: '11-20', type: 'national', enabled: true },
+  { name: 'Natal', date: '12-25', type: 'national', enabled: true }
+];
+
 export interface BusinessHoursConfig {
   enabled: boolean;
   timezone: string;
@@ -26,6 +48,7 @@ export interface BusinessHoursConfig {
     saturday: DaySchedule;
     sunday: DaySchedule;
   };
+  holidays?: HolidayItem[];
 }
 
 export const defaultBusinessHours: BusinessHoursConfig = {
@@ -40,7 +63,8 @@ export const defaultBusinessHours: BusinessHoursConfig = {
     friday: { enabled: true, start: '08:00', end: '18:00', hasLunch: true, lunchStart: '12:00', lunchEnd: '13:00' },
     saturday: { enabled: true, start: '08:00', end: '12:00', hasLunch: false, lunchStart: '12:00', lunchEnd: '13:00' },
     sunday: { enabled: false, start: '08:00', end: '12:00', hasLunch: false, lunchStart: '12:00', lunchEnd: '13:00' }
-  }
+  },
+  holidays: []
 };
 
 export interface BotConfig {
@@ -127,7 +151,8 @@ export function loadBotConfig(): BotConfig {
       schedule: {
         ...defaultBusinessHours.schedule,
         ...(stored.businessHours?.schedule || {})
-      }
+      },
+      holidays: Array.isArray(stored.businessHours?.holidays) ? stored.businessHours.holidays : []
     },
     geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
     openaiApiKey: stored.openaiApiKey || process.env.OPENAI_API_KEY || '',
@@ -157,7 +182,10 @@ export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
       schedule: {
         ...current.businessHours.schedule,
         ...(newConfig.businessHours.schedule || {})
-      }
+      },
+      holidays: Array.isArray(newConfig.businessHours.holidays)
+        ? newConfig.businessHours.holidays
+        : (current.businessHours.holidays || [])
     };
   }
 

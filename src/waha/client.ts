@@ -77,6 +77,11 @@ export class WahaClient {
    * Se falhar o envio para 13 dígitos (com 9), tenta automaticamente para 12 dígitos (sem 9), e vice-versa.
    */
   async sendText(chatId: string, text: string, options?: Partial<WahaSendTextRequest>): Promise<any> {
+    if (chatId.includes('@g.us')) {
+      console.warn(`[WAHA] Bloqueado: Nossos bots não interagem em grupos do WhatsApp (@g.us): ${chatId}`);
+      return null;
+    }
+
     const rawSession = options?.session || this.defaultSession;
     const session = (rawSession && rawSession !== '*') ? rawSession : (this.defaultSession || 'default');
 
@@ -137,6 +142,11 @@ export class WahaClient {
     caption?: string,
     options?: { session?: string }
   ): Promise<any> {
+    if (chatId.includes('@g.us')) {
+      console.warn(`[WAHA] Bloqueado: Nossos bots não interagem em grupos do WhatsApp (@g.us): ${chatId}`);
+      return null;
+    }
+
     const rawSession = options?.session || this.defaultSession;
     const session = (rawSession && rawSession !== '*') ? rawSession : (this.defaultSession || 'default');
 
