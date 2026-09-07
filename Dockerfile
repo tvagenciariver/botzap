@@ -17,7 +17,8 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 COPY src/web/public ./dist/web/public
-COPY data ./data
+COPY src/web/public ./src/web/public
+RUN mkdir -p /app/data /app/data/uploads
 
 EXPOSE 3001
 

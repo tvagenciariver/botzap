@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node -e \"import('fs').then(fs => fs.cpSync('src/web/public', 'dist/web/public', {recursive: true}))\"",
     "start": "node dist/index.js",
     "test": "tsx test/simulator.ts"
   },
