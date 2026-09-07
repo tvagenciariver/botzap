@@ -2068,13 +2068,14 @@ function updateSidebarAgentStatus(agentId) {
     if (dotSched) dotSched.className = 'status-dot online';
   } else if (bh && !bh.isOpen) {
     let reasonText = 'Fechado 🔴';
-    if (bh.reason === 'lunch') reasonText = 'Almoço 🍽️';
+    if (bh.reason === 'holiday') reasonText = `Feriado 🏖️ ${bh.holidayName ? `(${bh.holidayName})` : ''}`;
+    else if (bh.reason === 'lunch') reasonText = 'Almoço 🍽️';
     else if (bh.reason === 'day_closed') reasonText = 'Fechado hoje 🔴';
     else reasonText = `Fechado 🔴 (${bh.currentTime})`;
 
     if (textSched) {
       textSched.textContent = reasonText;
-      textSched.className = bh.reason === 'lunch' ? 'status-val text-orange' : 'status-val text-red';
+      textSched.className = (bh.reason === 'lunch' || bh.reason === 'holiday') ? 'status-val text-orange' : 'status-val text-red';
     }
     if (dotSched) dotSched.className = 'status-dot offline';
   }
