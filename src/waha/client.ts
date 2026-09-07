@@ -371,6 +371,83 @@ export class WahaClient {
       }
     }
   }
+
+  /**
+   * Baixa arquivo de mídia (áudio, voz/PTT, imagem, documento) da WAHA ou de URL externa.
+   * Trata URLs relativas, absolutas, autenticação da WAHA e fallback para download sob demanda.
+   */
+  async downloadMedia(
+    mediaUrl?: string | null,
+    payload?: any,
+    session?: string
+  ): Promise<{ buffer: Buffer; mimetype: string } | null> {
+    let targetUrl = mediaUrl || payload?.media?.url;
+    let expectedMime = payload?.media?.mimetype || payload?._data?.mimetype || 'audio/ogg';
+
+    // Se a URL não veio diretamente no webhook, tenta solicitar o download sob demanda na WAHA
+    if (!targetUrl && payload?.id && (payload.from || payload.to)) {
+      const chatId = payload.from || payload.to;
+      const sessionName = session || this.defaultSession;
+      try {
+        const res = await this.client.get(`/api/${sessionName}/chats/${chatId}/messages/${payload.id}`, {
+          params: { downloadMedia: true }
+        });
+        if (res.data?.media?.url) {
+          targetUrl = res.data.media.url;
+          expectedMime = res.data.media.mimetype || expectedMime;
+        }
+      } catch (err: any) {
+        console.warn(`[WAHA] Tentativa de baixar mensagem com mídia sob demanda falhou (${payload.id}):`, err.message);
+      }
+    }
+
+    if (!targetUrl) {
+      console.warn('[WAHA] Nenhuma URL de mídia disponível para download.');
+      return null;
+    }
+
+    try {
+      let requestPath = targetUrl;
+
+      // Se for uma URL absoluta
+      if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) {
+        try {
+          const parsed = new URL(targetUrl);
+          // Se o path for da WAHA (/api/files/... ou /api/...) usamos o cliente configurado da WAHA
+          if (parsed.pathname.startsWith('/api/files/') || parsed.pathname.startsWith('/api/')) {
+            requestPath = parsed.pathname + parsed.search;
+          } else {
+            // URL externa arbitrária
+            const externalRes = await axios.get(targetUrl, {
+              responseType: 'arraybuffer',
+              timeout: 20000
+            });
+            const buffer = Buffer.from(externalRes.data);
+            const mimetype = externalRes.headers['content-type'] || expectedMime;
+            return { buffer, mimetype };
+          }
+        } catch {
+          requestPath = targetUrl;
+        }
+      }
+
+      // Requisição direta via axios client da WAHA (com headers X-Api-Key)
+      const res = await this.client.get(requestPath, {
+        responseType: 'arraybuffer',
+        timeout: 25000
+      });
+
+      const buffer = Buffer.from(res.data);
+      const mimetype = (res.headers['content-type'] && res.headers['content-type'] !== 'application/octet-stream')
+        ? res.headers['content-type']
+        : expectedMime;
+
+      return { buffer, mimetype };
+    } catch (err: any) {
+      console.error('[WAHA] Erro ao baixar arquivo de mídia:', this.extractErrorMessage(err));
+      return null;
+    }
+  }
 }
 
 export const wahaClient = new WahaClient();

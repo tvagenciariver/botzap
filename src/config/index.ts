@@ -80,6 +80,7 @@ export interface BotConfig {
   debounceSeconds: number;
   enableTypingSimulation: boolean;
   enableSendSeen: boolean;
+  enableAudioTranscription: boolean;
   pauseDurationHours: number;
   pauseDurationMinutes: number;
   llmProvider: 'gemini' | 'openai';
@@ -142,6 +143,7 @@ export function loadBotConfig(): BotConfig {
     debounceSeconds: stored.debounceSeconds ?? 2.5,
     enableTypingSimulation: stored.enableTypingSimulation ?? true,
     enableSendSeen: stored.enableSendSeen ?? true,
+    enableAudioTranscription: stored.enableAudioTranscription ?? false,
     pauseDurationHours: hours,
     pauseDurationMinutes: Math.round(hours * 60),
     llmProvider: stored.llmProvider || (process.env.LLM_PROVIDER as 'gemini' | 'openai') || 'gemini',
@@ -216,6 +218,7 @@ export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
   if (updated.webhookPublicUrl) env.webhookPublicUrl = updated.webhookPublicUrl;
   if (updated.adminUser) env.adminUser = updated.adminUser;
   if (updated.adminPassword) env.adminPassword = updated.adminPassword;
+  if (updated.enableAudioTranscription !== undefined) env.enableAudioTranscription = updated.enableAudioTranscription;
 
   return updated;
 }
@@ -235,5 +238,6 @@ export const env = {
   openaiModel: process.env.OPENAI_MODEL || initialConfig.openaiModel || 'gpt-4o-mini',
   webhookPublicUrl: (process.env.WEBHOOK_PUBLIC_URL || initialConfig.webhookPublicUrl || 'http://localhost:3001').replace(/\/$/, ''),
   adminUser: process.env.ADMIN_USER || initialConfig.adminUser || 'admin',
-  adminPassword: process.env.ADMIN_PASSWORD || initialConfig.adminPassword || 'File@152341'
+  adminPassword: process.env.ADMIN_PASSWORD || initialConfig.adminPassword || 'File@152341',
+  enableAudioTranscription: initialConfig.enableAudioTranscription ?? false
 };

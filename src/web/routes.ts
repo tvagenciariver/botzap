@@ -254,7 +254,7 @@ apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) =
 
   res.json({
     orchestrator: 'online',
-    version: '2.5.0',
+    version: '2.6.0',
     buildDate: '2026.09.07',
     timestamp: new Date().toISOString(),
     agentsCount: {

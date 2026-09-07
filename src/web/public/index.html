@@ -18,7 +18,7 @@
         <div class="brand-text">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h1>BotZap</h1>
-            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.5.0</span>
+            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.6.0</span>
           </div>
           <span>Orquestrador IA</span>
         </div>
@@ -125,7 +125,7 @@
 
       <div class="sidebar-footer">
         <div class="footer-version-row">
-          <span class="footer-version-tag">⚡ BotZap <strong id="footer-version-num">v2.5.0</strong></span>
+          <span class="footer-version-tag">⚡ BotZap <strong id="footer-version-num">v2.6.0</strong></span>
           <span class="footer-build-tag" title="Compilação de deploy">build 2026.09.07</span>
         </div>
         <small>WAHA + Gemini / OpenAI GPT</small>
@@ -162,7 +162,7 @@
         </div>
 
         <div class="topbar-actions">
-          <span class="topbar-version-pill" id="topbar-version-pill" title="Versão oficial instalada do BotZap">v2.5.0</span>
+          <span class="topbar-version-pill" id="topbar-version-pill" title="Versão oficial instalada do BotZap">v2.6.0</span>
           <div class="user-badge-container" id="user-badge-container" style="display: none;">
             <span class="user-badge-name" id="user-badge-name">👤 admin</span>
             <button class="btn btn-outline btn-sm" id="btn-logout" title="Encerrar Sessão">🚪 Sair</button>
@@ -846,7 +846,7 @@
                         <small class="form-hint">Espera o cliente terminar de mandar frases picadas antes de processar.</small>
                       </div>
                       <div class="form-group col-4">
-                        <label>Efeitos Humanizados no WhatsApp</label>
+                        <label>Humanização & Áudios</label>
                         <div class="checkbox-group" style="padding-top: 8px; display: flex; flex-direction: column; gap: 10px;">
                           <label class="switch-row">
                             <input type="checkbox" id="modal-agent-typing" checked>
@@ -855,6 +855,10 @@
                           <label class="switch-row">
                             <input type="checkbox" id="modal-agent-seen" checked>
                             <span>Marcar Mensagem como "Lida" (Check Azul)</span>
+                          </label>
+                          <label class="switch-row" title="Converte automaticamente áudios e mensagens de voz do WhatsApp em texto para este bot responder com IA">
+                            <input type="checkbox" id="modal-agent-transcribe-audio">
+                            <span>🎙️ Transcrever Áudios (Voz / PTT) <span class="badge-tag-opt">Opcional</span></span>
                           </label>
                         </div>
                       </div>
@@ -1079,10 +1083,11 @@
                   <small class="form-hint">Tempo em horas que o bot aguarda antes de voltar a responder após um humano intervir (Padrão: 6h).</small>
                 </div>
                 <div class="form-group col-4">
-                  <label>Humanização</label>
+                  <label>Humanização & Áudios</label>
                   <div class="checkbox-group">
                     <label><input type="checkbox" id="cfg-typing" name="enableTypingSimulation"> Simular Digitando...</label>
                     <label><input type="checkbox" id="cfg-seen" name="enableSendSeen"> Enviar Visto (Check Azul)</label>
+                    <label title="Converte áudios e mensagens de voz recebidas no WhatsApp em texto para os bots responderem via IA"><input type="checkbox" id="cfg-transcribe-audio" name="enableAudioTranscription"> 🎙️ Transcrever Áudios <span class="badge-tag-opt">Opcional</span></label>
                   </div>
                 </div>
               </div>

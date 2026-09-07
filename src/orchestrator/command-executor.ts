@@ -77,6 +77,7 @@ export class CommandExecutor {
           `**💬 Mensagens Diretas:**\n` +
           `• \`enviar <telefone>: <mensagem>\`\n\n` +
           `**📊 Diagnóstico Geral:**\n` +
+          `• \`ativar transcricao\` / \`desativar transcricao\` (Liga/desliga a transcrição de áudios via IA)\n` +
           `• \`status\` (Exibe saúde do bot, sessões e expediente)`,
         timestamp
       };
@@ -474,7 +475,51 @@ export class CommandExecutor {
     }
 
     // -----------------------------------------------------------------------
-    // 7. STATUS & DIAGNÓSTICO DO SISTEMA
+    // 7. TRANSCRIÇÃO DE ÁUDIOS (VOZ / PTT)
+    // -----------------------------------------------------------------------
+
+    if (
+      lower === 'ativar transcricao' ||
+      lower === 'ligar transcricao' ||
+      lower === 'ativar audio' ||
+      lower === 'ligar audio' ||
+      lower === 'transcricao on'
+    ) {
+      agentManager.updateAgent(agent.id, { enableAudioTranscription: true });
+      saveBotConfig({ enableAudioTranscription: true });
+
+      return {
+        success: true,
+        command: cmd,
+        action: 'transcription_enabled',
+        message: `🎙️ Transcrição automática de áudios **ATIVADA** com sucesso para o agente **${agent.name}** (${agent.companyName})! As mensagens de voz do WhatsApp serão transcritas via IA.`,
+        data: { enableAudioTranscription: true },
+        timestamp
+      };
+    }
+
+    if (
+      lower === 'desativar transcricao' ||
+      lower === 'desligar transcricao' ||
+      lower === 'desativar audio' ||
+      lower === 'desligar audio' ||
+      lower === 'transcricao off'
+    ) {
+      agentManager.updateAgent(agent.id, { enableAudioTranscription: false });
+      saveBotConfig({ enableAudioTranscription: false });
+
+      return {
+        success: true,
+        command: cmd,
+        action: 'transcription_disabled',
+        message: `🎙️ Transcrição automática de áudios **DESATIVADA** para o agente **${agent.name}** (${agent.companyName}).`,
+        data: { enableAudioTranscription: false },
+        timestamp
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    // 8. STATUS & DIAGNÓSTICO DO SISTEMA
     // -----------------------------------------------------------------------
 
     if (lower === 'status' || lower === 'info' || lower === 'diagnostico') {
@@ -488,6 +533,8 @@ export class CommandExecutor {
         ? `🔴 Fechado (${bhStatus.reason === 'holiday' ? `Feriado: ${bhStatus.holidayName}` : bhStatus.reason})`
         : `🟢 Aberto (${bhStatus.currentTime} - ${bhStatus.currentDayName})`;
 
+      const audioLabel = agent.enableAudioTranscription ? '🎙️ Ativada (IA)' : '⚪ Desativada';
+
       return {
         success: true,
         command: cmd,
@@ -496,6 +543,7 @@ export class CommandExecutor {
           `📊 **Status Operacional do BotZap**\n\n` +
           `• **Empresa Ativa:** ${agent.companyName} (${agent.name})\n` +
           `• **IA:** ${agent.llmProvider.toUpperCase()} (${agent.llmProvider === 'openai' ? agent.openaiModel : agent.model})\n` +
+          `• **Transcrição de Áudio (Voz):** ${audioLabel}\n` +
           `• **Sessão WAHA:** \`${agent.wahaSession || 'default'}\`\n` +
           `• **Horário Comercial:** ${bhLabel}\n` +
           `• **Feriados Cadastrados:** ${agent.businessHours?.holidays?.length || 0}\n` +

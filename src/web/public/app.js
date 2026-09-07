@@ -756,6 +756,9 @@ async function loadConfig() {
     document.getElementById('cfg-pauseDurationHours').value = pauseHours;
     document.getElementById('cfg-typing').checked = cfg.enableTypingSimulation !== false;
     document.getElementById('cfg-seen').checked = cfg.enableSendSeen !== false;
+    if (document.getElementById('cfg-transcribe-audio')) {
+      document.getElementById('cfg-transcribe-audio').checked = !!cfg.enableAudioTranscription;
+    }
 
     document.getElementById('sim-bot-name').textContent = cfg.botName || 'Assistente Virtual';
   } catch (err) {
@@ -794,6 +797,7 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
     pauseDurationMinutes: Math.round(pauseHours * 60),
     enableTypingSimulation: document.getElementById('cfg-typing').checked,
     enableSendSeen: document.getElementById('cfg-seen').checked,
+    enableAudioTranscription: document.getElementById('cfg-transcribe-audio') ? document.getElementById('cfg-transcribe-audio').checked : false,
     apiKey: document.getElementById('cfg-apiKey').value,
     openaiApiKey: document.getElementById('cfg-openaiApiKey').value
   };
@@ -2463,6 +2467,9 @@ function openNewAgentModal() {
   document.getElementById('modal-agent-debounce').value = 2.5;
   document.getElementById('modal-agent-typing').checked = true;
   document.getElementById('modal-agent-seen').checked = true;
+  if (document.getElementById('modal-agent-transcribe-audio')) {
+    document.getElementById('modal-agent-transcribe-audio').checked = false;
+  }
 
   document.getElementById('modal-sched-enabled').checked = false;
   document.getElementById('modal-sched-outOfHoursMessage').value =
@@ -2512,6 +2519,9 @@ async function openEditAgentModal(agentId) {
     document.getElementById('modal-agent-debounce').value = agent.debounceSeconds ?? 2.5;
     document.getElementById('modal-agent-typing').checked = agent.enableTypingSimulation !== false;
     document.getElementById('modal-agent-seen').checked = agent.enableSendSeen !== false;
+    if (document.getElementById('modal-agent-transcribe-audio')) {
+      document.getElementById('modal-agent-transcribe-audio').checked = !!agent.enableAudioTranscription;
+    }
 
     const bh = agent.businessHours || {};
     document.getElementById('modal-sched-enabled').checked = !!bh.enabled;
@@ -2591,6 +2601,7 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
       debounceSeconds: parseFloat(document.getElementById('modal-agent-debounce').value) || 2.5,
       enableTypingSimulation: document.getElementById('modal-agent-typing').checked,
       enableSendSeen: document.getElementById('modal-agent-seen').checked,
+      enableAudioTranscription: document.getElementById('modal-agent-transcribe-audio') ? document.getElementById('modal-agent-transcribe-audio').checked : false,
       businessHours: {
         enabled: document.getElementById('modal-sched-enabled').checked,
         outOfHoursMessage: document.getElementById('modal-sched-outOfHoursMessage').value.trim(),

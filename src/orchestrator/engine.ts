@@ -12,6 +12,7 @@ import { loadBotConfig, env } from '../config/index.js';
 import { agentManager } from '../config/agent-manager.js';
 import { WahaMessagePayload } from '../waha/types.js';
 import { getAlternateBrazilianChatId } from '../appointments/phone-utils.js';
+import { audioTranscriber } from './audio-transcriber.js';
 
 export interface LogEntry {
   id: string;
@@ -47,6 +48,23 @@ export class AgentOrchestrator {
 
     // Registra o callback do debouncer
     messageDebouncer.registerHandler(this.handleDebouncedMessage.bind(this));
+  }
+
+  /**
+   * Identifica se a mensagem recebida é um áudio ou gravação de voz (PTT)
+   */
+  isAudioMessage(payload: WahaMessagePayload): boolean {
+    if (!payload.hasMedia) return false;
+    const type = (payload._data?.type || '').toLowerCase();
+    const mime = (payload.media?.mimetype || payload._data?.mimetype || '').toLowerCase();
+    return (
+      type === 'ptt' ||
+      type === 'audio' ||
+      mime.startsWith('audio/') ||
+      mime.includes('audio') ||
+      mime.includes('ogg') ||
+      mime.includes('opus')
+    );
   }
 
   addLog(entry: Omit<LogEntry, 'id' | 'timestamp'>): void {
@@ -207,7 +225,78 @@ export class AgentOrchestrator {
       return;
     }
 
-    // 4. Se o bot estiver pausado para este chatId e agente, verifica se é interação de agendamento/lembrete ou validação de exame LGPD
+    const contactName = payload._data?.notifyName || payload.from.split('@')[0];
+    let effectiveBody = body || '';
+    const isAudio = this.isAudioMessage(payload);
+
+    // 4.1. Processamento Inteligente de Áudio (Voz / PTT) com Transcrição IA
+    if (isAudio) {
+      const config = loadBotConfig();
+      const isTranscriptionEnabled = (agent.enableAudioTranscription !== undefined)
+        ? agent.enableAudioTranscription
+        : (config.enableAudioTranscription ?? false);
+
+      if (!isTranscriptionEnabled) {
+        console.log(`[Orchestrator] Áudio recebido de ${chatId}, mas a transcrição está desativada no agente [${agent.name}].`);
+        this.addLog({
+          type: 'info',
+          chatId,
+          contactName,
+          message: `[${agent.name}] Mensagem de áudio recebida de ${contactName}, mas a transcrição automática está desativada.`
+        });
+        return;
+      }
+
+      // Transcrição habilitada!
+      console.log(`[Orchestrator] 🎙️ Áudio recebido de ${chatId} (${contactName}). Baixando para transcrição com IA...`);
+      this.addLog({
+        type: 'info',
+        chatId,
+        contactName,
+        message: `[${agent.name}] 🎙️ Mensagem de áudio recebida. Baixando e transcrevendo via IA...`
+      });
+
+      try {
+        const downloaded = await wahaClient.downloadMedia(payload.media?.url, payload, sessionName);
+        if (!downloaded || !downloaded.buffer || downloaded.buffer.length === 0) {
+          console.warn(`[Orchestrator] Não foi possível baixar mídia de áudio para ${chatId}.`);
+          this.addLog({
+            type: 'error',
+            chatId,
+            contactName,
+            message: `[${agent.name}] ⚠️ Não foi possível baixar o arquivo de áudio da WAHA para transcrição.`
+          });
+          return;
+        }
+
+        const transcribed = await audioTranscriber.transcribe(downloaded.buffer, downloaded.mimetype, agent);
+        if (!transcribed || transcribed.trim() === '') {
+          console.log(`[Orchestrator] Áudio de ${chatId} inaudível ou sem fala perceptível.`);
+          this.addLog({
+            type: 'info',
+            chatId,
+            contactName,
+            message: `[${agent.name}] 🎙️ Áudio inaudível ou sem fala discernível detectada.`
+          });
+          return;
+        }
+
+        console.log(`[Orchestrator] ✅ Áudio transcrito com sucesso para ${chatId}: "${transcribed}"`);
+        effectiveBody = transcribed;
+        payload.body = transcribed;
+      } catch (err: any) {
+        console.error(`[Orchestrator] Erro ao transcrever áudio de ${chatId}:`, err.message);
+        this.addLog({
+          type: 'error',
+          chatId,
+          contactName,
+          message: `[${agent.name}] ⚠️ Falha na transcrição do áudio: ${err.message}`
+        });
+        return;
+      }
+    }
+
+    // 4.2. Se o bot estiver pausado para este chatId e agente, verifica se é interação de agendamento/lembrete ou validação de exame LGPD
     if (memoryStore.isChatPaused(chatId, agent.id)) {
       const bookingAgent = this.agents.find(a => a.name === 'BookingAgent');
       const examAgent = this.agents.find(a => a.name === 'ExamDeliveryAgent');
@@ -217,7 +306,7 @@ export class AgentOrchestrator {
 
       const testCtx = {
         chatId,
-        userMessage: body || '',
+        userMessage: effectiveBody,
         session: sessionName,
         agent
       };
@@ -239,6 +328,7 @@ export class AgentOrchestrator {
         this.addLog({
           type: 'info',
           chatId,
+          contactName,
           message: `Contato ${chatId} respondeu a ${reason}. Pausa cancelada automaticamente.`
         });
       } else {
@@ -246,35 +336,35 @@ export class AgentOrchestrator {
         this.addLog({
           type: 'info',
           chatId,
-          message: `Mensagem recebida mas bot [${agent.name}] está pausado para este contato: "${body}"`
+          contactName,
+          message: `Mensagem recebida mas bot [${agent.name}] está pausado para este contato: "${effectiveBody}"`
         });
         return;
       }
     }
 
     // 5. Verifica se há texto válido
-    if (!body || body.trim() === '') {
+    if (!effectiveBody || effectiveBody.trim() === '') {
       if (hasMedia) {
         this.addLog({
           type: 'info',
           chatId,
+          contactName,
           message: 'Mensagem com mídia recebida sem legenda.'
         });
       }
       return;
     }
 
-    const contactName = payload._data?.notifyName || payload.from.split('@')[0];
-
     this.addLog({
       type: 'incoming',
       chatId,
       contactName,
-      message: `[${agent.name}] ${body}`
+      message: isAudio ? `[${agent.name}] 🎙️ [Áudio Transcrito]: "${effectiveBody}"` : `[${agent.name}] ${effectiveBody}`
     });
 
     // 6. Envia mensagem para o debouncer com escopo da sessão e agente
-    messageDebouncer.enqueue(chatId, body, contactName, sessionName, agent.id, agent.debounceSeconds);
+    messageDebouncer.enqueue(chatId, effectiveBody, contactName, sessionName, agent.id, agent.debounceSeconds);
   }
 
   /**

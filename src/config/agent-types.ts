@@ -29,6 +29,7 @@ export interface AgentProfile {
   debounceSeconds: number;
   enableTypingSimulation: boolean;
   enableSendSeen: boolean;
+  enableAudioTranscription?: boolean;
 
   // Horário Comercial Próprio
   businessHours: BusinessHoursConfig;

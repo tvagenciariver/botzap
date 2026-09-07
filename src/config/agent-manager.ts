@@ -63,6 +63,7 @@ export class AgentManager {
       debounceSeconds: config.debounceSeconds ?? 2.5,
       enableTypingSimulation: config.enableTypingSimulation !== false,
       enableSendSeen: config.enableSendSeen !== false,
+      enableAudioTranscription: config.enableAudioTranscription ?? false,
       businessHours: config.businessHours || defaultBusinessHours,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -168,6 +169,7 @@ export class AgentManager {
       debounceSeconds: data.debounceSeconds ?? 2.5,
       enableTypingSimulation: data.enableTypingSimulation !== false,
       enableSendSeen: data.enableSendSeen !== false,
+      enableAudioTranscription: !!data.enableAudioTranscription,
       businessHours: data.businessHours || defaultHours,
       createdAt: Date.now(),
       updatedAt: Date.now()
