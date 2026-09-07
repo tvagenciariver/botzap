@@ -441,7 +441,10 @@ function switchToTab(targetTab) {
     if (targetTab === 'agents' && currentUser?.role === 'admin') loadAgents();
     if (targetTab === 'chats') loadChats();
     if (targetTab === 'logs' && currentUser?.role === 'admin') loadLogs();
-    if (targetTab === 'prompts' && currentUser?.role === 'admin') loadConfig();
+    if (targetTab === 'prompts' && currentUser?.role === 'admin') {
+      loadConfig();
+      loadHolidays();
+    }
     if (targetTab === 'schedule' && currentUser?.role === 'admin') {
       loadSchedule();
       loadHolidays();
@@ -1100,6 +1103,22 @@ function renderHolidaysTable(holidays) {
       </tr>
     `;
   }).join('');
+
+  // Atualiza também o resumo visual na aba de Prompts / Configurações Gerais
+  const promptsSummary = document.getElementById('prompts-holidays-summary');
+  if (promptsSummary) {
+    if (!holidays || holidays.length === 0) {
+      promptsSummary.innerHTML = '<em>Nenhum feriado cadastrado no momento. Clique em "<strong>Adicionar Feriado</strong>" ou "<strong>Carregar Nacionais</strong>" acima para configurar.</em>';
+    } else {
+      const activeHols = holidays.filter(h => h.enabled !== false);
+      const badges = activeHols.slice(0, 10).map(h => {
+        const icon = h.type === 'national' ? '🇧🇷' : (h.type === 'recess' ? '🏖️' : '🏙️');
+        return `<span class="badge ${h.type === 'national' ? 'badge-national' : (h.type === 'recess' ? 'badge-recess' : 'badge-municipal')}" style="font-size: 11px; margin-right: 6px; margin-bottom: 4px; display: inline-flex; align-items: center; gap: 4px;">${icon} <strong>${h.date}</strong>: ${escapeHtml(h.name)}</span>`;
+      }).join(' ');
+      const extra = activeHols.length > 10 ? `<span class="text-muted" style="font-size: 11px;">+${activeHols.length - 10} mais...</span>` : '';
+      promptsSummary.innerHTML = `<div style="margin-bottom: 6px;"><strong>${activeHols.length} feriado(s) ativo(s):</strong></div><div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">${badges} ${extra}</div>`;
+    }
+  }
 }
 
 function openHolidayModal(holiday = null) {
@@ -1385,6 +1404,63 @@ document.getElementById('topbar-command-input')?.addEventListener('keydown', (e)
       e.target.value = '';
       executeAdminCommand(cmd, true);
     }
+  }
+});
+
+// Event Listeners para Feriados e Comandos na Aba de Prompts / Configurações
+document.getElementById('btn-prompts-add-holiday')?.addEventListener('click', () => openHolidayModal());
+document.getElementById('btn-prompts-load-national')?.addEventListener('click', loadNationalHolidays);
+
+async function handlePromptsCommandRun() {
+  const input = document.getElementById('prompts-command-input');
+  const output = document.getElementById('prompts-command-output');
+  if (!input || !output) return;
+
+  const cmd = input.value.trim();
+  if (!cmd) return;
+
+  output.style.display = 'block';
+  output.style.color = '#38bdf8';
+  output.textContent = `Executando: "${cmd}"... ⏳`;
+
+  try {
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const res = await fetchWithAuth('/api/admin/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        command: cmd,
+        agentId: effectiveCompany
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      output.style.color = '#34d399';
+      output.textContent = data.message;
+      input.value = '';
+      showToast(data.message.split('\n')[0], 'success');
+      if (cmd.toLowerCase().includes('feriado')) loadHolidays();
+      if (cmd.toLowerCase().includes('horario') || cmd.toLowerCase().includes('modelo') || cmd.toLowerCase().includes('temperatura')) {
+        checkStatus();
+      }
+    } else {
+      output.style.color = '#f87171';
+      output.textContent = data.error || data.message || 'Erro ao executar comando.';
+      showToast(output.textContent, 'error');
+    }
+  } catch (err) {
+    output.style.color = '#f87171';
+    output.textContent = `Erro de comunicação: ${err.message}`;
+    showToast(output.textContent, 'error');
+  }
+}
+
+document.getElementById('btn-prompts-run-cmd')?.addEventListener('click', handlePromptsCommandRun);
+document.getElementById('prompts-command-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handlePromptsCommandRun();
   }
 });
 
@@ -6507,5 +6583,44 @@ document.getElementById('company-picker-search')?.addEventListener('input', (e) 
 
 // Inicializa Drag & Drop de exames no carregamento
 setupExamDropzone();
+
+// ============================================================================
+// Inicialização Automática da Aplicação e Restauração de Sessão
+// ============================================================================
+async function initApp() {
+  const token = getAuthToken();
+  if (token) {
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated && data.user) {
+          hideLoginModal(data.user);
+          checkStatus();
+          if (data.user.role === 'admin') {
+            loadConfig();
+            loadSchedule();
+            loadHolidays();
+            loadWahaConfig();
+            await loadAgents();
+          }
+          loadAgentsForSimulator();
+          loadAppointments();
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Falha ao restaurar sessão existente:', e);
+    }
+  }
+  // Se não houver token ou for inválido, exibe tela de login
+  showLoginModal();
+}
+
+// Executa inicialização
+initApp();
+
 
 

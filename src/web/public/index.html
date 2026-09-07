@@ -1066,7 +1066,45 @@
                 </div>
               </div>
 
-              <div class="form-actions">
+              <!-- Bloco de Feriados & Indisponibilidades Municipais -->
+              <div class="form-group" style="margin-top: 25px;">
+                <label class="section-title">🗓️ Feriados & Indisponibilidades (Municipais, Estaduais e Recessos)</label>
+                <div class="card p-3" style="background: rgba(99, 102, 241, 0.05); border: 1px dashed var(--primary); border-radius: 10px;">
+                  <div class="d-flex justify-between align-center" style="flex-wrap: wrap; gap: 12px;">
+                    <div>
+                      <strong style="color: #f1f5f9; font-size: 14px;">Configurações de Feriados e Folgas Locais</strong>
+                      <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">
+                        Configure feriados municipais (ex: padroeira da cidade, aniversário do município, recessos). Nesses dias o bot responde avisando sobre o recesso e bloqueia novos agendamentos.
+                      </p>
+                    </div>
+                    <div class="d-flex" style="gap: 8px;">
+                      <button type="button" class="btn btn-secondary btn-sm" id="btn-prompts-load-national">🇧🇷 Carregar Nacionais</button>
+                      <button type="button" class="btn btn-primary btn-sm" id="btn-prompts-add-holiday">➕ Adicionar Feriado</button>
+                    </div>
+                  </div>
+                  <div id="prompts-holidays-summary" style="margin-top: 14px; font-size: 12px; color: #94a3b8; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px;">
+                    <!-- Preenchido via app.js com a lista de feriados cadastrados -->
+                  </div>
+                </div>
+              </div>
+
+              <!-- Bloco de Linha de Comandos em Tempo Real (Admin CLI) -->
+              <div class="form-group" style="margin-top: 25px;">
+                <label class="section-title">⚡ Linha de Comandos do Bot em Tempo Real (Admin Execution)</label>
+                <div class="card p-3" style="background: #090d16; border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 10px;">
+                  <p style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">
+                    Digite uma instrução abaixo (ex: <code>feriado 21/09 Aniversário de Petrolina</code>, <code>pausar 87988177877 2h</code>, <code>temperatura 0.3</code>, <code>status</code>) ou ordens em linguagem natural para o bot aplicar agora em tempo real:
+                  </p>
+                  <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <span style="font-family: monospace; color: #10b981; font-weight: bold; font-size: 14px;">admin&gt;</span>
+                    <input type="text" id="prompts-command-input" class="form-control" style="flex: 1; min-width: 240px; font-family: 'Fira Code', monospace; background: rgba(15, 23, 42, 0.9); color: #38bdf8; border-color: rgba(99, 102, 241, 0.4);" placeholder="Ex: 'feriado 21/09 Aniversário da Cidade' ou 'pausar 87988177877'..." autocomplete="off">
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-prompts-run-cmd" style="white-space: nowrap;">⚡ Executar Agora ↵</button>
+                  </div>
+                  <div id="prompts-command-output" style="margin-top: 10px; display: none; font-family: 'Fira Code', monospace; font-size: 12px; padding: 10px 14px; border-radius: 6px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.08); white-space: pre-wrap; line-height: 1.5;"></div>
+                </div>
+              </div>
+
+              <div class="form-actions" style="margin-top: 30px;">
                 <button type="submit" class="btn btn-primary" id="btn-save-config">💾 Salvar Configurações</button>
                 <span id="save-feedback" class="feedback-msg"></span>
               </div>
