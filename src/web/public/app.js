@@ -583,7 +583,7 @@ async function checkStatus() {
       }
     }
 
-    // Versão da Aplicação
+    // Versão da Aplicação e Data do Build
     if (data.version) {
       const vText = data.version.startsWith('v') ? data.version : `v${data.version}`;
       const versionBadges = ['app-version-badge', 'footer-version-num', 'topbar-version-pill'];
@@ -592,6 +592,14 @@ async function checkStatus() {
         if (el) el.textContent = vText;
       });
     }
+    if (data.buildDate) {
+      const buildTag = document.getElementById('footer-build-tag');
+      if (buildTag) buildTag.textContent = `build ${data.buildDate}`;
+    }
+    if (typeof updatePanicButtonVisibility === 'function') {
+      updatePanicButtonVisibility();
+    }
+
 
     // Atualiza status do agente em foco na barra lateral se já selecionado
     const sidebarSelect = document.getElementById('sidebar-agent-select');
@@ -2929,18 +2937,33 @@ function updatePanicButtonVisibility() {
   if (!panicBtn || !resumeBtn) return;
 
   const agents = (typeof allAgents !== 'undefined' ? allAgents : []);
-  const anyPaused = agents.some(a => a.isPausedGlobally === true && a.active);
-  const allPaused = agents.filter(a => a.active).every(a => a.isPausedGlobally === true);
+  
+  // O botão de pânico é SEMPRE visível no topo da interface
+  panicBtn.style.display = 'inline-flex';
 
-  // Mostra "PARAR TUDO" apenas se há agentes ativos não pausados
-  panicBtn.style.display = (!allPaused && agents.some(a => a.active && !a.isPausedGlobally)) ? 'inline-flex' : 'none';
-  // Mostra "REATIVAR TUDO" se há algum agente pausado em modo emergência
-  resumeBtn.style.display = anyPaused ? 'inline-flex' : 'none';
+  const anyPausedGlobally = agents.some(a => a.isPausedGlobally === true);
+  const activeAgents = agents.filter(a => a.active !== false);
+  const allActivePaused = activeAgents.length > 0 && activeAgents.every(a => a.isPausedGlobally === true);
+
+  if (allActivePaused) {
+    panicBtn.innerHTML = '⛔ TUDO PARADO';
+    panicBtn.title = 'Todos os agentes foram parados via Botão de Pânico';
+  } else {
+    panicBtn.innerHTML = '🚨 PARAR TUDO';
+    panicBtn.title = 'EMERGÊNCIA: Parar todos os agentes imediatamente';
+  }
+
+  // O botão "REATIVAR TUDO" aparece sempre que houver algum agente em pausa de emergência
+  resumeBtn.style.display = anyPausedGlobally ? 'inline-flex' : 'none';
 }
 
 // Wires dos botões de pânico na topbar
 document.getElementById('btn-global-panic')?.addEventListener('click', triggerGlobalPanic);
 document.getElementById('btn-global-resume')?.addEventListener('click', cancelGlobalPanic);
+
+// Garante chamada inicial
+updatePanicButtonVisibility();
+
 
 // ============================================================================
 

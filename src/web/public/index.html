@@ -18,8 +18,9 @@
         <div class="brand-text">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h1>BotZap</h1>
-            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.6.0</span>
+            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.7.0</span>
           </div>
+
           <span>Orquestrador IA</span>
         </div>
       </div>
@@ -125,9 +126,10 @@
 
       <div class="sidebar-footer">
         <div class="footer-version-row">
-          <span class="footer-version-tag">⚡ BotZap <strong id="footer-version-num">v2.6.0</strong></span>
-          <span class="footer-build-tag" title="Compilação de deploy">build 2026.09.07</span>
+          <span class="footer-version-tag">⚡ BotZap <strong id="footer-version-num">v2.7.0</strong></span>
+          <span class="footer-build-tag" id="footer-build-tag" title="Compilação de deploy">build 2026.09.08</span>
         </div>
+
         <small>WAHA + Gemini / OpenAI GPT</small>
       </div>
     </aside>
@@ -162,14 +164,15 @@
         </div>
 
         <div class="topbar-actions">
-          <span class="topbar-version-pill" id="topbar-version-pill" title="Versão oficial instalada do BotZap">v2.6.0</span>
-          <!-- 🚨 BOTÃO DE PÂNICO GLOBAL — sempre visível -->
-          <button type="button" id="btn-global-panic" class="btn btn-panic btn-sm" title="EMERGÊNCIA: Para TODOS os agentes imediatamente" style="background: linear-gradient(135deg, #dc2626, #991b1b); color: #fff; border: 2px solid #ef4444; font-weight: 700; animation: panicPulse 2s ease-in-out infinite; display: none;">
+          <span class="topbar-version-pill" id="topbar-version-pill" title="Versão oficial instalada do BotZap">v2.7.0</span>
+          <!-- 🚨 BOTÃO DE PÂNICO GLOBAL — SEMPRE VISÍVEL -->
+          <button type="button" id="btn-global-panic" class="btn btn-panic btn-sm" title="EMERGÊNCIA: Parar todos os agentes imediatamente" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
             🚨 PARAR TUDO
           </button>
-          <button type="button" id="btn-global-resume" class="btn btn-sm" title="Reativar todos os agentes pausados" style="background: linear-gradient(135deg, #16a34a, #15803d); color: #fff; border: 2px solid #22c55e; font-weight: 700; display: none;">
+          <button type="button" id="btn-global-resume" class="btn btn-sm" title="Reativar todos os agentes pausados" style="display: none; align-items: center; gap: 6px; background: linear-gradient(135deg, #16a34a, #15803d); color: #fff; border: 2px solid #22c55e; font-weight: 700;">
             ✅ REATIVAR TUDO
           </button>
+
           <div class="user-badge-container" id="user-badge-container" style="display: none;">
             <span class="user-badge-name" id="user-badge-name">👤 admin</span>
             <button class="btn btn-outline btn-sm" id="btn-logout" title="Encerrar Sessão">🚪 Sair</button>
