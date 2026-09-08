@@ -234,6 +234,26 @@ export class AgentOrchestrator {
       return;
     }
 
+    // BLINDAGEM DE SEGURANÇA: Verificar se o agente está globalmente pausado (botão de pânico)
+    if (agent.isPausedGlobally) {
+      const pausedUntil = agent.pausedGloballyUntil;
+      // Se tem tempo de expiração e já passou, remove a pausa automaticamente
+      if (pausedUntil && Date.now() > pausedUntil) {
+        agentManager.updateAgent(agent.id, { isPausedGlobally: false, pausedGloballyUntil: undefined });
+        console.log(`[SEGURANÇA][${agent.id}] Pausa global expirou automaticamente. Agente reativado.`);
+      } else {
+        console.warn(`[SEGURANÇA][${agent.id}] ⛔ Mensagem de ${chatId} BLOQUEADA — agente pausado globalmente (pânico). Sessão: "${sessionName}".`);
+        this.addLog({
+          type: 'info',
+          chatId,
+          message: `⛔ Mensagem bloqueada — Agente "${agent.name}" está pausado globalmente por emergência.`,
+          agentName: agent.name
+        });
+        return;
+      }
+    }
+
+
     // 4. Se a mensagem foi enviada pelo próprio número (fromMe === true)
     // Isso acontece quando um ATENDENTE HUMANO no Chatwoot ou no celular responde ao cliente!
     if (fromMe) {

@@ -860,6 +860,90 @@ apiRouter.post('/api/agents/:id/duplicate', requireAdmin, (req: Request, res: Re
   }
 });
 
+/**
+ * 15. Pausa de Emergência Individual — Congela todas as respostas de um agente
+ */
+apiRouter.post('/api/agents/:id/pause', requireAuth, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const agent = agentManager.getAgent(id);
+  if (!agent) {
+    return res.status(404).json({ error: 'Agente não encontrado.' });
+  }
+  agentManager.updateAgent(id, { isPausedGlobally: true, pausedGloballyUntil: undefined });
+  orchestrator.addLog({
+    type: 'info',
+    chatId: 'sistema',
+    message: `⏸ Agente "${agent.name}" pausado globalmente via painel.`,
+    agentName: agent.name
+  });
+  console.warn(`[SEGURANÇA] Agente "${agent.name}" (${id}) PAUSADO GLOBALMENTE pelo painel.`);
+  res.json({ success: true, id, isPausedGlobally: true });
+});
+
+/**
+ * 16. Reativar Agente após Pausa de Emergência
+ */
+apiRouter.post('/api/agents/:id/resume', requireAuth, (req: Request, res: Response) => {
+  const { id } = req.params;
+  const agent = agentManager.getAgent(id);
+  if (!agent) {
+    return res.status(404).json({ error: 'Agente não encontrado.' });
+  }
+  agentManager.updateAgent(id, { isPausedGlobally: false, pausedGloballyUntil: undefined });
+  orchestrator.addLog({
+    type: 'info',
+    chatId: 'sistema',
+    message: `▶️ Agente "${agent.name}" reativado via painel.`,
+    agentName: agent.name
+  });
+  console.log(`[SEGURANÇA] Agente "${agent.name}" (${id}) REATIVADO pelo painel.`);
+  res.json({ success: true, id, isPausedGlobally: false });
+});
+
+/**
+ * 17. 🚨 BOTÃO DE PÂNICO — Para TODOS os agentes imediatamente
+ */
+apiRouter.post('/api/agents/panic', requireAuth, (req: Request, res: Response) => {
+  const agents = agentManager.listAgents();
+  let pausedCount = 0;
+  for (const agent of agents) {
+    if (agent.active) {
+      agentManager.updateAgent(agent.id, { isPausedGlobally: true, pausedGloballyUntil: undefined });
+      pausedCount++;
+    }
+  }
+  orchestrator.addLog({
+    type: 'info',
+    chatId: 'sistema',
+    message: `🚨 BOTÃO DE PÂNICO ACIONADO — ${pausedCount} agente(s) pausados imediatamente via painel de emergência.`
+  });
+  console.error(`[PÂNICO] 🚨 TODOS OS AGENTES PAUSADOS (${pausedCount}) via botão de pânico!`);
+  res.json({ success: true, pausedCount });
+});
+
+/**
+ * 18. Restaurar todos os agentes após pânico
+ */
+apiRouter.delete('/api/agents/panic', requireAuth, (req: Request, res: Response) => {
+  const agents = agentManager.listAgents();
+  let resumedCount = 0;
+  for (const agent of agents) {
+    if (agent.isPausedGlobally) {
+      agentManager.updateAgent(agent.id, { isPausedGlobally: false, pausedGloballyUntil: undefined });
+      resumedCount++;
+    }
+  }
+  orchestrator.addLog({
+    type: 'info',
+    chatId: 'sistema',
+    message: `✅ Emergência encerrada — ${resumedCount} agente(s) reativados.`
+  });
+  console.log(`[PÂNICO] Emergência encerrada. ${resumedCount} agente(s) reativados.`);
+  res.json({ success: true, resumedCount });
+});
+
+
+
 // ============================================================================
 // AGENDAMENTOS & AGENDA INTELIGENTE
 // ============================================================================

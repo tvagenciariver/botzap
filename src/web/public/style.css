@@ -556,6 +556,29 @@ body {
   color: var(--text-main);
 }
 
+/* 🚨 Botão de Pânico Global */
+.btn-panic {
+  background: linear-gradient(135deg, #dc2626, #991b1b) !important;
+  color: #fff !important;
+  border: 2px solid #ef4444 !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-panic:hover {
+  background: linear-gradient(135deg, #b91c1c, #7f1d1d) !important;
+  transform: scale(1.02);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.5) !important;
+}
+
+@keyframes panicPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+  50% { box-shadow: 0 0 24px rgba(239, 68, 68, 0.9), 0 0 40px rgba(239, 68, 68, 0.4); }
+}
+
+
 .btn-sm {
   padding: 6px 12px;
   font-size: 12px;

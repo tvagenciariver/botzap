@@ -6,8 +6,11 @@ export interface AgentProfile {
   companyName: string; // nome da empresa (ex: "Unimagem")
   description?: string; // observação interna sobre o cliente
   active: boolean; // se o bot está ativo
+  isPausedGlobally?: boolean; // pausa de emergência — congela TODAS as respostas sem desativar o agente
+  pausedGloballyUntil?: number; // timestamp até quando o agente está pausado globalmente
   isDefault?: boolean; // se é o agente padrão de contingência
   wahaSession?: string; // sessão da WAHA vinculada (ex: "unimagem" ou "*")
+
   
   // Provedor de IA e Parâmetros
   llmProvider: 'gemini' | 'openai';

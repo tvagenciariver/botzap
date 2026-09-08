@@ -2077,11 +2077,15 @@ async function loadAgents() {
     renderAgentsGrid(allAgents);
     populateSimulatorAgentSelect(allAgents);
     populateSidebarAgentSelect(allAgents);
+
+    // Atualiza visibilidade dos botões de pânico na topbar
+    if (typeof updatePanicButtonVisibility === 'function') updatePanicButtonVisibility();
   } catch (err) {
     console.error('Erro ao carregar agentes:', err);
     showToast(`Erro ao carregar agentes: ${err.message}`, 'error');
   }
 }
+
 
 function renderAgentsGrid(agents) {
   const grid = document.getElementById('agents-grid');
@@ -2102,6 +2106,7 @@ function renderAgentsGrid(agents) {
   grid.innerHTML = agents.map(agent => {
     const isDefault = agent.isDefault;
     const isActive = agent.active;
+    const isPausedGlobally = agent.isPausedGlobally === true;
     const provider = agent.llmProvider || 'openai';
     const model = provider === 'openai' ? (agent.openaiModel || 'gpt-4o-mini') : (agent.model || 'gemini-flash-lite');
     const sessionLabel = agent.wahaSession ? (agent.wahaSession === '*' ? 'Todas (*)' : agent.wahaSession) : 'Não vinculada';
@@ -2133,8 +2138,21 @@ function renderAgentsGrid(agents) {
     const effectiveCompany = getEffectiveActiveCompanyId();
     const isSelectedCompany = (effectiveCompany !== 'all' && effectiveCompany === agent.id);
 
+    // Borda de emergência vermelha se o agente estiver pausado globalmente
+    const cardBorderStyle = isPausedGlobally
+      ? 'border: 2px solid #ef4444; box-shadow: 0 0 20px rgba(239, 68, 68, 0.35);'
+      : isSelectedCompany
+        ? 'border: 2px solid #6366f1; box-shadow: 0 0 16px rgba(99, 102, 241, 0.25);'
+        : '';
+
     return `
-      <div class="agent-card ${isActive ? '' : 'inactive'}" id="agent-card-${agent.id}" style="${isSelectedCompany ? 'border: 2px solid #6366f1; box-shadow: 0 0 16px rgba(99, 102, 241, 0.25);' : ''}">
+      <div class="agent-card ${isActive ? '' : 'inactive'}" id="agent-card-${agent.id}" style="${cardBorderStyle}">
+        ${isPausedGlobally ? `
+          <div style="background: rgba(239,68,68,0.12); border-bottom: 1px solid rgba(239,68,68,0.3); padding: 6px 14px; display: flex; align-items: center; gap: 8px; border-radius: 12px 12px 0 0;">
+            <span style="font-size: 14px;">⛔</span>
+            <span style="color: #ef4444; font-size: 12px; font-weight: 700;">AGENTE PAUSADO — Emergência Ativa</span>
+          </div>
+        ` : ''}
         <div>
           <div class="agent-card-header">
             <div class="agent-card-title-group">
@@ -2149,7 +2167,11 @@ function renderAgentsGrid(agents) {
             </div>
             <div>
               ${isDefault ? '<span class="agent-badge-item agent-badge-default">⭐ Padrão</span>' : ''}
-              ${isActive ? '<span class="badge text-green" style="font-size: 11px;">Ativo</span>' : '<span class="badge text-muted" style="font-size: 11px;">Pausado</span>'}
+              ${isPausedGlobally
+                ? '<span class="badge" style="font-size: 11px; background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid #ef4444;">⛔ Pausado</span>'
+                : isActive
+                  ? '<span class="badge text-green" style="font-size: 11px;">Ativo</span>'
+                  : '<span class="badge text-muted" style="font-size: 11px;">Inativo</span>'}
             </div>
           </div>
 
@@ -2178,6 +2200,19 @@ function renderAgentsGrid(agents) {
           <button class="btn btn-outline btn-sm" onclick="duplicateAgent('${agent.id}')" title="Duplicar">
             📋 Copiar
           </button>
+          ${isPausedGlobally ? `
+            <button class="btn btn-sm" onclick="resumeAgentGlobally('${agent.id}', '${escapeHtml(agent.name)}')"
+              title="Reativar este agente"
+              style="background: linear-gradient(135deg, #16a34a, #15803d); color: #fff; border: 1px solid #22c55e; font-weight: 600;">
+              ▶️ Reativar
+            </button>
+          ` : isActive ? `
+            <button class="btn btn-sm" onclick="pauseAgentGlobally('${agent.id}', '${escapeHtml(agent.name)}')"
+              title="Pausar este agente imediatamente (emergência)"
+              style="background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.4); font-weight: 600;">
+              ⏸ Pausar
+            </button>
+          ` : ''}
           ${!isDefault ? `
             <button class="btn btn-outline btn-sm text-red" onclick="deleteAgent('${agent.id}', '${escapeHtml(agent.name)}')" title="Excluir">
               🗑️
@@ -2188,6 +2223,7 @@ function renderAgentsGrid(agents) {
     `;
   }).join('');
 }
+
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -2819,6 +2855,95 @@ async function deleteAgent(id, name) {
   }
 }
 
+// ============================================================================
+// ⏸ PAUSA INDIVIDUAL DE AGENTE
+// ============================================================================
+
+async function pauseAgentGlobally(id, name) {
+  if (!confirm(`⏸ Pausar o agente "${name}" imediatamente?\n\nO agente vai parar de responder todas as mensagens até ser reativado manualmente.\nEste é um recurso de emergência.`)) return;
+
+  try {
+    const res = await fetchWithAuth(`/api/agents/${id}/pause`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao pausar agente.');
+    showToast(`⏸ Agente "${name}" pausado com sucesso. Nenhuma mensagem será respondida até reativar.`, 'warning');
+    await loadAgents();
+    updatePanicButtonVisibility();
+  } catch (err) {
+    showToast(`Erro ao pausar agente: ${err.message}`, 'error');
+  }
+}
+
+async function resumeAgentGlobally(id, name) {
+  if (!confirm(`▶️ Reativar o agente "${name}"?\n\nO agente voltará a responder mensagens normalmente.`)) return;
+
+  try {
+    const res = await fetchWithAuth(`/api/agents/${id}/resume`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao reativar agente.');
+    showToast(`✅ Agente "${name}" reativado com sucesso!`, 'success');
+    await loadAgents();
+    updatePanicButtonVisibility();
+  } catch (err) {
+    showToast(`Erro ao reativar agente: ${err.message}`, 'error');
+  }
+}
+
+// ============================================================================
+// 🚨 BOTÃO DE PÂNICO GLOBAL
+// ============================================================================
+
+async function triggerGlobalPanic() {
+  if (!confirm('🚨 ATENÇÃO — BOTÃO DE PÂNICO!\n\nTodos os agentes serão pausados IMEDIATAMENTE e vão parar de responder qualquer mensagem.\n\nConfirma o acionamento de emergência?')) return;
+
+  try {
+    const res = await fetchWithAuth('/api/agents/panic', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao acionar pânico.');
+    showToast(`🚨 EMERGÊNCIA ATIVADA — ${data.pausedCount} agente(s) parados imediatamente!`, 'error');
+    await loadAgents();
+    updatePanicButtonVisibility();
+  } catch (err) {
+    showToast(`Erro ao acionar emergência: ${err.message}`, 'error');
+  }
+}
+
+async function cancelGlobalPanic() {
+  if (!confirm('✅ Encerrar a emergência?\n\nTodos os agentes pausados pelo botão de pânico serão reativados e voltarão a responder mensagens normalmente.')) return;
+
+  try {
+    const res = await fetchWithAuth('/api/agents/panic', { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao encerrar emergência.');
+    showToast(`✅ Emergência encerrada — ${data.resumedCount} agente(s) reativados!`, 'success');
+    await loadAgents();
+    updatePanicButtonVisibility();
+  } catch (err) {
+    showToast(`Erro ao encerrar emergência: ${err.message}`, 'error');
+  }
+}
+
+function updatePanicButtonVisibility() {
+  const panicBtn = document.getElementById('btn-global-panic');
+  const resumeBtn = document.getElementById('btn-global-resume');
+  if (!panicBtn || !resumeBtn) return;
+
+  const agents = (typeof allAgents !== 'undefined' ? allAgents : []);
+  const anyPaused = agents.some(a => a.isPausedGlobally === true && a.active);
+  const allPaused = agents.filter(a => a.active).every(a => a.isPausedGlobally === true);
+
+  // Mostra "PARAR TUDO" apenas se há agentes ativos não pausados
+  panicBtn.style.display = (!allPaused && agents.some(a => a.active && !a.isPausedGlobally)) ? 'inline-flex' : 'none';
+  // Mostra "REATIVAR TUDO" se há algum agente pausado em modo emergência
+  resumeBtn.style.display = anyPaused ? 'inline-flex' : 'none';
+}
+
+// Wires dos botões de pânico na topbar
+document.getElementById('btn-global-panic')?.addEventListener('click', triggerGlobalPanic);
+document.getElementById('btn-global-resume')?.addEventListener('click', cancelGlobalPanic);
+
+// ============================================================================
+
 document.getElementById('btn-logout')?.addEventListener('click', async () => {
   try {
     await fetchWithAuth('/api/auth/logout', { method: 'POST' });
@@ -2827,6 +2952,7 @@ document.getElementById('btn-logout')?.addEventListener('click', async () => {
   currentUser = null;
   showLoginModal();
 });
+
 
 // ============================================================================
 // SISTEMA DE AGENDAMENTO, TIMELINE, KANBAN E NOTIFICAÇÕES (FRONTEND)

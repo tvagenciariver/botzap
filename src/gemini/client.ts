@@ -80,7 +80,8 @@ export class GeminiService {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const systemInstruction = this.buildFullSystemInstruction(agent);
-    const history = memoryStore.getHistory(chatId);
+    const agentId = agent?.id; // ISOLAMENTO: chave de memória é agentId:chatId
+    const history = memoryStore.getHistory(chatId, agentId);
 
     // Lista de modelos candidatos priorizados para garantir altíssima disponibilidade
     const preferredModel = agent?.model || config.model || 'gemini-flash-lite-latest';
@@ -119,14 +120,15 @@ export class GeminiService {
         } catch (chatErr: any) {
           const errMsg = chatErr?.message || '';
           if (errMsg.includes('role') || errMsg.includes('First content') || errMsg.includes('history')) {
-            console.warn(`[Gemini] Inconsistência no histórico detectada (${errMsg}). Limpando histórico de ${chatId} e regenerando...`);
-            memoryStore.clearHistory(chatId);
+            console.warn(`[Gemini][${agentId}] Inconsistência no histórico detectada (${errMsg}). Limpando histórico de ${chatId} e regenerando...`);
+            memoryStore.clearHistory(chatId, agentId);
             const freshChat = model.startChat({ history: [] });
             result = await freshChat.sendMessage(userMessage);
           } else {
             throw chatErr;
           }
         }
+
         let replyText = result.response.text();
 
         // Se precisou usar outro modelo com sucesso, atualiza a configuração para os próximos
@@ -143,9 +145,10 @@ export class GeminiService {
         // Sanitização amigável de títulos Markdown para formato WhatsApp (*Negrito*)
         replyText = replyText.replace(/^#{1,6}\s*(.+)$/gm, '*$1*');
 
-        // Salva no histórico de memória
-        memoryStore.addMessage(chatId, 'user', userMessage, contactName);
-        memoryStore.addMessage(chatId, 'model', replyText, contactName);
+        // Salva no histórico de memória — ISOLADO por agentId:chatId
+        memoryStore.addMessage(chatId, 'user', userMessage, contactName, agentId);
+        memoryStore.addMessage(chatId, 'model', replyText, contactName, agentId);
+
 
         return replyText;
       } catch (error: any) {

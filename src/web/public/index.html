@@ -163,6 +163,13 @@
 
         <div class="topbar-actions">
           <span class="topbar-version-pill" id="topbar-version-pill" title="Versão oficial instalada do BotZap">v2.6.0</span>
+          <!-- 🚨 BOTÃO DE PÂNICO GLOBAL — sempre visível -->
+          <button type="button" id="btn-global-panic" class="btn btn-panic btn-sm" title="EMERGÊNCIA: Para TODOS os agentes imediatamente" style="background: linear-gradient(135deg, #dc2626, #991b1b); color: #fff; border: 2px solid #ef4444; font-weight: 700; animation: panicPulse 2s ease-in-out infinite; display: none;">
+            🚨 PARAR TUDO
+          </button>
+          <button type="button" id="btn-global-resume" class="btn btn-sm" title="Reativar todos os agentes pausados" style="background: linear-gradient(135deg, #16a34a, #15803d); color: #fff; border: 2px solid #22c55e; font-weight: 700; display: none;">
+            ✅ REATIVAR TUDO
+          </button>
           <div class="user-badge-container" id="user-badge-container" style="display: none;">
             <span class="user-badge-name" id="user-badge-name">👤 admin</span>
             <button class="btn btn-outline btn-sm" id="btn-logout" title="Encerrar Sessão">🚪 Sair</button>
@@ -170,6 +177,7 @@
           <button class="btn btn-secondary btn-sm" id="btn-refresh-status">🔄 Atualizar Status</button>
           <a href="https://waha.devlike.pro/docs/overview/" target="_blank" class="btn btn-outline btn-sm">📖 Docs WAHA</a>
         </div>
+
       </header>
 
       <!-- TAB 1: Simulador -->

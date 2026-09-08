@@ -71,7 +71,8 @@ export class OpenAIService {
 
     const config = loadBotConfig();
     const systemInstruction = this.buildFullSystemInstruction(agent);
-    const history = memoryStore.getOpenAIHistory(chatId);
+    const agentId = agent?.id; // ISOLAMENTO: chave de memória é agentId:chatId
+    const history = memoryStore.getOpenAIHistory(chatId, agentId);
 
     const messages: OpenAIMessage[] = [
       { role: 'system', content: systemInstruction },
@@ -129,9 +130,10 @@ export class OpenAIService {
         // Sanitização amigável de títulos Markdown para formato WhatsApp (*Negrito*)
         replyText = replyText.replace(/^#{1,6}\s*(.+)$/gm, '*$1*');
 
-        // Salva no histórico de memória
-        memoryStore.addMessage(chatId, 'user', userMessage, contactName);
-        memoryStore.addMessage(chatId, 'model', replyText, contactName);
+        // Salva no histórico de memória — ISOLADO por agentId:chatId
+        memoryStore.addMessage(chatId, 'user', userMessage, contactName, agentId);
+        memoryStore.addMessage(chatId, 'model', replyText, contactName, agentId);
+
 
         return replyText;
       } catch (error: any) {
