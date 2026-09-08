@@ -236,7 +236,7 @@ apiRouter.post('/webhook/chatwoot', async (req: Request, res: Response) => {
 /**
  * 3. Status geral do sistema e serviços
  */
-apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) => {
+apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) => {
   let wahaOnline = false;
   let sessionStatus = null;
 
@@ -251,6 +251,17 @@ apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) =
   const provider = config.llmProvider || 'gemini';
   const allAgents = agentManager.listAgents();
   const activeAgents = allAgents.filter(a => a.active !== false);
+
+  const effectiveAgentId = req.query.agentId as string;
+  let targetBhConfig = config;
+  let targetBhStatus = checkBusinessHoursStatus(config);
+  if (effectiveAgentId && effectiveAgentId !== 'all' && effectiveAgentId !== '*') {
+    const agent = agentManager.getAgent(effectiveAgentId);
+    if (agent && agent.businessHours) {
+      targetBhConfig = { ...config, businessHours: agent.businessHours };
+      targetBhStatus = checkBusinessHoursStatus(agent);
+    }
+  }
 
   res.json({
     orchestrator: 'online',
@@ -281,12 +292,12 @@ apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) =
       model: provider === 'openai' ? (config.openaiModel || 'gpt-4o-mini') : (config.model || 'gemini-flash-lite-latest')
     },
     businessHours: {
-      enabled: !!config.businessHours?.enabled,
-      isOpen: checkBusinessHoursStatus(config).isOpen,
-      reason: checkBusinessHoursStatus(config).reason,
-      currentTime: checkBusinessHoursStatus(config).currentTime,
-      currentDay: checkBusinessHoursStatus(config).currentDayName,
-      timezone: checkBusinessHoursStatus(config).timezone
+      enabled: !!targetBhConfig.businessHours?.enabled,
+      isOpen: targetBhStatus.isOpen,
+      reason: targetBhStatus.reason,
+      currentTime: targetBhStatus.currentTime,
+      currentDay: targetBhStatus.currentDayName,
+      timezone: targetBhStatus.timezone
     }
   });
 });
@@ -294,7 +305,25 @@ apiRouter.get('/api/status', requireAuth, async (_req: Request, res: Response) =
 /**
  * 3.1 Obter status e configuração de Horário Comercial
  */
-apiRouter.get('/api/business-hours/status', requireAuth, (_req: Request, res: Response) => {
+apiRouter.get('/api/business-hours/status', requireAuth, (req: Request, res: Response) => {
+  const agentId = req.query.agentId as string;
+  if (agentId && agentId !== 'all' && agentId !== '*') {
+    const agent = agentManager.getAgent(agentId);
+    if (agent) {
+      const bh = agent.businessHours || loadBotConfig().businessHours;
+      const status = checkBusinessHoursStatus(agent);
+      return res.json({
+        businessHours: bh,
+        status,
+        agent: {
+          id: agent.id,
+          name: agent.name,
+          companyName: agent.companyName
+        }
+      });
+    }
+  }
+
   const config = loadBotConfig();
   const status = checkBusinessHoursStatus(config);
   res.json({
@@ -308,13 +337,42 @@ apiRouter.get('/api/business-hours/status', requireAuth, (_req: Request, res: Re
  */
 apiRouter.post('/api/business-hours', requireAdmin, (req: Request, res: Response) => {
   try {
-    const { businessHours } = req.body;
+    const { businessHours, agentId } = req.body;
     if (!businessHours) {
       return res.status(400).json({ error: 'Configuração de horário ausente.' });
     }
+
+    if (agentId && agentId !== 'all' && agentId !== '*') {
+      const agent = agentManager.getAgent(agentId);
+      if (agent) {
+        // Preserva feriados existentes do agente se não enviados no payload
+        const holidays = businessHours.holidays || agent.businessHours?.holidays || [];
+        const updatedBh = {
+          ...agent.businessHours,
+          ...businessHours,
+          holidays
+        };
+        const updatedAgent = agentManager.updateAgent(agentId, { businessHours: updatedBh });
+        const status = checkBusinessHoursStatus(updatedAgent || { businessHours: updatedBh });
+        return res.json({
+          success: true,
+          message: `Horário comercial de "${agent.companyName || agent.name}" salvo com sucesso!`,
+          businessHours: updatedBh,
+          status,
+          agentId
+        });
+      }
+    }
+
+    // Se for global ('all' ou sem agentId)
     const updated = saveBotConfig({ businessHours });
     const status = checkBusinessHoursStatus(updated);
-    res.json({ success: true, message: 'Horário comercial salvo com sucesso!', businessHours: updated.businessHours, status });
+    res.json({
+      success: true,
+      message: 'Horário comercial global salvo com sucesso!',
+      businessHours: updated.businessHours,
+      status
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -326,7 +384,7 @@ apiRouter.post('/api/business-hours', requireAdmin, (req: Request, res: Response
 apiRouter.get('/api/business-hours/holidays', requireAuth, (req: Request, res: Response) => {
   try {
     const agentId = req.query.agentId as string;
-    const agent = (agentId && agentId !== '*') ? agentManager.getAgent(agentId) : null;
+    const agent = (agentId && agentId !== '*' && agentId !== 'all') ? agentManager.getAgent(agentId) : null;
     const holidays = agent?.businessHours?.holidays || loadBotConfig().businessHours?.holidays || [];
     res.json({ success: true, holidays });
   } catch (err: any) {
@@ -354,7 +412,7 @@ apiRouter.post('/api/business-hours/holidays', requireAdmin, (req: Request, res:
       createdAt: new Date().toISOString()
     };
 
-    if (agentId && agentId !== '*') {
+    if (agentId && agentId !== '*' && agentId !== 'all') {
       const agent = agentManager.getAgent(agentId);
       if (agent) {
         const list = Array.isArray(agent.businessHours?.holidays) ? [...agent.businessHours.holidays] : [];
@@ -362,10 +420,15 @@ apiRouter.post('/api/business-hours/holidays', requireAdmin, (req: Request, res:
         agentManager.updateAgent(agentId, {
           businessHours: { ...agent.businessHours, holidays: list }
         });
+        return res.status(201).json({
+          success: true,
+          holiday: newHoliday,
+          message: `Feriado adicionado para a empresa "${agent.companyName || agent.name}"!`
+        });
       }
     }
 
-    // Atualiza também na configuração global
+    // Atualiza na configuração global se for 'all' ou sem agentId
     const cfg = loadBotConfig();
     const globalList = Array.isArray(cfg.businessHours?.holidays) ? [...cfg.businessHours.holidays] : [];
     globalList.push(newHoliday);
@@ -385,13 +448,14 @@ apiRouter.delete('/api/business-hours/holidays/:id', requireAdmin, (req: Request
     const { id } = req.params;
     const agentId = req.query.agentId as string;
 
-    if (agentId && agentId !== '*') {
+    if (agentId && agentId !== '*' && agentId !== 'all') {
       const agent = agentManager.getAgent(agentId);
       if (agent && Array.isArray(agent.businessHours?.holidays)) {
         const filtered = agent.businessHours.holidays.filter(h => h.id !== id);
         agentManager.updateAgent(agentId, {
           businessHours: { ...agent.businessHours, holidays: filtered }
         });
+        return res.json({ success: true, message: 'Feriado removido com sucesso!' });
       }
     }
 
@@ -413,10 +477,37 @@ apiRouter.delete('/api/business-hours/holidays/:id', requireAdmin, (req: Request
 apiRouter.post('/api/business-hours/holidays/load-national', requireAdmin, (req: Request, res: Response) => {
   try {
     const { agentId } = req.body;
+    let count = 0;
+
+    if (agentId && agentId !== '*' && agentId !== 'all') {
+      const agent = agentManager.getAgent(agentId);
+      if (agent) {
+        const agentList = Array.isArray(agent.businessHours?.holidays) ? [...agent.businessHours.holidays] : [];
+        for (const def of defaultBrazilianHolidays) {
+          if (!agentList.some(h => h.date === def.date && h.name === def.name)) {
+            agentList.push({
+              id: 'hol_' + Math.random().toString(36).substring(2, 9),
+              ...def,
+              createdAt: new Date().toISOString()
+            });
+            count++;
+          }
+        }
+        agentManager.updateAgent(agentId, {
+          businessHours: { ...agent.businessHours, holidays: agentList }
+        });
+        return res.json({
+          success: true,
+          addedCount: count,
+          count,
+          message: `${count} feriados nacionais carregados para "${agent.companyName || agent.name}"!`
+        });
+      }
+    }
+
     const cfg = loadBotConfig();
     const currentList = Array.isArray(cfg.businessHours?.holidays) ? [...cfg.businessHours.holidays] : [];
 
-    let count = 0;
     for (const def of defaultBrazilianHolidays) {
       if (!currentList.some(h => h.date === def.date && h.name === def.name)) {
         currentList.push({
@@ -430,26 +521,7 @@ apiRouter.post('/api/business-hours/holidays/load-national', requireAdmin, (req:
 
     saveBotConfig({ businessHours: { ...cfg.businessHours, holidays: currentList } });
 
-    if (agentId && agentId !== '*') {
-      const agent = agentManager.getAgent(agentId);
-      if (agent) {
-        const agentList = Array.isArray(agent.businessHours?.holidays) ? [...agent.businessHours.holidays] : [];
-        for (const def of defaultBrazilianHolidays) {
-          if (!agentList.some(h => h.date === def.date && h.name === def.name)) {
-            agentList.push({
-              id: 'hol_' + Math.random().toString(36).substring(2, 9),
-              ...def,
-              createdAt: new Date().toISOString()
-            });
-          }
-        }
-        agentManager.updateAgent(agentId, {
-          businessHours: { ...agent.businessHours, holidays: agentList }
-        });
-      }
-    }
-
-    res.json({ success: true, addedCount: count, message: `${count} feriados nacionais carregados com sucesso!` });
+    res.json({ success: true, addedCount: count, count, message: `${count} feriados nacionais carregados com sucesso!` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

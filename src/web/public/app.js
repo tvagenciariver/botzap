@@ -1,6 +1,7 @@
 // Estado Global, Autenticação e Multiempresa Ativa
 const AUTH_TOKEN_KEY = 'botzap_auth_token';
 const ACTIVE_COMPANY_KEY = 'botzap_active_company_id';
+const LAST_ACTIVE_TAB_KEY = 'botzap_last_active_tab';
 let currentChatId = 'simulador_' + Math.random().toString(36).substring(2, 7) + '@c.us';
 let currentActiveCompanyId = localStorage.getItem(ACTIVE_COMPANY_KEY) || 'all';
 
@@ -48,6 +49,42 @@ function updateTopbarCompanyDisplay() {
   }
 }
 
+function updateScheduleCompanyDisplay(effectiveCompany, agentInfo = null) {
+  const badgeEl = document.getElementById('schedule-company-badge');
+  const bannerTitle = document.getElementById('schedule-banner-title');
+  const bannerDesc = document.getElementById('schedule-banner-desc');
+  const bannerIcon = document.getElementById('schedule-banner-icon');
+
+  const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+    ? allAgents
+    : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+  const agent = agentInfo || agentsList.find(a => a.id === effectiveCompany);
+
+  if (effectiveCompany === 'all' || !agent) {
+    if (badgeEl) {
+      badgeEl.innerHTML = '🌐 Empresa: <strong>Todas as Empresas (Padrão Global)</strong>';
+      badgeEl.style.background = 'rgba(99, 102, 241, 0.15)';
+      badgeEl.style.color = '#818cf8';
+      badgeEl.style.borderColor = 'rgba(99, 102, 241, 0.3)';
+    }
+    if (bannerTitle) bannerTitle.textContent = 'Configurando: Todas as Empresas (Padrão Global)';
+    if (bannerDesc) bannerDesc.textContent = 'Você está editando a grade padrão global. Ao alternar a empresa no topo, a grade carregará os horários e feriados específicos da unidade escolhida.';
+    if (bannerIcon) bannerIcon.textContent = '🌐';
+  } else {
+    const compName = agent.companyName || agent.name;
+    const botName = agent.name;
+    if (badgeEl) {
+      badgeEl.innerHTML = `🏢 Empresa: <strong>${escapeHtml(compName)}</strong> (Bot: ${escapeHtml(botName)})`;
+      badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
+      badgeEl.style.color = '#34d399';
+      badgeEl.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+    }
+    if (bannerTitle) bannerTitle.textContent = `Configurando Empresa: ${compName} (Bot: ${botName})`;
+    if (bannerDesc) bannerDesc.textContent = `Você está visualizando e editando os horários exclusivos da clínica/unidade "${compName}". O bot deste cliente responderá com esta grade específica.`;
+    if (bannerIcon) bannerIcon.textContent = '🏢';
+  }
+}
+
 function setActiveCompany(companyId, reload = true) {
   // Se for atendente vinculado a uma empresa específica, nunca altera o ID
   if (currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*') {
@@ -86,21 +123,38 @@ function setActiveCompany(companyId, reload = true) {
     populateExamAgentsSelect(effectiveCompany !== 'all' ? effectiveCompany : '*');
   }
 
-  // 6. Recarrega dados da view ativa se solicitado
+  // 6. Atualiza badge e banner do Horário Comercial
+  updateScheduleCompanyDisplay(effectiveCompany);
+
+  // 7. Recarrega dados da view ativa se solicitado
   if (reload) {
     const activeNav = document.querySelector('.nav-menu .nav-btn.active');
     const activeTab = activeNav ? activeNav.getAttribute('data-tab') : null;
 
-    if (activeTab === 'appointments' && typeof loadAppointments === 'function') {
+    if (activeTab === 'schedule') {
+      if (typeof loadSchedule === 'function') loadSchedule();
+      if (typeof loadHolidays === 'function') loadHolidays();
+    } else if (activeTab === 'prompts') {
+      if (typeof loadConfig === 'function') loadConfig();
+      if (typeof loadHolidays === 'function') loadHolidays();
+    } else if (activeTab === 'appointments' && typeof loadAppointments === 'function') {
       loadAppointments();
     } else if (activeTab === 'exams' && typeof loadExams === 'function') {
       loadExams();
+    } else if (activeTab === 'chats' && typeof loadChats === 'function') {
+      loadChats();
+    } else if (activeTab === 'agents' && typeof renderAgentsGrid === 'function') {
+      renderAgentsGrid(agentsList);
     } else if (activeTab === 'simulator' && effectiveCompany !== 'all') {
       const simSelect = document.getElementById('sim-agent-select');
       if (simSelect && simSelect.value !== effectiveCompany) {
         simSelect.value = effectiveCompany;
         simSelect.dispatchEvent(new Event('change'));
       }
+    }
+
+    if (typeof checkStatus === 'function') {
+      checkStatus();
     }
   }
 }
@@ -406,6 +460,10 @@ function showToast(message, type = 'info', duration = 3500) {
 }
 
 function switchToTab(targetTab) {
+  if (targetTab && currentUser?.role !== 'attendant') {
+    localStorage.setItem(LAST_ACTIVE_TAB_KEY, targetTab);
+  }
+
   document.querySelectorAll('.nav-menu .nav-btn').forEach(b => {
     if (b.getAttribute('data-tab') === targetTab) {
       b.classList.add('active');
@@ -469,7 +527,11 @@ document.querySelectorAll('.nav-menu .nav-btn').forEach(btn => {
 async function checkStatus() {
   if (!getAuthToken()) return;
   try {
-    const res = await fetchWithAuth('/api/status');
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const statusUrl = (effectiveCompany && effectiveCompany !== 'all')
+      ? `/api/status?agentId=${encodeURIComponent(effectiveCompany)}`
+      : '/api/status';
+    const res = await fetchWithAuth(statusUrl);
     const data = await res.json();
 
     // WAHA Status
@@ -948,10 +1010,18 @@ function renderScheduleTable(schedule = {}) {
 async function loadSchedule() {
   if (!getAuthToken()) return;
   try {
-    const res = await fetchWithAuth('/api/business-hours/status');
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const url = (effectiveCompany && effectiveCompany !== 'all')
+      ? `/api/business-hours/status?agentId=${encodeURIComponent(effectiveCompany)}`
+      : '/api/business-hours/status';
+
+    const res = await fetchWithAuth(url);
     const data = await res.json();
     const bh = data.businessHours || {};
     currentScheduleData = bh;
+
+    // Atualiza Badges e Banners de identificação da empresa no topo do Horário Comercial
+    updateScheduleCompanyDisplay(effectiveCompany, data.agent);
 
     const masterCheckbox = document.getElementById('sched-enabled');
     if (masterCheckbox) {
@@ -971,6 +1041,7 @@ async function loadSchedule() {
 }
 
 async function handleSaveSchedule() {
+  const effectiveCompany = getEffectiveActiveCompanyId();
   const masterEnabled = document.getElementById('sched-enabled')?.checked || false;
   const outOfHoursMessage = document.getElementById('sched-outOfHoursMessage')?.value || '';
   const feedback = document.getElementById('schedule-save-feedback');
@@ -1001,6 +1072,7 @@ async function handleSaveSchedule() {
   }
 
   const payload = {
+    agentId: (effectiveCompany && effectiveCompany !== 'all') ? effectiveCompany : undefined,
     businessHours: {
       enabled: masterEnabled,
       timezone: 'America/Sao_Paulo',
@@ -1019,11 +1091,14 @@ async function handleSaveSchedule() {
 
     if (data.success) {
       if (feedback) {
-        feedback.textContent = '✅ Horário comercial salvo com sucesso!';
+        feedback.textContent = `✅ ${data.message || 'Horário comercial salvo com sucesso!'}`;
         feedback.className = 'feedback-msg text-green';
         setTimeout(() => { feedback.textContent = ''; }, 3500);
       }
-      showToast('Horários de atendimento salvos com sucesso!', 'success');
+      showToast(data.message || 'Horários de atendimento salvos com sucesso!', 'success');
+      // Recarrega agentes e horários
+      await loadAgents();
+      loadSchedule();
       checkStatus();
     } else {
       if (feedback) {
@@ -1055,7 +1130,12 @@ async function loadHolidays() {
   if (!tbody) return;
 
   try {
-    const res = await fetchWithAuth('/api/business-hours/holidays');
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const url = (effectiveCompany && effectiveCompany !== 'all')
+      ? `/api/business-hours/holidays?agentId=${encodeURIComponent(effectiveCompany)}`
+      : '/api/business-hours/holidays';
+
+    const res = await fetchWithAuth(url);
     const data = await res.json();
     holidaysState = data.holidays || [];
     renderHolidaysTable(holidaysState);
@@ -1175,7 +1255,7 @@ function openHolidayModal(holiday = null) {
 
 function closeHolidayModal() {
   const overlay = document.getElementById('modal-holiday-overlay');
-  if (overlay) overlay.style.display = 'none';
+  if (!overlay) overlay.style.display = 'none';
 }
 
 async function saveHolidaySubmit(e) {
@@ -1192,7 +1272,16 @@ async function saveHolidaySubmit(e) {
     return;
   }
 
-  const payload = { id: id || undefined, name, date, type, outOfHoursMessage, enabled };
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const payload = {
+    id: id || undefined,
+    name,
+    date,
+    type,
+    outOfHoursMessage,
+    enabled,
+    agentId: (effectiveCompany && effectiveCompany !== 'all') ? effectiveCompany : undefined
+  };
 
   try {
     const res = await fetchWithAuth('/api/business-hours/holidays', {
@@ -1217,7 +1306,12 @@ window.deleteHoliday = async function(id, name) {
   if (!confirm(`Deseja realmente remover o feriado "${name}"?`)) return;
 
   try {
-    const res = await fetchWithAuth(`/api/business-hours/holidays/${id}`, {
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const url = (effectiveCompany && effectiveCompany !== 'all')
+      ? `/api/business-hours/holidays/${encodeURIComponent(id)}?agentId=${encodeURIComponent(effectiveCompany)}`
+      : `/api/business-hours/holidays/${encodeURIComponent(id)}`;
+
+    const res = await fetchWithAuth(url, {
       method: 'DELETE'
     });
     const data = await res.json();
@@ -1238,8 +1332,13 @@ async function loadNationalHolidays() {
   }
 
   try {
+    const effectiveCompany = getEffectiveActiveCompanyId();
     const res = await fetchWithAuth('/api/business-hours/holidays/load-national', {
-      method: 'POST'
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentId: (effectiveCompany && effectiveCompany !== 'all') ? effectiveCompany : undefined
+      })
     });
     const data = await res.json();
     if (data.success) {
@@ -1253,7 +1352,7 @@ async function loadNationalHolidays() {
   }
 }
 
-// Event Listeners de Feriados
+// Event Listeners de Feriados e Horário Comercial
 document.getElementById('btn-add-holiday')?.addEventListener('click', () => openHolidayModal());
 document.getElementById('btn-load-national-holidays')?.addEventListener('click', loadNationalHolidays);
 document.getElementById('btn-close-holiday-modal')?.addEventListener('click', closeHolidayModal);
@@ -1261,6 +1360,9 @@ document.getElementById('btn-cancel-holiday')?.addEventListener('click', closeHo
 document.getElementById('modal-holiday-form')?.addEventListener('submit', saveHolidaySubmit);
 document.getElementById('modal-holiday-overlay')?.addEventListener('click', (e) => {
   if (e.target.id === 'modal-holiday-overlay') closeHolidayModal();
+});
+document.getElementById('schedule-banner-btn-switch')?.addEventListener('click', () => {
+  openCompanyPickerModal(false);
 });
 
 // ==========================================
@@ -1882,22 +1984,43 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
       setAuthToken(data.token);
       hideLoginModal(data.user || { username, role: 'admin' });
       passwordInput.value = '';
+
+      // 1. Carrega todos os agentes primeiro
+      await loadAgents();
+
+      // 2. Aplica empresa ativa
+      if (data.user?.assignedAgentId && data.user.assignedAgentId !== '*') {
+        setActiveCompany(data.user.assignedAgentId, true);
+      } else {
+        const savedCompany = localStorage.getItem(ACTIVE_COMPANY_KEY) || 'all';
+        setActiveCompany(savedCompany, true);
+      }
+
       checkStatus();
       if (data.user?.role === 'admin') {
         loadConfig();
         loadSchedule();
+        loadHolidays();
         loadWahaConfig();
-        await loadAgents();
       }
       loadAgentsForSimulator();
-      loadAppointments();
+      await loadAppointments();
+      startAppointmentsRealtimeSync();
+
       if (data.user?.role === 'attendant') {
         switchToTab('appointments');
+      } else {
+        const savedTab = localStorage.getItem(LAST_ACTIVE_TAB_KEY);
+        if (savedTab && document.getElementById(`pane-${savedTab}`)) {
+          switchToTab(savedTab);
+        }
       }
 
-      // Se for admin ou atendente com acesso a todas as empresas, abre o seletor obrigatório de empresa logo após o login
-      if (!data.user || data.user.role === 'admin' || !data.user.assignedAgentId || data.user.assignedAgentId === '*') {
-        openCompanyPickerModal(true);
+      // Se for admin ou atendente com acesso a todas as empresas, abre o seletor obrigatório se nenhuma estiver selecionada
+      if (!currentActiveCompanyId || currentActiveCompanyId === 'all') {
+        if (!data.user || data.user.role === 'admin' || !data.user.assignedAgentId || data.user.assignedAgentId === '*') {
+          openCompanyPickerModal(true);
+        }
       }
     } else {
       errorEl.textContent = data.error || 'Credenciais inválidas. Verifique usuário e senha.';
@@ -1987,14 +2110,20 @@ function renderAgentsGrid(agents) {
       }
     }
 
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    const isSelectedCompany = (effectiveCompany !== 'all' && effectiveCompany === agent.id);
+
     return `
-      <div class="agent-card ${isActive ? '' : 'inactive'}" id="agent-card-${agent.id}">
+      <div class="agent-card ${isActive ? '' : 'inactive'}" id="agent-card-${agent.id}" style="${isSelectedCompany ? 'border: 2px solid #6366f1; box-shadow: 0 0 16px rgba(99, 102, 241, 0.25);' : ''}">
         <div>
           <div class="agent-card-header">
             <div class="agent-card-title-group">
               <div class="agent-card-avatar">${provider === 'openai' ? '🟢' : '🔵'}</div>
               <div>
-                <h3 class="agent-card-name">${escapeHtml(agent.name)}</h3>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <h3 class="agent-card-name">${escapeHtml(agent.name)}</h3>
+                  ${isSelectedCompany ? '<span class="badge badge-primary" style="font-size: 10px; padding: 2px 6px;">🏢 Ativa</span>' : ''}
+                </div>
                 <div class="agent-card-company">🏢 ${escapeHtml(agent.companyName)}</div>
               </div>
             </div>
@@ -4231,26 +4360,38 @@ async function initApp() {
     if (res.ok) {
       const data = await res.json();
       hideLoginModal(data.user || { username: 'admin', role: 'admin' });
+
+      // 1. Carrega todos os agentes primeiro (fundamental para que o multiempresa funcione em todas as abas)
+      await loadAgents();
+
+      // 2. Aplica empresa ativa salva no localStorage ou vinculada ao atendente
+      if (data.user?.assignedAgentId && data.user.assignedAgentId !== '*') {
+        setActiveCompany(data.user.assignedAgentId, false);
+      } else {
+        const savedCompany = localStorage.getItem(ACTIVE_COMPANY_KEY) || 'all';
+        setActiveCompany(savedCompany, false);
+      }
+
       checkStatus();
       if (data.user?.role === 'admin') {
         loadConfig();
         loadSchedule();
+        loadHolidays();
         loadWahaConfig();
-        await loadAgents();
       }
       loadAgentsForSimulator();
 
-      // Aplica empresa ativa salva no localStorage ou vinculada ao atendente
-      if (data.user?.assignedAgentId && data.user.assignedAgentId !== '*') {
-        setActiveCompany(data.user.assignedAgentId, false);
-      } else {
-        setActiveCompany(currentActiveCompanyId, false);
-      }
-
       await loadAppointments();
       startAppointmentsRealtimeSync();
+
+      // 3. Restaura a aba que o usuário estava antes do F5 (se admin), ou appointments se atendente
       if (data.user?.role === 'attendant') {
         switchToTab('appointments');
+      } else {
+        const savedTab = localStorage.getItem(LAST_ACTIVE_TAB_KEY);
+        if (savedTab && document.getElementById(`pane-${savedTab}`)) {
+          switchToTab(savedTab);
+        }
       }
     } else {
       clearAuthToken();
@@ -6633,44 +6774,6 @@ initStatusCardState();
 
 // Inicializa Drag & Drop de exames no carregamento
 setupExamDropzone();
-
-// ============================================================================
-// Inicialização Automática da Aplicação e Restauração de Sessão
-// ============================================================================
-async function initApp() {
-  const token = getAuthToken();
-  if (token) {
-    try {
-      const res = await fetch('/api/auth/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.authenticated && data.user) {
-          hideLoginModal(data.user);
-          checkStatus();
-          if (data.user.role === 'admin') {
-            loadConfig();
-            loadSchedule();
-            loadHolidays();
-            loadWahaConfig();
-            await loadAgents();
-          }
-          loadAgentsForSimulator();
-          loadAppointments();
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn('Falha ao restaurar sessão existente:', e);
-    }
-  }
-  // Se não houver token ou for inválido, exibe tela de login
-  showLoginModal();
-}
-
-// Executa inicialização
-initApp();
 
 
 
