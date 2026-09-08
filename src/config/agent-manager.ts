@@ -172,10 +172,13 @@ export class AgentManager {
       enableTypingSimulation: data.enableTypingSimulation !== false,
       enableSendSeen: data.enableSendSeen !== false,
       enableAudioTranscription: !!data.enableAudioTranscription,
+      enableAutoReminders: data.enableAutoReminders !== false,
+      autoReminderTime: data.autoReminderTime || '18:00',
       businessHours: data.businessHours || defaultHours,
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
+
 
     if (newAgent.isDefault) {
       // Remove isDefault dos demais

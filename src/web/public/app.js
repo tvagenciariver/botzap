@@ -3890,6 +3890,127 @@ async function triggerBatchReminders() {
   }
 }
 
+// ============================================================================
+// ⏰ CONFIGURAÇÃO DE LEMBRETES AUTOMÁTICOS D-1
+// ============================================================================
+
+async function loadReminderConfig() {
+  if (!getAuthToken()) return;
+  try {
+    const res = await fetchWithAuth('/api/appointments/reminders/config');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const enabledCheckbox = document.getElementById('cfg-auto-reminders-enabled');
+    const timeInput = document.getElementById('cfg-auto-reminders-time');
+    const badgeStatus = document.getElementById('badge-auto-reminders-status');
+    const statusInfo = document.getElementById('reminder-modal-status-info');
+
+    if (enabledCheckbox) enabledCheckbox.checked = data.enabled !== false;
+    if (timeInput && data.targetTime) timeInput.value = data.targetTime;
+
+    if (badgeStatus) {
+      if (data.enabled !== false) {
+        badgeStatus.textContent = `⏰ Lembretes: Ativo às ${data.targetTime || '18:00'} (D-1)`;
+        badgeStatus.style.background = 'rgba(99, 102, 241, 0.15)';
+        badgeStatus.style.color = '#818cf8';
+        badgeStatus.style.borderColor = 'rgba(99, 102, 241, 0.3)';
+      } else {
+        badgeStatus.textContent = '⏰ Lembretes: Desativado';
+        badgeStatus.style.background = 'rgba(100, 116, 139, 0.15)';
+        badgeStatus.style.color = '#94a3b8';
+        badgeStatus.style.borderColor = 'rgba(100, 116, 139, 0.3)';
+      }
+    }
+
+    if (statusInfo) {
+      let historyText = 'Nenhum envio registrado hoje.';
+      if (data.lastRunSummary) {
+        const trigLabel = data.lastRunSummary.trigger === 'auto' ? 'Automático' : 'Manual';
+        const datePart = data.lastRunSummary.timestamp ? data.lastRunSummary.timestamp.substring(11, 16) : '';
+        historyText = `Último envio: ${datePart} (${data.lastRunSummary.sent} de ${data.lastRunSummary.total} enviados - ${trigLabel})`;
+      } else if (data.lastRunDate) {
+        historyText = `Última data executada: ${data.lastRunDate}`;
+      }
+
+      statusInfo.innerHTML = `
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+          <span>🌐 Relógio do Servidor: <strong>${data.currentTime || '--:--'}</strong></span>
+          <span>Fuso: <strong>${data.timezone || 'America/Sao_Paulo'}</strong></span>
+        </div>
+        <div style="color: var(--text-main); font-weight: 500;">
+          📌 ${historyText}
+        </div>
+      `;
+    }
+  } catch (err) {
+    console.error('Erro ao carregar configuração de lembretes:', err);
+  }
+}
+
+function openReminderConfigModal() {
+  const modal = document.getElementById('modal-reminder-config-overlay');
+  if (modal) {
+    modal.style.display = 'flex';
+    loadReminderConfig();
+  }
+}
+
+function closeReminderConfigModal() {
+  const modal = document.getElementById('modal-reminder-config-overlay');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveReminderConfig() {
+  const enabled = document.getElementById('cfg-auto-reminders-enabled')?.checked ?? true;
+  const time = document.getElementById('cfg-auto-reminders-time')?.value || '18:00';
+
+  try {
+    showToast('Salvando configuração de lembretes...', 'info');
+    const res = await fetchWithAuth('/api/appointments/reminders/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enableAutoReminders: enabled,
+        autoReminderTime: time
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Falha ao salvar.');
+
+    showToast(`✅ Lembretes Automáticos atualizados! ${enabled ? `Ativo diariamente às ${time}` : 'Envio automático desativado.'}`, 'success');
+    closeReminderConfigModal();
+    loadReminderConfig();
+  } catch (err) {
+    showToast(`Erro ao salvar: ${err.message}`, 'error');
+  }
+}
+
+async function testReminderDispatchNow() {
+  if (!confirm('Deseja executar o disparo de lembretes para as consultas de amanhã agora mesmo (teste em lote)?')) return;
+
+  try {
+    showToast('Executando disparo imediato de lembretes D-1...', 'info');
+    const res = await fetchWithAuth('/api/appointments/reminders/run-now', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: currentAppointmentsAgentFilter })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      showToast(`⚡ Disparo concluído: ${data.sent} de ${data.total} lembrete(s) enviado(s) para amanhã!`, 'success');
+      loadAppointments();
+      loadReminderConfig();
+    } else {
+      showToast(data.error || 'Não foi possível disparar os lembretes.', 'error');
+    }
+  } catch (err) {
+    showToast(`Erro ao testar lembretes: ${err.message}`, 'error');
+  }
+}
+
+
 /**
  * Exclui agendamento
  */
@@ -4514,6 +4635,13 @@ document.getElementById('btn-view-table')?.addEventListener('click', () => {
 document.getElementById('btn-new-appointment')?.addEventListener('click', () => openNewAppointmentModal());
 document.getElementById('btn-manage-specialists')?.addEventListener('click', openSpecialistsModal);
 document.getElementById('btn-trigger-reminders')?.addEventListener('click', triggerBatchReminders);
+document.getElementById('btn-open-reminder-config')?.addEventListener('click', openReminderConfigModal);
+document.getElementById('badge-auto-reminders-status')?.addEventListener('click', openReminderConfigModal);
+document.getElementById('btn-close-reminder-modal')?.addEventListener('click', closeReminderConfigModal);
+document.getElementById('btn-cancel-reminder-modal')?.addEventListener('click', closeReminderConfigModal);
+document.getElementById('btn-save-reminder-config')?.addEventListener('click', saveReminderConfig);
+document.getElementById('btn-reminder-test-now')?.addEventListener('click', testReminderDispatchNow);
+
 document.getElementById('btn-filter-encaixes')?.addEventListener('click', () => {
   // Filtra cancelados/encaixes na tabela ou timeline
   currentAppointmentsStatusFilter = 'cancelled';
@@ -4521,6 +4649,7 @@ document.getElementById('btn-filter-encaixes')?.addEventListener('click', () => 
   if (statusSelect) statusSelect.value = 'cancelled';
   loadAppointments();
 });
+
 
 // Inicialização da Aplicação
 async function initApp() {
@@ -4559,7 +4688,9 @@ async function initApp() {
       loadAgentsForSimulator();
 
       await loadAppointments();
+      loadReminderConfig();
       startAppointmentsRealtimeSync();
+
 
       // 3. Restaura a aba que o usuário estava antes do F5 (se admin), ou appointments se atendente
       if (data.user?.role === 'attendant') {

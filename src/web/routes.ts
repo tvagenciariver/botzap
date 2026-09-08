@@ -14,7 +14,9 @@ import { WahaWebhookEvent } from '../waha/types.js';
 import { checkBusinessHoursStatus } from '../orchestrator/schedule-helper.js';
 import { appointmentManager } from '../appointments/appointment-manager.js';
 import { notificationService } from '../appointments/notification-service.js';
+import { reminderScheduler } from '../appointments/reminder-scheduler.js';
 import { partnerManager } from '../appointments/partner-manager.js';
+
 import { examService } from '../appointments/exam-service.js';
 import { userManager } from '../auth/user-manager.js';
 import { UserSession } from '../auth/user-types.js';
@@ -1172,6 +1174,44 @@ apiRouter.post('/api/appointments/send-reminders', requireAuth, async (req: Requ
     res.status(500).json({ error: err.message });
   }
 });
+
+/**
+ * Obter status e configuração do Envio Automático de Lembretes D-1
+ */
+apiRouter.get('/api/appointments/reminders/config', requireAuth, (_req: Request, res: Response) => {
+  const status = reminderScheduler.getStatus();
+  res.json({ success: true, ...status });
+});
+
+/**
+ * Atualizar configuração do Envio Automático de Lembretes D-1
+ */
+apiRouter.put('/api/appointments/reminders/config', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { enableAutoReminders, autoReminderTime } = req.body;
+    const updated = reminderScheduler.updateConfig({ enableAutoReminders, autoReminderTime });
+    res.json({ success: true, ...updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * Disparar lembretes D-1 imediatamente via scheduler (com registro de log)
+ */
+apiRouter.post('/api/appointments/reminders/run-now', requireAuth, async (req: Request, res: Response) => {
+  try {
+    let { agentId } = req.body;
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      agentId = req.user.assignedAgentId;
+    }
+    const result = await reminderScheduler.checkAndRun('manual', agentId);
+    res.json({ success: true, ...result, status: reminderScheduler.getStatus() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 /**
  * Envia lembrete D-1 individual para um agendamento

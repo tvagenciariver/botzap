@@ -7,6 +7,8 @@ import { env, loadBotConfig } from './config/index.js';
 import { apiRouter } from './web/routes.js';
 import { wahaClient } from './waha/client.js';
 import { geminiService } from './gemini/client.js';
+import { reminderScheduler } from './appointments/reminder-scheduler.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,9 +54,14 @@ app.listen(env.port, async () => {
   console.log(`⚡ Sessão WAHA padrão:  ${env.wahaSession} (${env.wahaBaseUrl})`);
   console.log(`✨ Modelo Gemini Flash: ${config.model || env.geminiModel}`);
   console.log(`🔑 Gemini Configurado:  ${geminiService.isConfigured() ? 'SIM ✅' : 'NÃO (Informe a chave no painel web) ⚠️'}`);
+  console.log(`⏰ Lembretes Automáticos D-1: ${config.enableAutoReminders !== false ? `Ativo às ${config.autoReminderTime || '18:00'} ✅` : 'Desativado ❌'}`);
   console.log('======================================================\n');
 
+  // Inicializa o agendador automático em segundo plano para lembretes D-1
+  reminderScheduler.start();
+
   // Teste de conexão não-bloqueante com a WAHA
+
   try {
     const status = await wahaClient.getSessionStatus(env.wahaSession);
     if (status) {

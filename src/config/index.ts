@@ -95,7 +95,12 @@ export interface BotConfig {
   webhookPublicUrl?: string;
   adminUser?: string;
   adminPassword?: string;
+  // Configurações de Envio Automático de Lembretes D-1
+  enableAutoReminders?: boolean;
+  autoReminderTime?: string; // ex: "18:00"
+  lastAutoReminderDate?: string; // "YYYY-MM-DD"
 }
+
 
 const configPath = path.resolve(process.cwd(), 'data', 'bot_config.json');
 const envPath = path.resolve(process.cwd(), '.env');
@@ -166,9 +171,13 @@ export function loadBotConfig(): BotConfig {
     wahaSession: stored.wahaSession || process.env.WAHA_SESSION || 'default',
     webhookPublicUrl: stored.webhookPublicUrl || process.env.WEBHOOK_PUBLIC_URL || 'http://localhost:3001',
     adminUser: stored.adminUser || process.env.ADMIN_USER || 'admin',
-    adminPassword: stored.adminPassword || process.env.ADMIN_PASSWORD || 'File@152341'
+    adminPassword: stored.adminPassword || process.env.ADMIN_PASSWORD || 'File@152341',
+    enableAutoReminders: stored.enableAutoReminders ?? true,
+    autoReminderTime: stored.autoReminderTime || '18:00',
+    lastAutoReminderDate: stored.lastAutoReminderDate || ''
   };
 }
+
 
 export function saveBotConfig(newConfig: Partial<BotConfig>): BotConfig {
   const current = loadBotConfig();
