@@ -32,7 +32,7 @@ export class AppointmentManager {
     // 1. Carrega ou inicializa Especialistas
     if (fs.existsSync(this.specialistsFile)) {
       try {
-        const raw = fs.readFileSync(this.specialistsFile, 'utf-8');
+        const raw = fs.readFileSync(this.specialistsFile, 'utf-8').replace(/^\uFEFF/, '');
         this.specialists = JSON.parse(raw);
       } catch (err) {
         console.error('[AppointmentManager] Erro ao carregar specialists.json:', err);
@@ -46,7 +46,7 @@ export class AppointmentManager {
     // 2. Carrega ou inicializa Serviços
     if (fs.existsSync(this.servicesFile)) {
       try {
-        const raw = fs.readFileSync(this.servicesFile, 'utf-8');
+        const raw = fs.readFileSync(this.servicesFile, 'utf-8').replace(/^\uFEFF/, '');
         this.services = JSON.parse(raw);
       } catch (err) {
         console.error('[AppointmentManager] Erro ao carregar services.json:', err);
@@ -60,7 +60,7 @@ export class AppointmentManager {
     // 3. Carrega Agendamentos
     if (fs.existsSync(this.appointmentsFile)) {
       try {
-        const raw = fs.readFileSync(this.appointmentsFile, 'utf-8');
+        const raw = fs.readFileSync(this.appointmentsFile, 'utf-8').replace(/^\uFEFF/, '');
         this.appointments = JSON.parse(raw);
       } catch (err) {
         console.error('[AppointmentManager] Erro ao carregar appointments.json:', err);

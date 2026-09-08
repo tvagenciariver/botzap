@@ -22,13 +22,15 @@ export interface LogEntry {
   chatId: string;
   contactName?: string;
   message: string;
+  agentId?: string;
   agentName?: string;
+  companyName?: string;
 }
 
 export class AgentOrchestrator {
   private agents: IAgent[] = [];
   private logs: LogEntry[] = [];
-  private maxLogs: number = 200;
+  private maxLogs: number = 500;
   private processedMessageIds: Set<string> = new Set();
   private botStartTime: number = Date.now();
 
@@ -101,10 +103,49 @@ export class AgentOrchestrator {
   }
 
   addLog(entry: Omit<LogEntry, 'id' | 'timestamp'>): void {
+    let agentId = entry.agentId;
+    let agentName = entry.agentName;
+    let companyName = entry.companyName;
+
+    // 1. Se agentId foi fornecido mas não agentName ou companyName, auto-completa
+    if (agentId && (!agentName || !companyName)) {
+      const a = agentManager.getAgent(agentId);
+      if (a) {
+        if (!agentName) agentName = a.name;
+        if (!companyName) companyName = a.companyName || a.name;
+      }
+    } else if (!agentId && agentName) {
+      // 2. Se apenas agentName foi fornecido, descobre agentId e companyName
+      const all = agentManager.listAgents();
+      const match = all.find(a => a.name.toLowerCase() === agentName!.toLowerCase() || a.companyName?.toLowerCase() === agentName!.toLowerCase());
+      if (match) {
+        agentId = match.id;
+        companyName = match.companyName || match.name;
+      }
+    } else if (!agentId && !agentName && entry.message) {
+      // 3. Se não passou agentId/agentName, verifica se a mensagem menciona o bot/empresa
+      const all = agentManager.listAgents();
+      for (const a of all) {
+        if (
+          entry.message.includes(`[${a.name}]`) ||
+          entry.message.includes(`Bot [${a.name}]`) ||
+          (a.companyName && entry.message.includes(a.companyName))
+        ) {
+          agentId = a.id;
+          agentName = a.name;
+          companyName = a.companyName || a.name;
+          break;
+        }
+      }
+    }
+
     const log: LogEntry = {
       ...entry,
       id: Math.random().toString(36).substring(2, 9),
-      timestamp: new Date().toLocaleTimeString('pt-BR')
+      timestamp: new Date().toLocaleTimeString('pt-BR'),
+      agentId,
+      agentName,
+      companyName
     };
     this.logs.unshift(log);
     if (this.logs.length > this.maxLogs) {
@@ -112,12 +153,19 @@ export class AgentOrchestrator {
     }
   }
 
-  getLogs(): LogEntry[] {
-    return this.logs;
+  getLogs(agentId?: string): LogEntry[] {
+    if (!agentId || agentId === 'all' || agentId === '*') {
+      return this.logs;
+    }
+    return this.logs.filter(l => l.agentId === agentId);
   }
 
-  clearLogs(): void {
-    this.logs = [];
+  clearLogs(agentId?: string): void {
+    if (!agentId || agentId === 'all' || agentId === '*') {
+      this.logs = [];
+    } else {
+      this.logs = this.logs.filter(l => l.agentId !== agentId);
+    }
   }
 
   /**
@@ -507,7 +555,9 @@ export class AgentOrchestrator {
           chatId,
           contactName,
           message: response.replyText,
-          agentName: response.agentName || agent.name
+          agentId: agent.id,
+          agentName: response.agentName || agent.name,
+          companyName: agent.companyName || agent.name
         });
       }
     } catch (error: any) {
@@ -518,7 +568,10 @@ export class AgentOrchestrator {
       this.addLog({
         type: 'error',
         chatId,
-        message: `Erro ao responder: ${error.message}`
+        message: `Erro ao responder: ${error.message}`,
+        agentId: agent.id,
+        agentName: agent.name,
+        companyName: agent.companyName || agent.name
       });
     }
   }

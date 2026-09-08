@@ -1357,14 +1357,21 @@
       <!-- TAB 4: Logs em Tempo Real -->
       <section class="tab-pane" id="pane-logs">
         <div class="card">
-          <div class="card-header d-flex justify-between align-center">
+          <div class="card-header d-flex justify-between align-center flex-wrap gap-2">
             <div>
-              <h3>📋 Logs de Eventos e Atendimentos</h3>
-              <p>Acompanhe mensagens recebidas da WAHA, respostas geradas pelo Gemini e transbordos.</p>
+              <h3>📋 Logs de Eventos e Atendimentos em Tempo Real</h3>
+              <p>Acompanhe mensagens recebidas da WAHA, respostas geradas pela IA e transbordos com filtro individual por empresa.</p>
             </div>
-            <div>
-              <button class="btn btn-outline btn-sm" id="btn-clear-logs">Limpar Logs</button>
-              <button class="btn btn-secondary btn-sm" id="btn-refresh-logs">Atualizar</button>
+            <div class="d-flex align-center gap-2 flex-wrap">
+              <div class="d-flex align-center gap-1" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;">
+                <span style="font-size: 13px;">🏢</span>
+                <label for="logs-filter-agent" style="font-size: 11.5px; font-weight: 600; white-space: nowrap; margin: 0;">Empresa:</label>
+                <select id="logs-filter-agent" class="form-control form-control-sm" style="min-width: 200px; padding: 3px 6px; font-size: 12px;">
+                  <option value="all">🌐 Todas as Empresas (Geral)</option>
+                </select>
+              </div>
+              <button class="btn btn-outline btn-sm" id="btn-clear-logs" title="Limpar logs visíveis">🗑️ Limpar</button>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-logs" title="Atualizar agora">🔄 Atualizar</button>
             </div>
           </div>
           <div class="card-body">

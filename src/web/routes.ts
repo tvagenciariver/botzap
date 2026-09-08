@@ -802,17 +802,20 @@ apiRouter.post('/api/simulate', requireModule('simulator'), async (req: Request,
 });
 
 /**
- * 12. Obter logs em tempo real
+ * 12. Obter logs em tempo real (Exclusivo Administrador)
+ * Suporta filtro individual por empresa via ?agentId=...
  */
-apiRouter.get('/api/logs', requireAuth, (_req: Request, res: Response) => {
-  res.json({ logs: orchestrator.getLogs() });
+apiRouter.get('/api/logs', requireAdmin, (req: Request, res: Response) => {
+  const agentId = req.query.agentId as string | undefined;
+  res.json({ logs: orchestrator.getLogs(agentId) });
 });
 
 /**
- * 13. Limpar logs
+ * 13. Limpar logs (Exclusivo Administrador)
  */
-apiRouter.delete('/api/logs', requireAdmin, (_req: Request, res: Response) => {
-  orchestrator.clearLogs();
+apiRouter.delete('/api/logs', requireAdmin, (req: Request, res: Response) => {
+  const agentId = req.query.agentId as string | undefined;
+  orchestrator.clearLogs(agentId);
   res.json({ success: true });
 });
 

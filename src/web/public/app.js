@@ -123,6 +123,12 @@ function setActiveCompany(companyId, reload = true) {
     populateExamAgentsSelect(effectiveCompany !== 'all' ? effectiveCompany : '*');
   }
 
+  // 5.5 Sincroniza Filtro de Logs em Tempo Real (Admin)
+  const logsFilterSelect = document.getElementById('logs-filter-agent');
+  if (logsFilterSelect) {
+    logsFilterSelect.value = effectiveCompany;
+  }
+
   // 6. Atualiza badge e banner do Horário Comercial
   updateScheduleCompanyDisplay(effectiveCompany);
 
@@ -143,6 +149,8 @@ function setActiveCompany(companyId, reload = true) {
       loadExams();
     } else if (activeTab === 'chats' && typeof loadChats === 'function') {
       loadChats();
+    } else if (activeTab === 'logs' && typeof loadLogs === 'function') {
+      loadLogs();
     } else if (activeTab === 'agents' && typeof renderAgentsGrid === 'function') {
       renderAgentsGrid(agentsList);
     } else if (activeTab === 'simulator' && effectiveCompany !== 'all') {
@@ -1707,26 +1715,55 @@ window.clearChat = async function(chatId) {
   loadChats();
 };
 
-// 5. Logs em Tempo Real
+// 5. Logs em Tempo Real (Área do Administrador)
 async function loadLogs() {
   if (!getAuthToken()) return;
   const consoleEl = document.getElementById('logs-console');
+  if (!consoleEl) return;
+
   try {
-    const res = await fetchWithAuth('/api/logs');
+    const filterSelect = document.getElementById('logs-filter-agent');
+    let selectedAgent = filterSelect ? filterSelect.value : null;
+
+    // Se o filtro estiver sem valor definido, sincroniza com o active company
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    if (filterSelect && (!filterSelect.value || filterSelect.value === '')) {
+      if (effectiveCompany && effectiveCompany !== 'all') {
+        filterSelect.value = effectiveCompany;
+        selectedAgent = effectiveCompany;
+      } else {
+        filterSelect.value = 'all';
+        selectedAgent = 'all';
+      }
+    }
+
+    const url = (selectedAgent && selectedAgent !== 'all')
+      ? `/api/logs?agentId=${encodeURIComponent(selectedAgent)}`
+      : '/api/logs';
+
+    const res = await fetchWithAuth(url);
     const data = await res.json();
 
     if (!data.logs || data.logs.length === 0) {
-      consoleEl.innerHTML = '<div class="log-entry info"><span class="log-text">Nenhum evento registrado ainda.</span></div>';
+      const emptyMsg = (selectedAgent && selectedAgent !== 'all')
+        ? 'Nenhum evento registrado para esta empresa ainda.'
+        : 'Nenhum evento registrado ainda.';
+      consoleEl.innerHTML = `<div class="log-entry info"><span class="log-text">${emptyMsg}</span></div>`;
       return;
     }
 
     consoleEl.innerHTML = data.logs.map(log => {
       const tagClass = `tag-${log.type}`;
+      const companyTag = (log.companyName || log.agentName)
+        ? `<span class="badge badge-purple" style="font-size: 10px; margin-right: 6px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">🏢 ${escapeHtml(log.companyName || log.agentName)}</span>`
+        : `<span class="badge badge-secondary" style="font-size: 10px; margin-right: 6px; padding: 2px 6px; border-radius: 4px; background: rgba(148, 163, 184, 0.1); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.2);">🌐 Sistema</span>`;
+
       return `
         <div class="log-entry">
-          <span class="log-time">${log.timestamp}</span>
-          <span class="log-tag ${tagClass}">${log.type.toUpperCase()}</span>
-          <span class="log-text"><strong>[${log.chatId}]</strong> ${log.message}</span>
+          <span class="log-time">${escapeHtml(log.timestamp || '')}</span>
+          <span class="log-tag ${tagClass}">${escapeHtml((log.type || 'info').toUpperCase())}</span>
+          ${companyTag}
+          <span class="log-text"><strong>[${escapeHtml(log.chatId || '')}]</strong> ${escapeHtml(log.message || '')}</span>
         </div>
       `;
     }).join('');
@@ -1735,9 +1772,17 @@ async function loadLogs() {
   }
 }
 
+document.getElementById('logs-filter-agent')?.addEventListener('change', () => {
+  loadLogs();
+});
 document.getElementById('btn-refresh-logs')?.addEventListener('click', loadLogs);
 document.getElementById('btn-clear-logs')?.addEventListener('click', async () => {
-  await fetchWithAuth('/api/logs', { method: 'DELETE' });
+  const filterSelect = document.getElementById('logs-filter-agent');
+  const selectedAgent = filterSelect ? filterSelect.value : 'all';
+  const url = (selectedAgent && selectedAgent !== 'all')
+    ? `/api/logs?agentId=${encodeURIComponent(selectedAgent)}`
+    : '/api/logs';
+  await fetchWithAuth(url, { method: 'DELETE' });
   loadLogs();
 });
 
@@ -3427,6 +3472,21 @@ function populateAgentsDropdowns(agents) {
       userAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${escapeHtml(a.name)} (${escapeHtml(a.companyName || 'Empresa')})</option>`;
     });
     if (current) userAgentSelect.value = current;
+  }
+
+  const logsFilterSelect = document.getElementById('logs-filter-agent');
+  if (logsFilterSelect) {
+    const currentLogsVal = logsFilterSelect.value;
+    logsFilterSelect.innerHTML = '<option value="all">🌐 Todas as Empresas (Geral)</option>';
+    agentsList.forEach(a => {
+      const label = a.companyName ? `${escapeHtml(a.companyName)} (${escapeHtml(a.name)})` : escapeHtml(a.name);
+      logsFilterSelect.innerHTML += `<option value="${a.id}">🏢 ${label}</option>`;
+    });
+    if (isCompanyLocked) {
+      logsFilterSelect.value = effectiveCompany;
+    } else if (currentLogsVal) {
+      logsFilterSelect.value = currentLogsVal;
+    }
   }
 
   updateTopbarCompanyDisplay();
