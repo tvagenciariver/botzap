@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { UserProfile, UserSession } from './user-types.js';
+import { UserProfile, UserSession, AppModule } from './user-types.js';
 import { loadBotConfig, env } from '../config/index.js';
 
 export class UserManager {
@@ -71,6 +71,7 @@ export class UserManager {
         name: 'Administrador Geral',
         role: 'admin',
         assignedAgentId: '*',
+        allowedModules: ['appointments', 'exams', 'chats', 'simulator'],
         active: true,
         createdAt: new Date().toISOString()
       },
@@ -81,6 +82,7 @@ export class UserManager {
         name: 'Recepção / Atendimento',
         role: 'attendant',
         assignedAgentId: '*',
+        allowedModules: ['appointments', 'exams', 'chats', 'simulator'],
         active: true,
         createdAt: new Date().toISOString()
       }
@@ -111,6 +113,7 @@ export class UserManager {
     name: string;
     role: 'admin' | 'attendant';
     assignedAgentId?: string;
+    allowedModules?: AppModule[];
   }): Omit<UserProfile, 'password'> {
     const cleanUsername = data.username.toLowerCase().trim();
 
@@ -122,6 +125,8 @@ export class UserManager {
       throw new Error('A senha deve ter no mínimo 4 caracteres.');
     }
 
+    const defaultModules: AppModule[] = ['appointments', 'exams', 'chats', 'simulator'];
+
     const newUser: UserProfile = {
       id: 'usr_' + Math.random().toString(36).substring(2, 9),
       username: cleanUsername,
@@ -129,6 +134,9 @@ export class UserManager {
       name: data.name.trim(),
       role: data.role || 'attendant',
       assignedAgentId: data.assignedAgentId || '*',
+      allowedModules: Array.isArray(data.allowedModules) && data.allowedModules.length > 0
+        ? data.allowedModules
+        : (data.role === 'admin' ? defaultModules : ['appointments']),
       active: true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -163,6 +171,10 @@ export class UserManager {
       id, // Imutável
       updatedAt: new Date().toISOString()
     };
+
+    if (updates.allowedModules) {
+      updatedUser.allowedModules = updates.allowedModules;
+    }
 
     // Só altera senha se tiver sido enviada e preenchida
     if (!updates.password || !updates.password.trim()) {
@@ -210,6 +222,7 @@ export class UserManager {
     }
 
     const token = crypto.randomBytes(32).toString('hex');
+    const defaultModules: AppModule[] = ['appointments', 'exams', 'chats', 'simulator'];
     const session: UserSession = {
       token,
       userId: user.id,
@@ -217,6 +230,9 @@ export class UserManager {
       name: user.name,
       role: user.role,
       assignedAgentId: user.assignedAgentId || '*',
+      allowedModules: Array.isArray(user.allowedModules) && user.allowedModules.length > 0
+        ? user.allowedModules
+        : (user.role === 'admin' ? defaultModules : ['appointments', 'exams', 'chats', 'simulator']),
       createdAt: Date.now()
     };
 

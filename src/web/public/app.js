@@ -342,14 +342,28 @@ function applyRolePermissions(user) {
     el.style.display = isAdmin ? '' : 'none';
   });
 
-  // 2. Se for atendente, redireciona caso esteja em uma aba proibida
+  // 2. Controla visibilidade de abas conforme módulos permitidos
+  const userModules = Array.isArray(user.allowedModules) && user.allowedModules.length > 0
+    ? user.allowedModules
+    : (isAdmin ? ['appointments', 'exams', 'chats', 'simulator'] : ['appointments', 'exams', 'chats', 'simulator']);
+
+  document.querySelectorAll('.nav-menu .nav-btn[data-module]').forEach(btn => {
+    const mod = btn.getAttribute('data-module');
+    if (isAttendant) {
+      btn.style.display = userModules.includes(mod) ? '' : 'none';
+    } else {
+      btn.style.display = '';
+    }
+  });
+
+  // 3. Se for atendente, redireciona caso esteja em uma aba proibida
   if (isAttendant) {
     const activeNav = document.querySelector('.nav-menu .nav-btn.active');
     const activeTab = activeNav ? activeNav.getAttribute('data-tab') : null;
-    const allowedTabs = ['appointments', 'simulator', 'chats', 'exams'];
 
-    if (!allowedTabs.includes(activeTab)) {
-      switchToTab('appointments');
+    if (!activeTab || !userModules.includes(activeTab)) {
+      const defaultTab = userModules[0] || 'appointments';
+      switchToTab(defaultTab);
     }
 
     // Se vinculado a um cliente/agente específico (não '*'), aplica filtro automático e oculta o switcher
@@ -460,7 +474,15 @@ function showToast(message, type = 'info', duration = 3500) {
 }
 
 function switchToTab(targetTab) {
-  if (targetTab && currentUser?.role !== 'attendant') {
+  if (currentUser?.role === 'attendant') {
+    const userModules = Array.isArray(currentUser.allowedModules) && currentUser.allowedModules.length > 0
+      ? currentUser.allowedModules
+      : ['appointments', 'exams', 'chats', 'simulator'];
+
+    if (['appointments', 'exams', 'chats', 'simulator'].includes(targetTab) && !userModules.includes(targetTab)) {
+      targetTab = userModules[0] || 'appointments';
+    }
+  } else if (targetTab) {
     localStorage.setItem(LAST_ACTIVE_TAB_KEY, targetTab);
   }
 
@@ -2036,7 +2058,10 @@ document.getElementById('login-form')?.addEventListener('submit', async (e) => {
       startAppointmentsRealtimeSync();
 
       if (data.user?.role === 'attendant') {
-        switchToTab('appointments');
+        const userMods = Array.isArray(data.user.allowedModules) && data.user.allowedModules.length > 0
+          ? data.user.allowedModules
+          : ['appointments', 'exams', 'chats', 'simulator'];
+        switchToTab(userMods[0] || 'appointments');
       } else {
         const savedTab = localStorage.getItem(LAST_ACTIVE_TAB_KEY);
         if (savedTab && document.getElementById(`pane-${savedTab}`)) {
@@ -4719,9 +4744,12 @@ async function initApp() {
       startAppointmentsRealtimeSync();
 
 
-      // 3. Restaura a aba que o usuário estava antes do F5 (se admin), ou appointments se atendente
+      // 3. Restaura a aba que o usuário estava antes do F5 (se admin), ou primeiro módulo permitido se atendente
       if (data.user?.role === 'attendant') {
-        switchToTab('appointments');
+        const userMods = Array.isArray(data.user.allowedModules) && data.user.allowedModules.length > 0
+          ? data.user.allowedModules
+          : ['appointments', 'exams', 'chats', 'simulator'];
+        switchToTab(userMods[0] || 'appointments');
       } else {
         const savedTab = localStorage.getItem(LAST_ACTIVE_TAB_KEY);
         if (savedTab && document.getElementById(`pane-${savedTab}`)) {
@@ -4784,7 +4812,22 @@ function renderUsersTable() {
     const isSelf = currentUser && (currentUser.userId === u.id || currentUser.username === u.username);
     const roleBadge = u.role === 'admin'
       ? `<span class="badge badge-purple" style="font-size: 11px;">👑 Administrador Geral</span>`
-      : `<span class="badge badge-emerald" style="font-size: 11px;">👩‍💼 Atendimento / Recepção</span>`;
+      : `<span class="badge badge-emerald" style="font-size: 11px;">👩‍💼 Atendimento / Operador</span>`;
+
+    let moduleBadges = '';
+    if (u.role === 'admin') {
+      moduleBadges = '<div style="margin-top: 4px;"><span class="badge badge-purple" style="font-size: 10px;">👑 Acesso Total (Admin)</span></div>';
+    } else {
+      const uMods = Array.isArray(u.allowedModules) && u.allowedModules.length > 0
+        ? u.allowedModules
+        : ['appointments', 'exams', 'chats', 'simulator'];
+      const badges = [];
+      if (uMods.includes('appointments')) badges.push('<span class="badge badge-info" style="font-size: 10px; margin: 1px;">📅 Agenda</span>');
+      if (uMods.includes('exams')) badges.push('<span class="badge badge-purple" style="font-size: 10px; margin: 1px;">🔬 Exames</span>');
+      if (uMods.includes('chats')) badges.push('<span class="badge badge-cyan" style="font-size: 10px; margin: 1px;">👥 Conversas</span>');
+      if (uMods.includes('simulator')) badges.push('<span class="badge badge-warning" style="font-size: 10px; margin: 1px;">💬 Simulador</span>');
+      moduleBadges = `<div style="display: flex; flex-wrap: wrap; gap: 2px; margin-top: 4px;">${badges.join('')}</div>`;
+    }
 
     let agentLabel = '<span class="badge badge-info" style="font-size: 11px;">🌐 Todas as Agendas</span>';
     if (u.assignedAgentId && u.assignedAgentId !== '*') {
@@ -4804,7 +4847,10 @@ function renderUsersTable() {
           <div style="font-weight: 600;">${u.name || u.username} ${isSelf ? '<span class="badge badge-primary" style="font-size: 10px; margin-left: 4px;">Você</span>' : ''}</div>
         </td>
         <td><code>${u.username}</code></td>
-        <td>${roleBadge}</td>
+        <td>
+          ${roleBadge}
+          ${moduleBadges}
+        </td>
         <td>${agentLabel}</td>
         <td>${statusBadge}</td>
         <td><small class="text-muted">${dateFormatted}</small></td>
@@ -4819,6 +4865,12 @@ function renderUsersTable() {
   });
 
   tbody.innerHTML = html;
+}
+
+function toggleUserModulesVisibility(role) {
+  const grp = document.getElementById('modal-user-modules-group');
+  if (!grp) return;
+  grp.style.display = (role === 'admin') ? 'none' : 'block';
 }
 
 function openNewUserModal() {
@@ -4838,6 +4890,16 @@ function openNewUserModal() {
   document.getElementById('modal-user-role').value = 'attendant';
   document.getElementById('modal-user-agent').value = '*';
   document.getElementById('modal-user-active').value = 'true';
+
+  const modAppointments = document.getElementById('user-mod-appointments');
+  const modExams = document.getElementById('user-mod-exams');
+  const modChats = document.getElementById('user-mod-chats');
+  const modSimulator = document.getElementById('user-mod-simulator');
+  if (modAppointments) modAppointments.checked = true;
+  if (modExams) modExams.checked = false;
+  if (modChats) modChats.checked = false;
+  if (modSimulator) modSimulator.checked = false;
+  toggleUserModulesVisibility('attendant');
 
   populateUserAgentDropdown('*');
 
@@ -4864,6 +4926,19 @@ function openEditUserModal(userId) {
 
   document.getElementById('modal-user-role').value = user.role || 'attendant';
   document.getElementById('modal-user-active').value = user.active ? 'true' : 'false';
+
+  const mods = Array.isArray(user.allowedModules) && user.allowedModules.length > 0
+    ? user.allowedModules
+    : ['appointments', 'exams', 'chats', 'simulator'];
+  const modAppointments = document.getElementById('user-mod-appointments');
+  const modExams = document.getElementById('user-mod-exams');
+  const modChats = document.getElementById('user-mod-chats');
+  const modSimulator = document.getElementById('user-mod-simulator');
+  if (modAppointments) modAppointments.checked = mods.includes('appointments');
+  if (modExams) modExams.checked = mods.includes('exams');
+  if (modChats) modChats.checked = mods.includes('chats');
+  if (modSimulator) modSimulator.checked = mods.includes('simulator');
+  toggleUserModulesVisibility(user.role || 'attendant');
 
   populateUserAgentDropdown(user.assignedAgentId || '*');
 
@@ -4906,7 +4981,23 @@ async function saveUser(e) {
   submitBtn.textContent = 'Salvando... ⏳';
 
   try {
-    const payload = { name, username, role, assignedAgentId, active };
+    let allowedModules = ['appointments', 'exams', 'chats', 'simulator'];
+    if (role === 'attendant') {
+      allowedModules = [];
+      if (document.getElementById('user-mod-appointments')?.checked) allowedModules.push('appointments');
+      if (document.getElementById('user-mod-exams')?.checked) allowedModules.push('exams');
+      if (document.getElementById('user-mod-chats')?.checked) allowedModules.push('chats');
+      if (document.getElementById('user-mod-simulator')?.checked) allowedModules.push('simulator');
+
+      if (allowedModules.length === 0) {
+        showToast('Selecione pelo menos um módulo de acesso para o membro.', 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '💾 Salvar Membro';
+        return;
+      }
+    }
+
+    const payload = { name, username, role, assignedAgentId, active, allowedModules };
     if (password && password.trim()) {
       payload.password = password.trim();
     }
@@ -4968,6 +5059,9 @@ document.getElementById('btn-create-user')?.addEventListener('click', openNewUse
 document.getElementById('btn-close-user-modal')?.addEventListener('click', closeUserModal);
 document.getElementById('btn-cancel-user')?.addEventListener('click', closeUserModal);
 document.getElementById('modal-user-form')?.addEventListener('submit', saveUser);
+document.getElementById('modal-user-role')?.addEventListener('change', (e) => {
+  toggleUserModulesVisibility(e.target.value);
+});
 document.getElementById('modal-user-overlay')?.addEventListener('click', (e) => {
   if (e.target.id === 'modal-user-overlay') closeUserModal();
 });

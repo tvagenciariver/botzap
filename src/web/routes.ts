@@ -19,7 +19,7 @@ import { partnerManager } from '../appointments/partner-manager.js';
 
 import { examService } from '../appointments/exam-service.js';
 import { userManager } from '../auth/user-manager.js';
-import { UserSession } from '../auth/user-types.js';
+import { UserSession, AppModule } from '../auth/user-types.js';
 
 declare global {
   namespace Express {
@@ -70,6 +70,27 @@ const requireAuth = (req: Request, res: Response, next: () => void) => {
 };
 
 /**
+ * Middleware de Verificação de Permissão por Módulo (RBAC granular)
+ */
+const requireModule = (module: AppModule) => {
+  return (req: Request, res: Response, next: () => void) => {
+    requireAuth(req, res, () => {
+      if (req.user?.role === 'admin') {
+        return next();
+      }
+      const allowed = req.user?.allowedModules || ['appointments', 'exams', 'chats', 'simulator'];
+      if (!allowed.includes(module)) {
+        return res.status(403).json({
+          error: `Acesso restrito. Seu usuário não possui permissão para acessar o módulo '${module}'.`,
+          forbidden: true
+        });
+      }
+      next();
+    });
+  };
+};
+
+/**
  * Middleware de Autorização de Administrador (Acesso total)
  */
 const requireAdmin = (req: Request, res: Response, next: () => void) => {
@@ -109,7 +130,8 @@ apiRouter.post('/api/auth/login', (req: Request, res: Response) => {
       username: session.username,
       name: session.name,
       role: session.role,
-      assignedAgentId: session.assignedAgentId
+      assignedAgentId: session.assignedAgentId,
+      allowedModules: session.allowedModules
     }
   });
 });
@@ -142,7 +164,8 @@ apiRouter.get('/api/auth/me', (req: Request, res: Response) => {
           username: session.username,
           name: session.name,
           role: session.role,
-          assignedAgentId: session.assignedAgentId
+          assignedAgentId: session.assignedAgentId,
+          allowedModules: session.allowedModules
         }
       });
     }
@@ -718,7 +741,7 @@ apiRouter.post('/api/waha/setup-webhook', requireAdmin, async (req: Request, res
 /**
  * 7. Listar conversas ativas
  */
-apiRouter.get('/api/chats', requireAuth, (_req: Request, res: Response) => {
+apiRouter.get('/api/chats', requireModule('chats'), (_req: Request, res: Response) => {
   const chats = memoryStore.listActiveChats();
   res.json({ chats });
 });
@@ -726,7 +749,7 @@ apiRouter.get('/api/chats', requireAuth, (_req: Request, res: Response) => {
 /**
  * 8. Pausar bot para um contato específico
  */
-apiRouter.post('/api/chats/:chatId/pause', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/chats/:chatId/pause', requireModule('chats'), (req: Request, res: Response) => {
   const { chatId } = req.params;
   const minutes = parseInt(req.body.minutes || '60', 10);
   memoryStore.pauseChat(chatId, minutes);
@@ -741,7 +764,7 @@ apiRouter.post('/api/chats/:chatId/pause', requireAuth, (req: Request, res: Resp
 /**
  * 9. Reativar bot para um contato específico
  */
-apiRouter.post('/api/chats/:chatId/resume', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/chats/:chatId/resume', requireModule('chats'), (req: Request, res: Response) => {
   const { chatId } = req.params;
   memoryStore.resumeChat(chatId);
   orchestrator.addLog({
@@ -755,16 +778,16 @@ apiRouter.post('/api/chats/:chatId/resume', requireAuth, (req: Request, res: Res
 /**
  * 10. Limpar histórico de um contato
  */
-apiRouter.post('/api/chats/:chatId/clear', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/chats/:chatId/clear', requireModule('chats'), (req: Request, res: Response) => {
   const { chatId } = req.params;
   memoryStore.clearHistory(chatId);
-  res.json({ success: true, chatId });
+  res.json({ success: true, chatId, message: 'Histórico limpo com sucesso.' });
 });
 
 /**
- * 11. Simular conversa (Chat Simulator)
+ * 11. Simular mensagem de entrada (Web Chat)
  */
-apiRouter.post('/api/simulate', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/simulate', requireModule('simulator'), async (req: Request, res: Response) => {
   const { chatId = 'simulacao@c.us', message, agentId } = req.body;
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'Mensagem inválida.' });
@@ -953,7 +976,7 @@ apiRouter.delete('/api/agents/panic', requireAuth, (req: Request, res: Response)
 /**
  * Lista agendamentos com filtros (data, agentId, specialistId, status)
  */
-apiRouter.get('/api/appointments', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/appointments', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     let { agentId, date, specialistId, status } = req.query as {
       agentId?: string;
@@ -977,7 +1000,7 @@ apiRouter.get('/api/appointments', requireAuth, (req: Request, res: Response) =>
 /**
  * Métricas e KPIs para o Dashboard de Agendamentos
  */
-apiRouter.get('/api/appointments/summary', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/appointments/summary', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     let { agentId, date } = req.query as { agentId?: string; date?: string };
 
@@ -995,7 +1018,7 @@ apiRouter.get('/api/appointments/summary', requireAuth, (req: Request, res: Resp
 /**
  * Consulta horários disponíveis (anti-colisão) para uma data e especialista
  */
-apiRouter.get('/api/appointments/slots', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/appointments/slots', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const { specialistId, date } = req.query as { specialistId?: string; date?: string };
     if (!specialistId || !date) {
@@ -1011,7 +1034,7 @@ apiRouter.get('/api/appointments/slots', requireAuth, (req: Request, res: Respon
 /**
  * Lista vagas canceladas para encaixes rápidos (Hoje e Amanhã)
  */
-apiRouter.get('/api/appointments/encaixes', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/appointments/encaixes', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     let { agentId } = req.query as { agentId?: string };
 
@@ -1029,7 +1052,7 @@ apiRouter.get('/api/appointments/encaixes', requireAuth, (req: Request, res: Res
 /**
  * Criação manual de agendamento pelo painel
  */
-apiRouter.post('/api/appointments', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/appointments', requireModule('appointments'), async (req: Request, res: Response) => {
   try {
     let {
       agentId,
@@ -1093,7 +1116,7 @@ apiRouter.post('/api/appointments', requireAuth, async (req: Request, res: Respo
 /**
  * Atualiza status, observações ou reagendamento de consulta
  */
-apiRouter.put('/api/appointments/:id', requireAuth, async (req: Request, res: Response) => {
+apiRouter.put('/api/appointments/:id', requireModule('appointments'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const previous = appointmentManager.getAppointment(id);
@@ -1122,7 +1145,7 @@ apiRouter.put('/api/appointments/:id', requireAuth, async (req: Request, res: Re
 /**
  * Exclui agendamento permanentemente
  */
-apiRouter.delete('/api/appointments/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.delete('/api/appointments/:id', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const ok = appointmentManager.deleteAppointment(id);
@@ -1135,7 +1158,7 @@ apiRouter.delete('/api/appointments/:id', requireAuth, (req: Request, res: Respo
 /**
  * Reenvia notificação WhatsApp ao especialista
  */
-apiRouter.post('/api/appointments/:id/notify', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/appointments/:id/notify', requireModule('appointments'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const apt = appointmentManager.getAppointment(id);
@@ -1158,7 +1181,7 @@ apiRouter.post('/api/appointments/:id/notify', requireAuth, async (req: Request,
 /**
  * Disparo em lote de Lembretes D-1 para consultas de amanhã
  */
-apiRouter.post('/api/appointments/send-reminders', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/appointments/send-reminders', requireModule('appointments'), async (req: Request, res: Response) => {
   try {
     let { agentId } = req.body;
     if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
@@ -1178,7 +1201,7 @@ apiRouter.post('/api/appointments/send-reminders', requireAuth, async (req: Requ
 /**
  * Obter status e configuração do Envio Automático de Lembretes D-1
  */
-apiRouter.get('/api/appointments/reminders/config', requireAuth, (_req: Request, res: Response) => {
+apiRouter.get('/api/appointments/reminders/config', requireModule('appointments'), (_req: Request, res: Response) => {
   const status = reminderScheduler.getStatus();
   res.json({ success: true, ...status });
 });
@@ -1199,7 +1222,7 @@ apiRouter.put('/api/appointments/reminders/config', requireAdmin, (req: Request,
 /**
  * Disparar lembretes D-1 imediatamente via scheduler (com registro de log)
  */
-apiRouter.post('/api/appointments/reminders/run-now', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/appointments/reminders/run-now', requireModule('appointments'), async (req: Request, res: Response) => {
   try {
     let { agentId } = req.body;
     if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
@@ -1216,7 +1239,7 @@ apiRouter.post('/api/appointments/reminders/run-now', requireAuth, async (req: R
 /**
  * Envia lembrete D-1 individual para um agendamento
  */
-apiRouter.post('/api/appointments/:id/send-reminder', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/appointments/:id/send-reminder', requireModule('appointments'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const apt = appointmentManager.getAppointment(id);
@@ -1240,7 +1263,7 @@ apiRouter.post('/api/appointments/:id/send-reminder', requireAuth, async (req: R
 // ESPECIALISTAS & SERVIÇOS
 // ============================================================================
 
-apiRouter.get('/api/specialists', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/specialists', requireModule('appointments'), (req: Request, res: Response) => {
   let { agentId } = req.query as { agentId?: string };
   if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
     agentId = req.user.assignedAgentId;
@@ -1249,7 +1272,7 @@ apiRouter.get('/api/specialists', requireAuth, (req: Request, res: Response) => 
   res.json({ specialists });
 });
 
-apiRouter.post('/api/specialists', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/specialists', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const data = req.body;
     if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
@@ -1262,7 +1285,7 @@ apiRouter.post('/api/specialists', requireAuth, (req: Request, res: Response) =>
   }
 });
 
-apiRouter.put('/api/specialists/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.put('/api/specialists/:id', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const updated = appointmentManager.updateSpecialist(req.params.id, req.body);
     res.json({ success: true, specialist: updated });
@@ -1271,7 +1294,7 @@ apiRouter.put('/api/specialists/:id', requireAuth, (req: Request, res: Response)
   }
 });
 
-apiRouter.delete('/api/specialists/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.delete('/api/specialists/:id', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const ok = appointmentManager.deleteSpecialist(req.params.id);
     res.json({ success: ok });
@@ -1280,7 +1303,7 @@ apiRouter.delete('/api/specialists/:id', requireAuth, (req: Request, res: Respon
   }
 });
 
-apiRouter.get('/api/services', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/services', requireModule('appointments'), (req: Request, res: Response) => {
   let { agentId } = req.query as { agentId?: string };
   if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
     agentId = req.user.assignedAgentId;
@@ -1289,7 +1312,7 @@ apiRouter.get('/api/services', requireAuth, (req: Request, res: Response) => {
   res.json({ services });
 });
 
-apiRouter.post('/api/services', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/services', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const data = req.body;
     if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
@@ -1302,7 +1325,7 @@ apiRouter.post('/api/services', requireAuth, (req: Request, res: Response) => {
   }
 });
 
-apiRouter.put('/api/services/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.put('/api/services/:id', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const updated = appointmentManager.updateService(req.params.id, req.body);
     res.json({ success: true, service: updated });
@@ -1311,7 +1334,7 @@ apiRouter.put('/api/services/:id', requireAuth, (req: Request, res: Response) =>
   }
 });
 
-apiRouter.delete('/api/services/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.delete('/api/services/:id', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const ok = appointmentManager.deleteService(req.params.id);
     res.json({ success: ok });
@@ -1335,7 +1358,7 @@ apiRouter.get('/api/users', requireAdmin, (_req: Request, res: Response) => {
 
 apiRouter.post('/api/users', requireAdmin, (req: Request, res: Response) => {
   try {
-    const { username, password, name, role, assignedAgentId } = req.body;
+    const { username, password, name, role, assignedAgentId, allowedModules } = req.body;
     if (!username || !password || !name) {
       return res.status(400).json({ error: 'Nome, usuário e senha são obrigatórios.' });
     }
@@ -1344,7 +1367,8 @@ apiRouter.post('/api/users', requireAdmin, (req: Request, res: Response) => {
       password,
       name,
       role: role || 'attendant',
-      assignedAgentId: assignedAgentId || '*'
+      assignedAgentId: assignedAgentId || '*',
+      allowedModules: Array.isArray(allowedModules) ? allowedModules : undefined
     });
     res.status(201).json({ success: true, user: created });
   } catch (err: any) {
@@ -1379,7 +1403,7 @@ apiRouter.delete('/api/users/:id', requireAdmin, (req: Request, res: Response) =
 // GESTÃO DE PARCEIROS & CONVÊNIOS (requireAuth)
 // ============================================================================
 
-apiRouter.get('/api/partners', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/partners', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const agentId = (req.query.agentId as string) || (req.user?.role === 'attendant' && req.user?.assignedAgentId !== '*' ? req.user.assignedAgentId : undefined);
     const partners = partnerManager.listPartners(agentId);
@@ -1389,7 +1413,7 @@ apiRouter.get('/api/partners', requireAuth, (req: Request, res: Response) => {
   }
 });
 
-apiRouter.get('/api/partners/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/partners/:id', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const partner = partnerManager.getPartner(req.params.id);
     if (!partner) return res.status(404).json({ error: 'Parceiro não encontrado.' });
@@ -1399,7 +1423,7 @@ apiRouter.get('/api/partners/:id', requireAuth, (req: Request, res: Response) =>
   }
 });
 
-apiRouter.post('/api/partners', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/partners', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const { name, document, phone, contactPerson, email, notes, active, agentId } = req.body;
     const partner = partnerManager.createPartner({
@@ -1418,7 +1442,7 @@ apiRouter.post('/api/partners', requireAuth, (req: Request, res: Response) => {
   }
 });
 
-apiRouter.put('/api/partners/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.put('/api/partners/:id', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const updated = partnerManager.updatePartner(req.params.id, req.body);
     res.json({ success: true, partner: updated });
@@ -1427,7 +1451,7 @@ apiRouter.put('/api/partners/:id', requireAuth, (req: Request, res: Response) =>
   }
 });
 
-apiRouter.delete('/api/partners/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.delete('/api/partners/:id', requireModule('appointments'), (req: Request, res: Response) => {
   try {
     const ok = partnerManager.deletePartner(req.params.id);
     if (!ok) return res.status(404).json({ error: 'Parceiro não encontrado.' });
@@ -1441,7 +1465,7 @@ apiRouter.delete('/api/partners/:id', requireAuth, (req: Request, res: Response)
 // ENVIO & GESTÃO DE EXAMES / LAUDOS (requireAuth)
 // ============================================================================
 
-apiRouter.get('/api/exams', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/exams', requireModule('exams'), (req: Request, res: Response) => {
   try {
     let agentId = req.query.agentId as string | undefined;
     if (req.user?.role === 'attendant' && req.user?.assignedAgentId !== '*') {
@@ -1462,7 +1486,7 @@ apiRouter.get('/api/exams', requireAuth, (req: Request, res: Response) => {
   }
 });
 
-apiRouter.get('/api/exams/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/exams/:id', requireModule('exams'), (req: Request, res: Response) => {
   try {
     const exam = examService.getExam(req.params.id);
     if (!exam) return res.status(404).json({ error: 'Exame não encontrado.' });
@@ -1472,7 +1496,7 @@ apiRouter.get('/api/exams/:id', requireAuth, (req: Request, res: Response) => {
   }
 });
 
-apiRouter.get('/api/exams/:id/download', requireAuth, (req: Request, res: Response) => {
+apiRouter.get('/api/exams/:id/download', requireModule('exams'), (req: Request, res: Response) => {
   try {
     const exam = examService.getExam(req.params.id);
     if (!exam || !fs.existsSync(exam.fileStoredPath)) {
@@ -1484,7 +1508,7 @@ apiRouter.get('/api/exams/:id/download', requireAuth, (req: Request, res: Respon
   }
 });
 
-apiRouter.post('/api/exams/dispatch', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/exams/dispatch', requireModule('exams'), async (req: Request, res: Response) => {
   try {
     const {
       appointmentId,
@@ -1528,7 +1552,7 @@ apiRouter.post('/api/exams/dispatch', requireAuth, async (req: Request, res: Res
   }
 });
 
-apiRouter.post('/api/exams/:id/resend', requireAuth, async (req: Request, res: Response) => {
+apiRouter.post('/api/exams/:id/resend', requireModule('exams'), async (req: Request, res: Response) => {
   try {
     const { target, caption } = req.body;
     const exam = await examService.reSendExam(req.params.id, target, caption);
@@ -1538,7 +1562,7 @@ apiRouter.post('/api/exams/:id/resend', requireAuth, async (req: Request, res: R
   }
 });
 
-apiRouter.delete('/api/exams/:id', requireAuth, (req: Request, res: Response) => {
+apiRouter.delete('/api/exams/:id', requireModule('exams'), (req: Request, res: Response) => {
   try {
     const ok = examService.deleteExam(req.params.id);
     if (!ok) return res.status(404).json({ error: 'Exame não encontrado.' });

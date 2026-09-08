@@ -1,4 +1,5 @@
 export type UserRole = 'admin' | 'attendant';
+export type AppModule = 'appointments' | 'exams' | 'chats' | 'simulator';
 
 export interface UserProfile {
   id: string;
@@ -7,6 +8,7 @@ export interface UserProfile {
   name: string;
   role: UserRole;
   assignedAgentId?: string; // '*' para todas as agendas ou ID de um agente/cliente específico
+  allowedModules?: AppModule[]; // Módulos que o usuário tem permissão para acessar
   active: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -19,5 +21,6 @@ export interface UserSession {
   name: string;
   role: UserRole;
   assignedAgentId?: string;
+  allowedModules?: AppModule[];
   createdAt: number;
 }
