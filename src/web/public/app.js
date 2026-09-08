@@ -129,6 +129,29 @@ function setActiveCompany(companyId, reload = true) {
     logsFilterSelect.value = effectiveCompany;
   }
 
+  // 5.6 Sincroniza Filtro do Gerenciador de Especialistas & Procedimentos
+  const modalSpecsFilter = document.getElementById('modal-specs-filter-agent');
+  if (modalSpecsFilter) {
+    if (typeof populateModalSpecsFilter === 'function') {
+      populateModalSpecsFilter(agentsList);
+    }
+    if (effectiveCompany !== 'all') {
+      modalSpecsFilter.value = effectiveCompany;
+    }
+    if (typeof updateModalSpecsCompanyBadge === 'function') {
+      updateModalSpecsCompanyBadge(modalSpecsFilter.value);
+    }
+    if (typeof syncSpecFormAgent === 'function') {
+      syncSpecFormAgent(modalSpecsFilter.value);
+    }
+    const specModalOverlay = document.getElementById('modal-specialists-overlay');
+    if (specModalOverlay && specModalOverlay.style.display !== 'none') {
+      if (typeof onModalSpecsFilterChange === 'function') {
+        onModalSpecsFilterChange();
+      }
+    }
+  }
+
   // 6. Atualiza badge e banner do Horário Comercial
   updateScheduleCompanyDisplay(effectiveCompany);
 
@@ -3165,10 +3188,17 @@ async function loadAppointments() {
   }
 
   try {
-    // 1. Carrega Especialistas, Serviços e Agentes
+    // 1. Carrega Especialistas, Serviços e Agentes (com isolamento estrito por empresa ativa)
+    const specUrl = (currentAppointmentsAgentFilter && currentAppointmentsAgentFilter !== 'all')
+      ? `/api/specialists?agentId=${encodeURIComponent(currentAppointmentsAgentFilter)}`
+      : '/api/specialists';
+    const srvUrl = (currentAppointmentsAgentFilter && currentAppointmentsAgentFilter !== 'all')
+      ? `/api/services?agentId=${encodeURIComponent(currentAppointmentsAgentFilter)}`
+      : '/api/services';
+
     const [specRes, srvRes, agentsRes] = await Promise.all([
-      fetchWithAuth('/api/specialists'),
-      fetchWithAuth('/api/services'),
+      fetchWithAuth(specUrl),
+      fetchWithAuth(srvUrl),
       fetchWithAuth('/api/agents')
     ]);
 
@@ -3489,6 +3519,10 @@ function populateAgentsDropdowns(agents) {
     }
   }
 
+  if (typeof populateModalSpecsFilter === 'function') {
+    populateModalSpecsFilter(agentsList);
+  }
+
   updateTopbarCompanyDisplay();
 }
 
@@ -3501,7 +3535,7 @@ function populateSpecialistsDropdowns(forAgentId) {
 
   let list = specialistsState.filter(s => s.active);
   if (forAgentId && forAgentId !== 'all') {
-    list = list.filter(s => s.agentId === forAgentId || s.agentId === '*' || !s.agentId);
+    list = list.filter(s => s.agentId === forAgentId);
   }
 
   if (filterSelect) {
@@ -3532,7 +3566,7 @@ function populateServicesDropdowns(forAgentId) {
   if (modalSelect) {
     let list = servicesState.filter(s => s.active);
     if (forAgentId && forAgentId !== 'all') {
-      list = list.filter(s => s.agentId === forAgentId || s.agentId === '*' || !s.agentId);
+      list = list.filter(s => s.agentId === forAgentId);
     }
 
     const current = modalSelect.value;
@@ -3591,7 +3625,7 @@ async function renderTimelineView(apts) {
   let specialists = specialistsState.filter(s => s.active);
 
   if (currentAppointmentsAgentFilter !== 'all') {
-    specialists = specialists.filter(s => s.agentId === currentAppointmentsAgentFilter || s.agentId === '*' || !s.agentId);
+    specialists = specialists.filter(s => s.agentId === currentAppointmentsAgentFilter);
   }
 
   if (currentAppointmentsSpecialistFilter !== 'all') {
@@ -4302,14 +4336,122 @@ document.getElementById('btn-close-apt-modal')?.addEventListener('click', closeA
 document.getElementById('btn-cancel-apt')?.addEventListener('click', closeAppointmentModal);
 
 // ============================================================================
-// MODAL DE GERENCIAMENTO DE ESPECIALISTAS & SERVIÇOS
+// MODAL DE GERENCIAMENTO DE ESPECIALISTAS & SERVIÇOS (ISOLAMENTO ESTRITO POR EMPRESA)
 // ============================================================================
 
-function openSpecialistsModal() {
-  const overlay = document.getElementById('modal-specialists-overlay');
-  if (overlay) overlay.style.display = 'flex';
+function updateModalSpecsCompanyBadge(selectedCompanyId) {
+  const badge = document.getElementById('modal-specs-company-badge');
+  if (!badge) return;
+
+  if (!selectedCompanyId || selectedCompanyId === 'all') {
+    badge.textContent = 'Todas as Empresas (Visão Global)';
+    badge.className = 'badge badge-info';
+    badge.style.background = 'rgba(99, 102, 241, 0.15)';
+    badge.style.color = '#818cf8';
+    badge.style.borderColor = 'rgba(99, 102, 241, 0.3)';
+  } else {
+    const ag = allAgentsCache.find(a => a.id === selectedCompanyId);
+    const name = ag ? (ag.companyName || ag.name) : selectedCompanyId;
+    badge.textContent = `🏢 ${name}`;
+    badge.className = 'badge badge-purple';
+    badge.style.background = 'rgba(168, 85, 247, 0.15)';
+    badge.style.color = '#c084fc';
+    badge.style.borderColor = 'rgba(168, 85, 247, 0.3)';
+  }
+}
+
+function populateModalSpecsFilter(agents) {
+  const modalFilter = document.getElementById('modal-specs-filter-agent');
+  if (!modalFilter) return;
+
+  const agentsList = (agents && agents.length > 0)
+    ? agents
+    : ((typeof allAgents !== 'undefined' && allAgents.length > 0) ? allAgents : (allAgentsCache || []));
+
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const isLocked = effectiveCompany !== 'all';
+
+  if (isLocked) {
+    const myAgent = agentsList.find(a => a.id === effectiveCompany);
+    const name = myAgent ? (myAgent.companyName || myAgent.name) : 'Minha Unidade';
+    modalFilter.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(name)}</option>`;
+    modalFilter.value = effectiveCompany;
+    modalFilter.disabled = true;
+  } else {
+    modalFilter.disabled = false;
+    const current = modalFilter.value || 'all';
+    modalFilter.innerHTML = '<option value="all">🌐 Todas as Empresas (Visão Global)</option>';
+    agentsList.forEach(a => {
+      const label = a.companyName ? `${escapeHtml(a.companyName)} (${escapeHtml(a.name)})` : escapeHtml(a.name);
+      modalFilter.innerHTML += `<option value="${a.id}">🏢 ${label}</option>`;
+    });
+    if (current) modalFilter.value = current;
+  }
+
+  updateModalSpecsCompanyBadge(modalFilter.value);
+}
+
+function syncSpecFormAgent(targetAgentId) {
+  const specAgentSelect = document.getElementById('spec-agent');
+  const srvAgentSelect = document.getElementById('service-agent');
+
+  if (specAgentSelect && targetAgentId && targetAgentId !== 'all') {
+    specAgentSelect.value = targetAgentId;
+  }
+  if (srvAgentSelect && targetAgentId && targetAgentId !== 'all') {
+    srvAgentSelect.value = targetAgentId;
+  }
+}
+
+async function onModalSpecsFilterChange() {
+  const modalFilter = document.getElementById('modal-specs-filter-agent');
+  const targetAgentId = modalFilter ? modalFilter.value : getEffectiveActiveCompanyId();
+
+  updateModalSpecsCompanyBadge(targetAgentId);
+  syncSpecFormAgent(targetAgentId);
+
+  // Busca do backend garantindo isolamento estrito
+  const specUrl = (targetAgentId && targetAgentId !== 'all')
+    ? `/api/specialists?agentId=${encodeURIComponent(targetAgentId)}`
+    : '/api/specialists';
+  const srvUrl = (targetAgentId && targetAgentId !== 'all')
+    ? `/api/services?agentId=${encodeURIComponent(targetAgentId)}`
+    : '/api/services';
+
+  try {
+    const [specRes, srvRes] = await Promise.all([
+      fetchWithAuth(specUrl),
+      fetchWithAuth(srvUrl)
+    ]);
+    if (specRes.ok) {
+      const data = await specRes.json();
+      specialistsState = data.specialists || [];
+    }
+    if (srvRes.ok) {
+      const data = await srvRes.json();
+      servicesState = data.services || [];
+    }
+  } catch (err) {
+    console.error('Erro ao recarregar especialistas do modal:', err);
+  }
+
   renderSpecialistsTable();
   renderServicesTable();
+}
+
+async function openSpecialistsModal() {
+  const overlay = document.getElementById('modal-specialists-overlay');
+  if (overlay) overlay.style.display = 'flex';
+
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  populateModalSpecsFilter(allAgentsCache);
+
+  const modalFilter = document.getElementById('modal-specs-filter-agent');
+  if (modalFilter && effectiveCompany !== 'all') {
+    modalFilter.value = effectiveCompany;
+  }
+
+  await onModalSpecsFilterChange();
 }
 
 function closeSpecialistsModal() {
@@ -4317,6 +4459,7 @@ function closeSpecialistsModal() {
   if (overlay) overlay.style.display = 'none';
 }
 
+document.getElementById('modal-specs-filter-agent')?.addEventListener('change', onModalSpecsFilterChange);
 document.getElementById('btn-close-specs-modal')?.addEventListener('click', closeSpecialistsModal);
 document.getElementById('btn-close-specs-bottom')?.addEventListener('click', closeSpecialistsModal);
 
@@ -4345,6 +4488,12 @@ document.getElementById('btn-show-add-specialist')?.addEventListener('click', ()
       if (form) form.reset();
       if (idInput) idInput.value = '';
       if (title) title.textContent = 'Cadastrar Novo Especialista';
+
+      // Seta a empresa selecionada no filtro do modal
+      const modalFilter = document.getElementById('modal-specs-filter-agent');
+      const targetAgentId = modalFilter ? modalFilter.value : getEffectiveActiveCompanyId();
+      syncSpecFormAgent(targetAgentId);
+
       wrap.style.display = 'block';
       wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } else {
@@ -4382,7 +4531,13 @@ window.editSpecialist = function(id) {
 
   if (title) title.textContent = `Editar Especialista: ${spec.name}`;
   if (idInput) idInput.value = spec.id;
-  if (agentSelect) agentSelect.value = spec.agentId || '*';
+  if (agentSelect) {
+    if (spec.agentId && !Array.from(agentSelect.options).some(o => o.value === spec.agentId)) {
+      const ag = allAgentsCache.find(a => a.id === spec.agentId);
+      agentSelect.innerHTML += `<option value="${spec.agentId}">🏢 ${escapeHtml(ag ? (ag.companyName || ag.name) : spec.agentId)}</option>`;
+    }
+    agentSelect.value = spec.agentId || '';
+  }
   if (nameInput) nameInput.value = spec.name || '';
   if (roleInput) roleInput.value = spec.role || '';
   if (phoneInput) phoneInput.value = spec.phone || '';
@@ -4441,15 +4596,19 @@ document.getElementById('form-specialist')?.addEventListener('submit', async (e)
       body: JSON.stringify(payload)
     });
 
-    if (!res.ok) throw new Error('Falha ao salvar especialista.');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Falha ao salvar especialista.');
+    }
 
     showToast(id ? 'Especialista atualizado com sucesso!' : 'Especialista cadastrado com sucesso!', 'success');
     document.getElementById('form-specialist').reset();
     document.getElementById('spec-id').value = '';
     document.getElementById('form-spec-title').textContent = 'Cadastrar Novo Especialista';
     document.getElementById('form-new-specialist-wrap').style.display = 'none';
+
+    await onModalSpecsFilterChange();
     await loadAppointments();
-    renderSpecialistsTable();
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -4459,26 +4618,37 @@ function renderSpecialistsTable() {
   const tbody = document.getElementById('specialists-table-body');
   if (!tbody) return;
 
-  if (specialistsState.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" class="text-center p-3 text-muted">Nenhum especialista cadastrado.</td></tr>`;
+  const modalFilter = document.getElementById('modal-specs-filter-agent');
+  const targetAgentId = (modalFilter && modalFilter.value) ? modalFilter.value : getEffectiveActiveCompanyId();
+
+  let list = [...specialistsState];
+  if (targetAgentId && targetAgentId !== 'all') {
+    list = list.filter(s => s.agentId === targetAgentId);
+  }
+
+  if (list.length === 0) {
+    const emptyMsg = (targetAgentId && targetAgentId !== 'all')
+      ? 'Nenhum especialista cadastrado para esta empresa.'
+      : 'Nenhum especialista cadastrado.';
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center p-4 text-muted">${emptyMsg}</td></tr>`;
     return;
   }
 
   let html = '';
-  specialistsState.forEach(s => {
+  list.forEach(s => {
     const agentObj = allAgentsCache.find(a => a.id === s.agentId);
     const agentLabel = s.agentId === '*' || !s.agentId
-      ? '<span class="badge badge-info" style="font-size: 11px;">🌐 Global (Todos)</span>'
-      : `<span class="badge badge-purple" style="font-size: 11px;">🏢 ${agentObj ? agentObj.name : s.agentId}</span>`;
+      ? '<span class="badge badge-info" style="font-size: 11px;">🌐 Global</span>'
+      : `<span class="badge badge-purple" style="font-size: 11px;">🏢 ${escapeHtml(agentObj ? (agentObj.companyName || agentObj.name) : s.agentId)}</span>`;
 
     html += `
       <tr>
         <td>${agentLabel}</td>
-        <td><strong>${s.name}</strong></td>
-        <td>${s.role}</td>
-        <td>📱 ${s.phone}</td>
-        <td>${s.workHoursStart} às ${s.workHoursEnd} (Almoço: ${s.breakStart || '--'} - ${s.breakEnd || '--'})</td>
-        <td>${s.slotDurationMinutes} min</td>
+        <td><strong>${escapeHtml(s.name)}</strong></td>
+        <td>${escapeHtml(s.role)}</td>
+        <td>📱 ${escapeHtml(s.phone)}</td>
+        <td>${escapeHtml(s.workHoursStart)} às ${escapeHtml(s.workHoursEnd)} (Almoço: ${escapeHtml(s.breakStart || '--')} - ${escapeHtml(s.breakEnd || '--')})</td>
+        <td>${escapeHtml(String(s.slotDurationMinutes))} min</td>
         <td><span class="badge ${s.active ? 'badge-success' : 'badge-danger'}">${s.active ? 'Ativo' : 'Inativo'}</span></td>
         <td style="text-align: right;">
           <div class="d-flex justify-end gap-1">
@@ -4498,8 +4668,8 @@ async function deleteSpecialist(id) {
     const res = await fetchWithAuth(`/api/specialists/${id}`, { method: 'DELETE' });
     if (res.ok) {
       showToast('Especialista removido.', 'success');
+      await onModalSpecsFilterChange();
       await loadAppointments();
-      renderSpecialistsTable();
     }
   } catch (err) {
     showToast(err.message, 'error');
@@ -4518,6 +4688,12 @@ document.getElementById('btn-show-add-service')?.addEventListener('click', () =>
       if (form) form.reset();
       if (idInput) idInput.value = '';
       if (title) title.textContent = 'Cadastrar Novo Procedimento';
+
+      // Seta a empresa selecionada no filtro do modal
+      const modalFilter = document.getElementById('modal-specs-filter-agent');
+      const targetAgentId = modalFilter ? modalFilter.value : getEffectiveActiveCompanyId();
+      syncSpecFormAgent(targetAgentId);
+
       wrap.style.display = 'block';
     } else {
       wrap.style.display = 'none';
@@ -4549,7 +4725,13 @@ window.editService = function(id) {
 
   if (title) title.textContent = `Editar Procedimento: ${srv.name}`;
   if (idInput) idInput.value = srv.id;
-  if (agentSelect) agentSelect.value = srv.agentId || '*';
+  if (agentSelect) {
+    if (srv.agentId && !Array.from(agentSelect.options).some(o => o.value === srv.agentId)) {
+      const ag = allAgentsCache.find(a => a.id === srv.agentId);
+      agentSelect.innerHTML += `<option value="${srv.agentId}">🏢 ${escapeHtml(ag ? (ag.companyName || ag.name) : srv.agentId)}</option>`;
+    }
+    agentSelect.value = srv.agentId || '';
+  }
   if (nameInput) nameInput.value = srv.name || '';
   if (durationInput) durationInput.value = String(srv.durationMinutes || 30);
   if (priceInput) priceInput.value = srv.price !== undefined ? String(srv.price) : '';
@@ -4579,7 +4761,6 @@ document.getElementById('form-service')?.addEventListener('submit', async (e) =>
     active: true
   };
 
-
   try {
     const url = id ? `/api/services/${id}` : '/api/services';
     const method = id ? 'PUT' : 'POST';
@@ -4590,15 +4771,19 @@ document.getElementById('form-service')?.addEventListener('submit', async (e) =>
       body: JSON.stringify(payload)
     });
 
-    if (!res.ok) throw new Error('Falha ao salvar serviço.');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Falha ao salvar serviço.');
+    }
 
     showToast(id ? 'Procedimento atualizado com sucesso!' : 'Procedimento cadastrado com sucesso!', 'success');
     document.getElementById('form-service').reset();
     document.getElementById('service-id').value = '';
     document.getElementById('form-service-title').textContent = 'Cadastrar Novo Procedimento';
     document.getElementById('form-new-service-wrap').style.display = 'none';
+
+    await onModalSpecsFilterChange();
     await loadAppointments();
-    renderServicesTable();
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -4608,24 +4793,35 @@ function renderServicesTable() {
   const tbody = document.getElementById('services-table-body');
   if (!tbody) return;
 
-  if (servicesState.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center p-3 text-muted">Nenhum procedimento cadastrado.</td></tr>`;
+  const modalFilter = document.getElementById('modal-specs-filter-agent');
+  const targetAgentId = (modalFilter && modalFilter.value) ? modalFilter.value : getEffectiveActiveCompanyId();
+
+  let list = [...servicesState];
+  if (targetAgentId && targetAgentId !== 'all') {
+    list = list.filter(srv => srv.agentId === targetAgentId);
+  }
+
+  if (list.length === 0) {
+    const emptyMsg = (targetAgentId && targetAgentId !== 'all')
+      ? 'Nenhum procedimento cadastrado para esta empresa.'
+      : 'Nenhum procedimento cadastrado.';
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center p-4 text-muted">${emptyMsg}</td></tr>`;
     return;
   }
 
   let html = '';
-  servicesState.forEach(srv => {
+  list.forEach(srv => {
     const agentObj = allAgentsCache.find(a => a.id === srv.agentId);
     const agentLabel = srv.agentId === '*' || !srv.agentId
-      ? '<span class="badge badge-info" style="font-size: 11px;">🌐 Global (Todos)</span>'
-      : `<span class="badge badge-purple" style="font-size: 11px;">🏢 ${agentObj ? agentObj.name : srv.agentId}</span>`;
+      ? '<span class="badge badge-info" style="font-size: 11px;">🌐 Global</span>'
+      : `<span class="badge badge-purple" style="font-size: 11px;">🏢 ${escapeHtml(agentObj ? (agentObj.companyName || agentObj.name) : srv.agentId)}</span>`;
 
     html += `
       <tr>
         <td>${agentLabel}</td>
-        <td><strong>${srv.name}</strong></td>
-        <td>${srv.durationMinutes} min</td>
-        <td>${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Não definido'}</td>
+        <td><strong>${escapeHtml(srv.name)}</strong></td>
+        <td>${escapeHtml(String(srv.durationMinutes))} min</td>
+        <td>${srv.price ? `R$ ${Number(srv.price).toFixed(2)}` : 'Não definido'}</td>
         <td><span class="badge ${srv.active ? 'badge-success' : 'badge-danger'}">${srv.active ? 'Ativo' : 'Inativo'}</span></td>
         <td style="text-align: right;">
           <div class="d-flex justify-end gap-1">
@@ -4645,8 +4841,8 @@ async function deleteService(id) {
     const res = await fetchWithAuth(`/api/services/${id}`, { method: 'DELETE' });
     if (res.ok) {
       showToast('Procedimento removido.', 'success');
+      await onModalSpecsFilterChange();
       await loadAppointments();
-      renderServicesTable();
     }
   } catch (err) {
     showToast(err.message, 'error');

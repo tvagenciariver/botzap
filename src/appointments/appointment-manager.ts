@@ -114,6 +114,9 @@ export class AppointmentManager {
   }
 
   createSpecialist(data: Omit<Specialist, 'id' | 'createdAt'>): Specialist {
+    if (!data.agentId || data.agentId === '*' || data.agentId.trim() === '') {
+      throw new Error('Empresa/Agente (agentId) é obrigatório para cadastrar um especialista.');
+    }
     const newSpec: Specialist = {
       ...data,
       id: 'spec_' + Math.random().toString(36).substring(2, 9),
@@ -166,6 +169,9 @@ export class AppointmentManager {
   }
 
   createService(data: Omit<ServiceItem, 'id' | 'createdAt'>): ServiceItem {
+    if (!data.agentId || data.agentId === '*' || data.agentId.trim() === '') {
+      throw new Error('Empresa/Agente (agentId) é obrigatório para cadastrar um serviço/procedimento.');
+    }
     const newService: ServiceItem = {
       ...data,
       id: 'srv_' + Math.random().toString(36).substring(2, 9),
