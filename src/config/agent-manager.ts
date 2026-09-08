@@ -65,10 +65,12 @@ export class AgentManager {
       enableTypingSimulation: config.enableTypingSimulation !== false,
       enableSendSeen: config.enableSendSeen !== false,
       enableAudioTranscription: config.enableAudioTranscription ?? false,
+      enableBooking: false,
       businessHours: config.businessHours || defaultBusinessHours,
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
+
 
     this.agents.set(defaultAgent.id, defaultAgent);
     this.saveToDisk();
@@ -172,12 +174,14 @@ export class AgentManager {
       enableTypingSimulation: data.enableTypingSimulation !== false,
       enableSendSeen: data.enableSendSeen !== false,
       enableAudioTranscription: !!data.enableAudioTranscription,
+      enableBooking: !!data.enableBooking,
       enableAutoReminders: data.enableAutoReminders !== false,
       autoReminderTime: data.autoReminderTime || '18:00',
       businessHours: data.businessHours || defaultHours,
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
+
 
 
     if (newAgent.isDefault) {

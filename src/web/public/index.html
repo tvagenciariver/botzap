@@ -722,10 +722,18 @@
                           <p>Assume o atendimento automaticamente caso uma mensagem chegue por uma sessão não cadastrada.</p>
                         </div>
                       </label>
+                      <label class="setting-toggle-card" style="border: 1px solid rgba(99, 102, 241, 0.4); background: rgba(99, 102, 241, 0.05); grid-column: 1 / -1;">
+                        <input type="checkbox" id="modal-agent-enableBooking">
+                        <div class="setting-toggle-info">
+                          <strong style="color: #818cf8;">🗓️ Módulo de Agenda & Agendamentos Médicos (Opcional)</strong>
+                          <p><strong>Desmarcado por padrão</strong>. Ative APENAS se esta empresa for utilizar o sistema de agendamento de consultas com médicos e horários próprios. Se desmarcado, o robô NÃO responderá dados de agendamento e seguirá estritamente as instruções do seu prompt.</p>
+                        </div>
+                      </label>
                     </div>
                   </div>
                 </div>
               </div>
+
 
               <!-- SUB-TAB 2: INTELIGÊNCIA ARTIFICIAL -->
               <div class="modal-tab-pane" id="modal-pane-ai">
@@ -1846,11 +1854,12 @@
               <input type="hidden" id="spec-id" value="">
               <div class="form-row">
                 <div class="form-group col-3">
-                  <label>Cliente / Agente <span class="text-danger">*</span></label>
+                  <label>Empresa / Agente <span class="text-danger">*</span></label>
                   <select id="spec-agent" class="form-control" required>
-                    <option value="*">🌐 Todos os Clientes (Global)</option>
+                    <option value="" disabled selected>Selecione a Empresa...</option>
                   </select>
-                  <small class="form-hint">Disponível para este cliente.</small>
+                  <small class="form-hint">A agenda e médico pertencerão exclusivamente a esta empresa.</small>
+
                 </div>
                 <div class="form-group col-3">
                   <label>Nome do Profissional <span class="text-danger">*</span></label>
@@ -1954,10 +1963,12 @@
               <input type="hidden" id="service-id" value="">
               <div class="form-row">
                 <div class="form-group col-3">
-                  <label>Cliente / Agente <span class="text-danger">*</span></label>
+                  <label>Empresa / Agente <span class="text-danger">*</span></label>
                   <select id="service-agent" class="form-control" required>
-                    <option value="*">🌐 Todos os Clientes (Global)</option>
+                    <option value="" disabled selected>Selecione a Empresa...</option>
                   </select>
+                  <small class="form-hint">O serviço pertencerá exclusivamente a esta empresa.</small>
+
                 </div>
                 <div class="form-group col-3">
                   <label>Nome do Procedimento <span class="text-danger">*</span></label>

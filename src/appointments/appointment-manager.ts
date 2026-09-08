@@ -104,8 +104,10 @@ export class AppointmentManager {
     if (!agentId || agentId === 'all') {
       return this.specialists;
     }
-    return this.specialists.filter(s => s.agentId === agentId || s.agentId === '*');
+    // 🔒 ISOLAMENTO ESTRITO: Apenas especialistas cadastrados especificamente para este agente/empresa
+    return this.specialists.filter(s => s.agentId === agentId);
   }
+
 
   getSpecialist(id: string): Specialist | undefined {
     return this.specialists.find(s => s.id === id);
@@ -154,8 +156,10 @@ export class AppointmentManager {
     if (!agentId || agentId === 'all') {
       return this.services;
     }
-    return this.services.filter(s => s.agentId === agentId || s.agentId === '*');
+    // 🔒 ISOLAMENTO ESTRITO: Apenas procedimentos cadastrados especificamente para este agente/empresa
+    return this.services.filter(s => s.agentId === agentId);
   }
+
 
   getService(id: string): ServiceItem | undefined {
     return this.services.find(s => s.id === id);
@@ -591,150 +595,17 @@ export class AppointmentManager {
   // =========================================================================
 
   private getSeedSpecialists(): Specialist[] {
-    return [
-      {
-        id: 'spec_carlos',
-        agentId: '*',
-        name: 'Dr. Carlos Medeiros',
-        role: 'Clínico Geral & Cardiologista',
-        phone: '5511999998888',
-        email: 'carlos.medeiros@clinica.com.br',
-        avatar: '👨‍⚕️',
-        workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
-        workHoursStart: '08:00',
-        workHoursEnd: '18:00',
-        breakStart: '12:00',
-        breakEnd: '13:00',
-        slotDurationMinutes: 30,
-        serviceIds: ['srv_consulta_medica'],
-        active: true,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'spec_sofia',
-        agentId: '*',
-        name: 'Dra. Sofia Nogueira',
-        role: 'Psicóloga Clínica (TCC)',
-        phone: '5511988887777',
-        email: 'sofia.psicologia@clinica.com.br',
-        avatar: '👩‍⚕️',
-        workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
-        workHoursStart: '09:00',
-        workHoursEnd: '18:00',
-        breakStart: '12:00',
-        breakEnd: '13:00',
-        slotDurationMinutes: 45,
-        serviceIds: ['srv_psicoterapia'],
-        active: true,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'spec_mariana',
-        agentId: '*',
-        name: 'Dra. Mariana Santos',
-        role: 'Cirurgiã-Dentista & Ortodontista',
-        phone: '5511977776666',
-        email: 'mariana.odonto@clinica.com.br',
-        avatar: '🦷',
-        workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
-        workHoursStart: '08:30',
-        workHoursEnd: '17:30',
-        breakStart: '12:00',
-        breakEnd: '13:00',
-        slotDurationMinutes: 30,
-        serviceIds: ['srv_avaliacao_odonto'],
-        active: true,
-        createdAt: new Date().toISOString()
-      }
-    ];
+    return [];
   }
 
   private getSeedServices(): ServiceItem[] {
-    return [
-      {
-        id: 'srv_consulta_medica',
-        agentId: '*',
-        name: 'Consulta Médica Geral',
-        description: 'Avaliação clínica completa, check-up e prescrição',
-        durationMinutes: 30,
-        price: 200,
-        active: true,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'srv_psicoterapia',
-        agentId: '*',
-        name: 'Sessão de Psicoterapia',
-        description: 'Terapia Cognitivo-Comportamental individual',
-        durationMinutes: 45,
-        price: 180,
-        active: true,
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'srv_avaliacao_odonto',
-        agentId: '*',
-        name: 'Avaliação Odontológica & Limpeza',
-        description: 'Profilaxia dental, remoção de tártaro e raio-X preventivo',
-        durationMinutes: 30,
-        price: 150,
-        active: true,
-        createdAt: new Date().toISOString()
-      }
-    ];
+    return [];
   }
 
   private getSeedAppointments(): Appointment[] {
-    const today = this.getTodayDateString();
-    return [
-      {
-        id: 'apt_demo_1',
-        agentId: '*',
-        specialistId: 'spec_carlos',
-        specialistName: 'Dr. Carlos Medeiros',
-        specialistRole: 'Clínico Geral & Cardiologista',
-        serviceId: 'srv_consulta_medica',
-        serviceName: 'Consulta Médica Geral',
-        clientChatId: '5511999990001@c.us',
-        clientPhone: '(11) 99999-0001',
-        clientName: 'Ana Beatriz Souza',
-        date: today,
-        startTime: '10:00',
-        endTime: '10:30',
-        status: 'confirmed',
-        notes: 'Check-up de rotina',
-        notifiedSpecialist: true,
-        notifiedAt: new Date().toISOString(),
-        reminderSent: true,
-        bookedVia: 'whatsapp',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      {
-        id: 'apt_demo_2',
-        agentId: '*',
-        specialistId: 'spec_sofia',
-        specialistName: 'Dra. Sofia Nogueira',
-        specialistRole: 'Psicóloga Clínica (TCC)',
-        serviceId: 'srv_psicoterapia',
-        serviceName: 'Sessão de Psicoterapia',
-        clientChatId: '5511999990002@c.us',
-        clientPhone: '(11) 99999-0002',
-        clientName: 'Marcos Vinicius Lima',
-        date: today,
-        startTime: '14:30',
-        endTime: '15:15',
-        status: 'presence_confirmed',
-        notes: 'Paciente confirmou presença pelo lembrete D-1',
-        notifiedSpecialist: true,
-        notifiedAt: new Date().toISOString(),
-        reminderSent: true,
-        bookedVia: 'whatsapp',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ];
+    return [];
   }
 }
 
 export const appointmentManager = new AppointmentManager();
+

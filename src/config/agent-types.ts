@@ -38,6 +38,9 @@ export interface AgentProfile {
   // Horário Comercial Próprio
   businessHours: BusinessHoursConfig;
 
+  // Módulo de Agenda & Consultas (Opcional por empresa)
+  enableBooking?: boolean; // Se esta empresa possui agendamento automatizado (padrão: false)
+
   // Envio Automático de Lembretes D-1
   enableAutoReminders?: boolean;
   autoReminderTime?: string; // ex: "18:00"
@@ -46,4 +49,5 @@ export interface AgentProfile {
   createdAt: number;
   updatedAt: number;
 }
+
 

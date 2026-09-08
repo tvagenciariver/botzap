@@ -58,15 +58,18 @@ export class BookingAgent implements IAgent {
   }
 
   /**
-   * Localiza agendamento pendente de confirmação ou cancelamento por resposta a lembrete
+   * Localiza agendamento pendente de confirmação ou cancelamento por resposta a lembrete (isolado por agentId)
    */
-  private findReminderAppointment(chatId: string): Appointment | undefined {
+  private findReminderAppointment(chatId: string, agentId?: string): Appointment | undefined {
     const all = appointmentManager.listAppointments();
-    const active = all.filter(a =>
-      a.status === 'confirmed' ||
-      a.status === 'scheduled' ||
-      a.status === 'presence_confirmed'
-    );
+    const active = all.filter(a => {
+      if (agentId && a.agentId !== agentId) return false;
+      return (
+        a.status === 'confirmed' ||
+        a.status === 'scheduled' ||
+        a.status === 'presence_confirmed'
+      );
+    });
 
     const isMatch = (apt: Appointment) => {
       return matchPhoneOrChatId(apt.clientChatId, chatId) || matchPhoneOrChatId(apt.clientPhone, chatId);
@@ -91,8 +94,15 @@ export class BookingAgent implements IAgent {
    * Decide se este agente deve tratar a mensagem.
    */
   async canHandle(context: AgentContext): Promise<boolean> {
+    // 🔒 BLINDAGEM CRÍTICA: Se a empresa/agente NÃO possui a agenda habilitada,
+    // NUNCA interceptar a conversa! O bot deve responder estritamente conforme o prompt da IA.
+    if (!context.agent?.enableBooking) {
+      return false;
+    }
+
     const text = (context.userMessage || '').trim().toLowerCase();
     const chatId = context.chatId;
+    const agentId = context.agent.id;
 
     // 1. Se o usuário já está no meio de um fluxo de agendamento ou cancelamento ativo
     if (this.getSession(chatId)) {
@@ -104,13 +114,13 @@ export class BookingAgent implements IAgent {
     const isCancelChoice = ['2', 'não', 'nao', 'cancelo', 'desisto', 'não poderei', 'nao poderei', 'não vou', 'nao vou', 'cancelar', 'desistir', '2 - não', '2. não', '2 - desistir', '2 desistir'].some(c => text === c || text.startsWith('2') || text.includes('desist') || text.includes('cancel'));
 
     if (isConfirmChoice || isCancelChoice) {
-      const apt = this.findReminderAppointment(chatId);
+      const apt = this.findReminderAppointment(chatId, agentId);
       if (apt) {
         return true;
       }
     }
 
-    // 3. Intenção de Agendar
+    // 3. Intenção de Agendar — verifica se esta empresa tem médicos cadastrados
     const bookingKeywords = [
       'agendar', 'agendamento', 'marcar consulta', 'marcar horario', 'marcar horário',
       'quero agendar', 'preciso de consulta', 'disponibilidade de horario', 'horario disponivel',
@@ -118,6 +128,11 @@ export class BookingAgent implements IAgent {
       'marcar dentista', 'fazer agendamento', 'consultas disponíveis'
     ];
     if (bookingKeywords.some(kw => text.includes(kw))) {
+      // Garante que só ativa o fluxo interativo se a empresa possuir especialistas cadastrados
+      const specialists = appointmentManager.listSpecialists(agentId).filter(s => s.active);
+      if (specialists.length === 0) {
+        return false;
+      }
       return true;
     }
 
@@ -133,6 +148,7 @@ export class BookingAgent implements IAgent {
 
     return false;
   }
+
 
   /**
    * Execução da lógica de agendamento conversacional
@@ -162,8 +178,9 @@ export class BookingAgent implements IAgent {
     const isCancelChoice = ['2', 'não', 'nao', 'cancelo', 'desisto', 'não poderei', 'nao poderei', 'não vou', 'nao vou', 'cancelar', 'desistir', '2 - não', '2. não', '2 - desistir', '2 desistir'].some(c => lowerText === c || lowerText.startsWith('2') || lowerText.includes('desist') || lowerText.includes('cancel'));
 
     if (isConfirmChoice || isCancelChoice) {
-      const apt = this.findReminderAppointment(chatId);
+      const apt = this.findReminderAppointment(chatId, agentId);
       if (apt) {
+
         if (isConfirmChoice) {
           appointmentManager.updateAppointment(apt.id, { status: 'presence_confirmed' });
           return {

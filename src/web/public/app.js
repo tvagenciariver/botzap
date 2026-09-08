@@ -2191,7 +2191,9 @@ function renderAgentsGrid(agents) {
             <span class="${bhBadgeClass}">
               ${bhText}
             </span>
+            ${agent.enableBooking ? '<span class="agent-badge-item" style="border-color: rgba(16, 185, 129, 0.4); color: #10b981;">🗓️ Agenda Ativa</span>' : ''}
           </div>
+
 
           <div class="agent-card-desc">
             ${escapeHtml(agent.description || agent.systemInstruction || 'Sem observações.')}
@@ -2640,6 +2642,10 @@ function openNewAgentModal() {
   document.getElementById('modal-agent-description').value = '';
   document.getElementById('modal-agent-active').checked = true;
   document.getElementById('modal-agent-isDefault').checked = false;
+  if (document.getElementById('modal-agent-enableBooking')) {
+    document.getElementById('modal-agent-enableBooking').checked = false;
+  }
+
 
   document.getElementById('modal-agent-llmProvider').value = 'openai';
   setModalLLMProviderUI('openai');
@@ -2696,6 +2702,10 @@ async function openEditAgentModal(agentId) {
     document.getElementById('modal-agent-description').value = agent.description || '';
     document.getElementById('modal-agent-active').checked = agent.active !== false;
     document.getElementById('modal-agent-isDefault').checked = !!agent.isDefault;
+    if (document.getElementById('modal-agent-enableBooking')) {
+      document.getElementById('modal-agent-enableBooking').checked = !!agent.enableBooking;
+    }
+
 
     const prov = agent.llmProvider || 'openai';
     document.getElementById('modal-agent-llmProvider').value = prov;
@@ -2787,7 +2797,9 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
       description: document.getElementById('modal-agent-description').value.trim(),
       active: document.getElementById('modal-agent-active').checked,
       isDefault: document.getElementById('modal-agent-isDefault').checked,
+      enableBooking: document.getElementById('modal-agent-enableBooking') ? document.getElementById('modal-agent-enableBooking').checked : false,
       llmProvider: document.getElementById('modal-agent-llmProvider').value,
+
       openaiApiKey: document.getElementById('modal-agent-openaiApiKey').value.trim(),
       openaiModel: document.getElementById('modal-agent-openaiModel').value,
       geminiApiKey: document.getElementById('modal-agent-geminiApiKey').value.trim(),
@@ -3356,11 +3368,11 @@ function populateAgentsDropdowns(agents) {
     } else {
       specAgentSelect.disabled = false;
       const current = specAgentSelect.value;
-      specAgentSelect.innerHTML = '<option value="*">🌐 Todos os Clientes (Global)</option>';
+      specAgentSelect.innerHTML = '<option value="" disabled selected>Selecione a Empresa / Agente *</option>';
       agentsList.forEach(a => {
         specAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${escapeHtml(a.name)} (${escapeHtml(a.companyName || 'Empresa')})</option>`;
       });
-      if (current) specAgentSelect.value = current;
+      if (current && current !== '*') specAgentSelect.value = current;
     }
   }
 
@@ -3374,13 +3386,14 @@ function populateAgentsDropdowns(agents) {
     } else {
       srvAgentSelect.disabled = false;
       const current = srvAgentSelect.value;
-      srvAgentSelect.innerHTML = '<option value="*">🌐 Todos os Clientes (Global)</option>';
+      srvAgentSelect.innerHTML = '<option value="" disabled selected>Selecione a Empresa / Agente *</option>';
       agentsList.forEach(a => {
         srvAgentSelect.innerHTML += `<option value="${a.id}">🏢 ${escapeHtml(a.name)} (${escapeHtml(a.companyName || 'Empresa')})</option>`;
       });
-      if (current) srvAgentSelect.value = current;
+      if (current && current !== '*') srvAgentSelect.value = current;
     }
   }
+
 
   if (userAgentSelect) {
     const current = userAgentSelect.value;
@@ -4310,13 +4323,20 @@ document.getElementById('form-specialist')?.addEventListener('submit', async (e)
   e.preventDefault();
 
   const id = document.getElementById('spec-id')?.value;
+  const agentId = document.getElementById('spec-agent')?.value;
+  if (!agentId || agentId === '' || agentId === '*') {
+    showToast('Por favor, selecione para qual Empresa/Agente este profissional pertence.', 'error');
+    return;
+  }
+
   const daysChecked = Array.from(document.querySelectorAll('input[name="spec-days"]:checked')).map(c => c.value);
 
   const payload = {
-    agentId: document.getElementById('spec-agent')?.value || '*',
+    agentId,
     name: document.getElementById('spec-name')?.value.trim(),
     role: document.getElementById('spec-role')?.value.trim(),
     phone: document.getElementById('spec-phone')?.value.trim(),
+
     workHoursStart: document.getElementById('spec-hours-start')?.value || '08:00',
     workHoursEnd: document.getElementById('spec-hours-end')?.value || '18:00',
     breakStart: document.getElementById('spec-break-start')?.value || '12:00',
@@ -4460,13 +4480,20 @@ document.getElementById('form-service')?.addEventListener('submit', async (e) =>
   e.preventDefault();
 
   const id = document.getElementById('service-id')?.value;
+  const agentId = document.getElementById('service-agent')?.value;
+  if (!agentId || agentId === '' || agentId === '*') {
+    showToast('Por favor, selecione para qual Empresa/Agente este procedimento pertence.', 'error');
+    return;
+  }
+
   const payload = {
-    agentId: document.getElementById('service-agent')?.value || '*',
+    agentId,
     name: document.getElementById('service-name')?.value.trim(),
     durationMinutes: parseInt(document.getElementById('service-duration')?.value || '30', 10),
     price: parseFloat(document.getElementById('service-price')?.value || '0'),
     active: true
   };
+
 
   try {
     const url = id ? `/api/services/${id}` : '/api/services';
