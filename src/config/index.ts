@@ -76,6 +76,7 @@ export interface BotConfig {
   businessInfo: string;
   handoffKeywords: string[];
   handoffMessage: string;
+  mediaHandoffMessage?: string;
   botActiveByDefault: boolean;
   debounceSeconds: number;
   enableTypingSimulation: boolean;
@@ -139,6 +140,7 @@ export function loadBotConfig(): BotConfig {
     businessInfo: stored.businessInfo || '',
     handoffKeywords: stored.handoffKeywords || ['atendente', 'humano', 'suporte', 'pessoa'],
     handoffMessage: stored.handoffMessage || 'Entendido! Estou transferindo sua conversa para um de nossos atendentes humanos.',
+    mediaHandoffMessage: stored.mediaHandoffMessage || 'Olá, *{name}*! Recebemos sua imagem / pedido médico com sucesso! 📄✅\n\nJá estou encaminhando seu documento para a nossa equipe de atendimento humanizado 👤 para calcular os valores e verificar a disponibilidade dos seus exames.\n\nEm instantes um de nossos atendentes irá te responder por aqui! Por favor, aguarde só um momento. 😊',
     botActiveByDefault: stored.botActiveByDefault ?? true,
     debounceSeconds: stored.debounceSeconds ?? 2.5,
     enableTypingSimulation: stored.enableTypingSimulation ?? true,

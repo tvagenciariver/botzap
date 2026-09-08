@@ -24,6 +24,7 @@ export interface AgentProfile {
   // Transbordo Humano e Pausa
   handoffKeywords: string[];
   handoffMessage: string;
+  mediaHandoffMessage?: string;
   pauseDurationHours: number;
   pauseDurationMinutes: number;
   debounceSeconds: number;

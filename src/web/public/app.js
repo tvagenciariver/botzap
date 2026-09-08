@@ -700,6 +700,22 @@ chatForm?.addEventListener('submit', async (e) => {
   }
 });
 
+// Ações rápidas no simulador
+document.getElementById('sim-btn-send-photo')?.addEventListener('click', () => {
+  chatInput.value = '[Imagem / Pedido Médico / Laudo Enviado pelo Paciente]';
+  chatForm.dispatchEvent(new Event('submit'));
+});
+
+document.getElementById('sim-btn-send-doc')?.addEventListener('click', () => {
+  chatInput.value = '[Documento / Pedido Médico Anexo]: pedido_medico_requisicao.pdf';
+  chatForm.dispatchEvent(new Event('submit'));
+});
+
+document.getElementById('sim-btn-ask-human')?.addEventListener('click', () => {
+  chatInput.value = 'Gostaria de falar com um atendente humano, por favor.';
+  chatForm.dispatchEvent(new Event('submit'));
+});
+
 document.getElementById('btn-clear-chat').addEventListener('click', () => {
   chatMessages.innerHTML = '';
   currentChatId = 'simulador_' + Math.random().toString(36).substring(2, 7) + '@c.us';
@@ -813,6 +829,9 @@ async function loadConfig() {
     document.getElementById('cfg-businessInfo').value = cfg.businessInfo || '';
     document.getElementById('cfg-handoffKeywords').value = (cfg.handoffKeywords || []).join(', ');
     document.getElementById('cfg-handoffMessage').value = cfg.handoffMessage || '';
+    if (document.getElementById('cfg-mediaHandoffMessage')) {
+      document.getElementById('cfg-mediaHandoffMessage').value = cfg.mediaHandoffMessage || '';
+    }
     document.getElementById('cfg-debounce').value = cfg.debounceSeconds ?? 2.5;
     const pauseHours = cfg.pauseDurationHours || (cfg.pauseDurationMinutes ? cfg.pauseDurationMinutes / 60 : 6);
     document.getElementById('cfg-pauseDurationHours').value = pauseHours;
@@ -854,6 +873,7 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
     businessInfo: document.getElementById('cfg-businessInfo').value,
     handoffKeywords,
     handoffMessage: document.getElementById('cfg-handoffMessage').value,
+    mediaHandoffMessage: document.getElementById('cfg-mediaHandoffMessage') ? document.getElementById('cfg-mediaHandoffMessage').value : undefined,
     debounceSeconds: parseFloat(document.getElementById('cfg-debounce').value),
     pauseDurationHours: pauseHours,
     pauseDurationMinutes: Math.round(pauseHours * 60),
@@ -2592,6 +2612,10 @@ function openNewAgentModal() {
 
   document.getElementById('modal-agent-handoffKeywords').value = 'atendente, humano, falar com pessoa, suporte, financeiro';
   document.getElementById('modal-agent-handoffMessage').value = 'Entendido! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que já iremos te atender! 👩‍💼';
+  if (document.getElementById('modal-agent-mediaHandoffMessage')) {
+    document.getElementById('modal-agent-mediaHandoffMessage').value =
+      'Olá, *{name}*! Recebemos sua imagem / pedido médico com sucesso! 📄✅\n\nJá estou encaminhando seu documento para a nossa equipe de atendimento humanizado 👤 para calcular os valores e verificar a disponibilidade dos seus exames.\n\nEm instantes um de nossos atendentes irá te responder por aqui! Por favor, aguarde só um momento. 😊';
+  }
   document.getElementById('modal-agent-pauseHours').value = 6;
   document.getElementById('modal-agent-debounce').value = 2.5;
   document.getElementById('modal-agent-typing').checked = true;
@@ -2644,6 +2668,9 @@ async function openEditAgentModal(agentId) {
 
     document.getElementById('modal-agent-handoffKeywords').value = Array.isArray(agent.handoffKeywords) ? agent.handoffKeywords.join(', ') : (agent.handoffKeywords || '');
     document.getElementById('modal-agent-handoffMessage').value = agent.handoffMessage || '';
+    if (document.getElementById('modal-agent-mediaHandoffMessage')) {
+      document.getElementById('modal-agent-mediaHandoffMessage').value = agent.mediaHandoffMessage || '';
+    }
     document.getElementById('modal-agent-pauseHours').value = agent.pauseDurationHours || (agent.pauseDurationMinutes ? (agent.pauseDurationMinutes / 60) : 6);
     document.getElementById('modal-agent-debounce').value = agent.debounceSeconds ?? 2.5;
     document.getElementById('modal-agent-typing').checked = agent.enableTypingSimulation !== false;
@@ -2726,6 +2753,7 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
       businessInfo: document.getElementById('modal-agent-businessInfo').value.trim(),
       handoffKeywords: keywords,
       handoffMessage: document.getElementById('modal-agent-handoffMessage').value.trim(),
+      mediaHandoffMessage: document.getElementById('modal-agent-mediaHandoffMessage') ? document.getElementById('modal-agent-mediaHandoffMessage').value.trim() : '',
       pauseDurationHours: parseFloat(document.getElementById('modal-agent-pauseHours').value) || 6,
       debounceSeconds: parseFloat(document.getElementById('modal-agent-debounce').value) || 2.5,
       enableTypingSimulation: document.getElementById('modal-agent-typing').checked,

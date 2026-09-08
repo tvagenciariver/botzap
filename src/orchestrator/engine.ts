@@ -1,5 +1,6 @@
 import { IAgent, AgentContext, AgentResponse } from './agents/base.js';
 import { BusinessHoursAgent } from './agents/business-hours.js';
+import { MediaHandoffAgent } from './agents/media-handoff.js';
 import { HandoffAgent } from './agents/handoff.js';
 import { BookingAgent } from './agents/booking.js';
 import { ExamDeliveryAgent } from './agents/exam-delivery.js';
@@ -34,12 +35,14 @@ export class AgentOrchestrator {
   constructor() {
     // Ordem de prioridade dos agentes:
     // 1. BusinessHoursAgent (verifica se está fora do horário comercial)
-    // 2. HandoffAgent (checa se o cliente quer atendente humano)
-    // 3. ExamDeliveryAgent (Validação dos 3 primeiros dígitos do CPF e entrega de exames LGPD)
-    // 4. BookingAgent (Agendamentos, anti-conflitos e confirmação D-1)
-    // 5. AttendantAgent (IA: Google Gemini / OpenAI)
+    // 2. MediaHandoffAgent (detecta fotos de pedidos médicos/laudos e transfere para humanizado)
+    // 3. HandoffAgent (checa se o cliente quer atendente humano)
+    // 4. ExamDeliveryAgent (Validação dos 3 primeiros dígitos do CPF e entrega de exames LGPD)
+    // 5. BookingAgent (Agendamentos, anti-conflitos e confirmação D-1)
+    // 6. AttendantAgent (IA: Google Gemini / OpenAI)
     this.agents = [
       new BusinessHoursAgent(),
+      new MediaHandoffAgent(),
       new HandoffAgent(),
       new ExamDeliveryAgent(),
       new BookingAgent(),
@@ -64,6 +67,36 @@ export class AgentOrchestrator {
       mime.includes('audio') ||
       mime.includes('ogg') ||
       mime.includes('opus')
+    );
+  }
+
+  /**
+   * Identifica se a mensagem recebida é uma imagem/foto (pedido médico, laudo, receita)
+   */
+  isImageMessage(payload: WahaMessagePayload): boolean {
+    if (!payload.hasMedia) return false;
+    const type = (payload._data?.type || '').toLowerCase();
+    const mime = (payload.media?.mimetype || payload._data?.mimetype || '').toLowerCase();
+    return (
+      type === 'image' ||
+      mime.startsWith('image/')
+    );
+  }
+
+  /**
+   * Identifica se a mensagem recebida é um documento (PDF de laudo, requisição, etc.)
+   */
+  isDocumentMessage(payload: WahaMessagePayload): boolean {
+    if (!payload.hasMedia) return false;
+    const type = (payload._data?.type || '').toLowerCase();
+    const mime = (payload.media?.mimetype || payload._data?.mimetype || '').toLowerCase();
+    return (
+      type === 'document' ||
+      mime.startsWith('application/pdf') ||
+      mime.includes('pdf') ||
+      mime.includes('document') ||
+      mime.includes('msword') ||
+      mime.includes('officedocument')
     );
   }
 
@@ -228,6 +261,8 @@ export class AgentOrchestrator {
     const contactName = payload._data?.notifyName || payload.from.split('@')[0];
     let effectiveBody = body || '';
     const isAudio = this.isAudioMessage(payload);
+    const isImage = this.isImageMessage(payload);
+    const isDocument = this.isDocumentMessage(payload);
 
     // 4.1. Processamento Inteligente de Áudio (Voz / PTT) com Transcrição IA
     if (isAudio) {
@@ -296,6 +331,20 @@ export class AgentOrchestrator {
       }
     }
 
+    // 4.1b. Processamento Inteligente de Imagens e Documentos (Pedidos Médicos, Laudos, Receitas)
+    if (isImage || isDocument) {
+      if (!effectiveBody || effectiveBody.trim() === '') {
+        effectiveBody = isImage
+          ? '[Imagem / Pedido Médico / Laudo Enviado pelo Paciente]'
+          : '[Documento / Pedido Médico Anexo]';
+      } else {
+        effectiveBody = isImage
+          ? `[Imagem / Pedido Médico Anexo]: ${effectiveBody.trim()}`
+          : `[Documento / Pedido Médico Anexo]: ${effectiveBody.trim()}`;
+      }
+      payload.body = effectiveBody;
+    }
+
     // 4.2. Se o bot estiver pausado para este chatId e agente, verifica se é interação de agendamento/lembrete ou validação de exame LGPD
     if (memoryStore.isChatPaused(chatId, agent.id)) {
       const bookingAgent = this.agents.find(a => a.name === 'BookingAgent');
@@ -360,7 +409,13 @@ export class AgentOrchestrator {
       type: 'incoming',
       chatId,
       contactName,
-      message: isAudio ? `[${agent.name}] 🎙️ [Áudio Transcrito]: "${effectiveBody}"` : `[${agent.name}] ${effectiveBody}`
+      message: isAudio
+        ? `[${agent.name}] 🎙️ [Áudio Transcrito]: "${effectiveBody}"`
+        : (isImage
+            ? `[${agent.name}] 📸 [Foto/Pedido Médico Recebido]: "${effectiveBody}"`
+            : (isDocument
+                ? `[${agent.name}] 📄 [Documento/Laudo Recebido]: "${effectiveBody}"`
+                : `[${agent.name}] ${effectiveBody}`))
     });
 
     // 6. Envia mensagem para o debouncer com escopo da sessão e agente
@@ -454,12 +509,19 @@ export class AgentOrchestrator {
   async simulateMessage(chatId: string, messageText: string, agentId?: string): Promise<AgentResponse> {
     const agent = (agentId ? agentManager.getAgent(agentId) : null) || agentManager.getDefaultAgent();
 
+    const isImageSim = messageText.startsWith('[Imagem') || messageText.startsWith('[Foto');
+    const isDocSim = messageText.startsWith('[Documento');
+
     const context: AgentContext = {
       chatId,
       userMessage: messageText,
       contactName: 'Cliente Teste',
       session: 'simulator',
-      agent
+      agent,
+      metadata: (isImageSim || isDocSim) ? {
+        hasMedia: true,
+        mediaType: isImageSim ? 'image' : 'document'
+      } : undefined
     };
 
     for (const a of this.agents) {

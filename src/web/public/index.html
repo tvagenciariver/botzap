@@ -201,6 +201,13 @@
             </div>
           </div>
 
+          <div class="sim-quick-actions" style="padding: 6px 14px; background: rgba(15, 23, 42, 0.4); border-top: 1px solid var(--border-color); display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <span style="font-size: 11px; color: var(--text-muted);">Simular Ações:</span>
+            <button type="button" class="btn btn-outline btn-xs" id="sim-btn-send-photo" title="Simular envio de foto de laudo ou pedido médico pelo paciente">📸 Enviar Foto/Pedido</button>
+            <button type="button" class="btn btn-outline btn-xs" id="sim-btn-send-doc" title="Simular envio de documento PDF de requisição">📄 Enviar PDF/Laudo</button>
+            <button type="button" class="btn btn-outline btn-xs" id="sim-btn-ask-human" title="Simular pedido para falar com atendente humano">👤 Pedir Atendente</button>
+          </div>
+
           <form class="chat-input-area" id="chat-form">
             <input type="text" id="chat-input" placeholder="Digite uma mensagem como se fosse o cliente..." autocomplete="off">
             <button type="submit" class="btn btn-primary" id="btn-send-sim">Enviar</button>
@@ -834,6 +841,12 @@
                       <small class="form-hint">Mensagem cordial enviada ao cliente antes do bot pausar.</small>
                     </div>
 
+                    <div class="form-group" style="margin-top: 15px;">
+                      <label for="modal-agent-mediaHandoffMessage">📸 Mensagem ao Receber Imagem / Pedido Médico / Laudo</label>
+                      <textarea id="modal-agent-mediaHandoffMessage" rows="3" class="form-control" placeholder="Olá, *{name}*! Recebemos sua imagem / pedido médico com sucesso! 📄✅&#10;&#10;Já estou encaminhando seu documento para a nossa equipe de atendimento humanizado 👤 para calcular os valores e verificar a disponibilidade dos seus exames.&#10;&#10;Em instantes um de nossos atendentes irá te responder por aqui! Por favor, aguarde só um momento. 😊"></textarea>
+                      <small class="form-hint">Enviada automaticamente quando o paciente envia foto ou arquivo do pedido/laudo, transferindo imediatamente para os atendentes humanos.</small>
+                    </div>
+
                     <div class="form-row" style="margin-top: 25px;">
                       <div class="form-group col-4">
                         <label for="modal-agent-pauseHours">Tempo de Pausa do Bot (Horas)</label>
@@ -1069,6 +1082,12 @@
               <div class="form-group">
                 <label for="cfg-handoffMessage">Mensagem de Transbordo Humano</label>
                 <textarea id="cfg-handoffMessage" name="handoffMessage" rows="2" class="form-control"></textarea>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-mediaHandoffMessage">📸 Mensagem ao Receber Imagem / Pedido Médico / Laudo</label>
+                <textarea id="cfg-mediaHandoffMessage" name="mediaHandoffMessage" rows="2" class="form-control" placeholder="Olá, *{name}*! Recebemos sua imagem / pedido médico com sucesso! 📄✅..."></textarea>
+                <small class="form-hint">Mensagem cordial enviada quando o paciente manda foto de requisição ou documento médico antes de transferir para a equipe humana.</small>
               </div>
 
               <div class="form-row">
