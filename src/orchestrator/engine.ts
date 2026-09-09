@@ -558,18 +558,21 @@ export class AgentOrchestrator {
       }
 
       // Verificação estrita para lembrete de agendamento:
-      const isStrictReminderChoice = ['1', '2', 'sim', 'nao', 'não', 'confirmo', 'cancelo', 'desisto'].includes(cleanMsg) ||
-        /^1\s*[-.]?\s*sim$/i.test(cleanMsg) ||
-        /^2\s*[-.]?\s*(não|nao|desistir|cancelar)$/i.test(cleanMsg);
+      // SÓ DEVE OBEDECER SE A EMPRESA FOR OPTANTE DA OPÇÃO DE AGENDA/AGENDAMENTO (agent.enableBooking === true)
+      if (agent.enableBooking) {
+        const isStrictReminderChoice = ['1', '2', 'sim', 'nao', 'não', 'confirmo', 'cancelo', 'desisto'].includes(cleanMsg) ||
+          /^1\s*[-.]?\s*sim$/i.test(cleanMsg) ||
+          /^2\s*[-.]?\s*(não|nao|desistir|cancelar)$/i.test(cleanMsg);
 
-      if (isStrictReminderChoice && bookingAgent) {
-        const testCtx = {
-          chatId,
-          userMessage: effectiveBody,
-          session: sessionName,
-          agent
-        };
-        canHandleBooking = await bookingAgent.canHandle(testCtx);
+        if (isStrictReminderChoice && bookingAgent) {
+          const testCtx = {
+            chatId,
+            userMessage: effectiveBody,
+            session: sessionName,
+            agent
+          };
+          canHandleBooking = await bookingAgent.canHandle(testCtx);
+        }
       }
 
       if (canHandleBooking || canHandleExam) {
