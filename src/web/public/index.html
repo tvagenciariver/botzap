@@ -216,6 +216,7 @@
             <span style="font-size: 11px; color: var(--text-muted);">Simular Ações:</span>
             <button type="button" class="btn btn-outline btn-xs" id="sim-btn-send-photo" title="Simular envio de foto de laudo ou pedido médico pelo paciente">📸 Enviar Foto/Pedido</button>
             <button type="button" class="btn btn-outline btn-xs" id="sim-btn-send-doc" title="Simular envio de documento PDF de requisição">📄 Enviar PDF/Laudo</button>
+            <button type="button" class="btn btn-outline btn-xs" id="sim-btn-send-audio" title="Simular envio de áudio ou mensagem de voz pelo paciente">🎙️ Enviar Áudio</button>
             <button type="button" class="btn btn-outline btn-xs" id="sim-btn-ask-human" title="Simular pedido para falar com atendente humano">👤 Pedir Atendente</button>
           </div>
 
@@ -885,7 +886,7 @@
                         <small class="form-hint">Espera o cliente terminar de mandar frases picadas antes de processar.</small>
                       </div>
                       <div class="form-group col-4">
-                        <label>Humanização & Áudios</label>
+                        <label>Experiência de Conversa</label>
                         <div class="checkbox-group" style="padding-top: 8px; display: flex; flex-direction: column; gap: 10px;">
                           <label class="switch-row">
                             <input type="checkbox" id="modal-agent-typing" checked>
@@ -895,9 +896,26 @@
                             <input type="checkbox" id="modal-agent-seen" checked>
                             <span>Marcar Mensagem como "Lida" (Check Azul)</span>
                           </label>
-                          <label class="switch-row" title="Converte automaticamente áudios e mensagens de voz do WhatsApp em texto para este bot responder com IA">
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Bloco Dedicado: Transcrição Automática de Áudios Recebidos -->
+                    <div style="margin-top: 16px; padding: 14px 18px; background: rgba(59, 130, 246, 0.07); border: 1px solid rgba(59, 130, 246, 0.28); border-radius: 8px;">
+                      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;">
+                        <div style="flex: 1;">
+                          <div style="font-weight: 600; color: #60a5fa; display: flex; align-items: center; gap: 8px; font-size: 14px;">
+                            <span>🎙️ Transcrição Automática de Áudios Recebidos</span>
+                            <span class="badge badge-primary" style="font-size: 10px; padding: 2px 6px;">Exclusivo Áudios Recebidos</span>
+                          </div>
+                          <p style="font-size: 12px; color: var(--text-muted); margin: 6px 0 0 0; line-height: 1.45;">
+                            Quando ativado, todo áudio/nota de voz enviado pelo cliente no WhatsApp será automaticamente transcrito com IA e <strong>adicionado na conversa com citação direta</strong>. Isso permite que os atendentes humanos no <strong>WhatsApp Web</strong> e no <strong>Chatwoot</strong> leiam imediatamente o que o paciente falou, sem precisar ouvir o áudio. (Por padrão vem desmarcado).
+                          </p>
+                        </div>
+                        <div style="padding-top: 2px;">
+                          <label class="switch-row" style="margin: 0; white-space: nowrap; cursor: pointer;">
                             <input type="checkbox" id="modal-agent-transcribe-audio">
-                            <span>🎙️ Transcrever Áudios (Voz / PTT) <span class="badge-tag-opt">Opcional</span></span>
+                            <span style="font-weight: 600; font-size: 13px; color: #93c5fd;">Ativar</span>
                           </label>
                         </div>
                       </div>

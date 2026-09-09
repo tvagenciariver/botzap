@@ -772,6 +772,11 @@ document.getElementById('sim-btn-send-doc')?.addEventListener('click', () => {
   chatForm.dispatchEvent(new Event('submit'));
 });
 
+document.getElementById('sim-btn-send-audio')?.addEventListener('click', () => {
+  chatInput.value = '[Áudio / Mensagem de Voz Recebida]: "Olá! Gostaria de saber os horários de atendimento para esta semana e valores de consulta."';
+  chatForm.dispatchEvent(new Event('submit'));
+});
+
 document.getElementById('sim-btn-ask-human')?.addEventListener('click', () => {
   chatInput.value = 'Gostaria de falar com um atendente humano, por favor.';
   chatForm.dispatchEvent(new Event('submit'));

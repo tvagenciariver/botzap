@@ -334,6 +334,7 @@ export class AgentOrchestrator {
       : undefined;
 
     let effectiveBody = body || '';
+    let transcribedAudioText = '';
     const isAudio = this.isAudioMessage(payload);
     const isImage = this.isImageMessage(payload);
     const isDocument = this.isDocumentMessage(payload);
@@ -391,8 +392,27 @@ export class AgentOrchestrator {
         }
 
         console.log(`[Orchestrator] ✅ Áudio transcrito com sucesso para ${chatId}: "${transcribed}"`);
+        transcribedAudioText = transcribed;
         effectiveBody = transcribed;
         payload.body = transcribed;
+
+        // Adiciona a transcrição diretamente na conversa do WhatsApp citando o áudio recebido.
+        // Assim, o atendente humano no WhatsApp Web ou Chatwoot pode ler imediatamente o conteúdo!
+        const transcriptionReply = `🎤 *Transcrição do Áudio:*\n"${transcribed}"`;
+        try {
+          botTracker.recordBotMessage(chatId, transcriptionReply);
+          const activeSession = (sessionName && sessionName !== '*')
+            ? sessionName
+            : ((agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession);
+
+          await wahaClient.sendText(chatId, transcriptionReply, {
+            session: activeSession,
+            reply_to: payload.id
+          });
+          console.log(`[Orchestrator] 📤 Transcrição do áudio entregue no WhatsApp/Chatwoot com citação direta.`);
+        } catch (sendErr: any) {
+          console.warn(`[Orchestrator] Aviso ao enviar citação de transcrição do áudio para ${chatId}:`, sendErr.message);
+        }
       } catch (err: any) {
         console.error(`[Orchestrator] Erro ao transcrever áudio de ${chatId}:`, err.message);
         this.addLog({
@@ -455,6 +475,17 @@ export class AgentOrchestrator {
           message: `Contato ${chatId} respondeu a ${reason}. Pausa cancelada automaticamente.`
         });
       } else {
+        if (isAudio) {
+          console.log(`[Orchestrator] Bot [${agent.name}] pausado para ${chatId}. Transcrição entregue no chat para o atendente humano ler.`);
+          this.addLog({
+            type: 'info',
+            chatId,
+            contactName,
+            message: `[${agent.name}] 🎙️ Áudio transcrito e entregue no chat para o atendente humano ler: "${transcribedAudioText}"`
+          });
+          return;
+        }
+
         console.log(`[Orchestrator] Bot [${agent.name}] pausado para ${chatId}, ignorando processamento.`);
         this.addLog({
           type: 'info',
@@ -590,6 +621,61 @@ export class AgentOrchestrator {
 
     const isImageSim = messageText.startsWith('[Imagem') || messageText.startsWith('[Foto');
     const isDocSim = messageText.startsWith('[Documento');
+    const isAudioSim = messageText.startsWith('[Áudio') || messageText.startsWith('[Audio') || messageText.startsWith('[Voz');
+
+    // Suporte especial à Simulação de Mensagens de Áudio Recebidas
+    if (isAudioSim) {
+      const config = loadBotConfig();
+      const isTranscriptionEnabled = (agent?.enableAudioTranscription !== undefined)
+        ? agent.enableAudioTranscription
+        : (config.enableAudioTranscription ?? false);
+
+      if (!isTranscriptionEnabled) {
+        return {
+          handled: true,
+          replyText: '🎙️ *[Mensagem de Áudio Recebida]*\n\n*(Aviso: A transcrição automática de áudios recebidos está desativada para este agente. Para transcrever e adicionar o texto automaticamente no WhatsApp e Chatwoot, ative a opção nas configurações do Agente).*',
+          agentName: 'AudioTranscriber'
+        };
+      }
+
+      // Se a transcrição está ativada, extrai o texto do áudio simulado ou usa exemplo padrão
+      let spokenText = 'Olá! Gostaria de saber os horários de atendimento para esta semana.';
+      const match = messageText.match(/\[(?:Áudio|Audio|Voz)[^\]]*\]:\s*"?([^"]+)"?/i);
+      if (match && match[1]) {
+        spokenText = match[1].trim();
+      }
+
+      const audioContext: AgentContext = {
+        chatId,
+        userMessage: spokenText,
+        contactName: 'Cliente Teste',
+        session: 'simulator',
+        agent,
+        metadata: {
+          hasMedia: true,
+          mediaType: 'audio'
+        }
+      };
+
+      for (const a of this.agents) {
+        const canHandle = await a.canHandle(audioContext);
+        if (canHandle) {
+          const res = await a.execute(audioContext);
+          if (res.handled) {
+            return {
+              ...res,
+              replyText: `🎤 *Transcrição do Áudio:*\n"${spokenText}"\n\n---\n\n${res.replyText}`
+            };
+          }
+        }
+      }
+
+      return {
+        handled: true,
+        replyText: `🎤 *Transcrição do Áudio:*\n"${spokenText}"\n\n*(Transcrição entregue na conversa para os atendentes lerem).*`,
+        agentName: 'AudioTranscriber'
+      };
+    }
 
     const context: AgentContext = {
       chatId,
