@@ -19,9 +19,9 @@ export class AttendantAgent implements IAgent {
     const cleanDigits = rawTrimmed.replace(/\D/g, '');
     const isPureDigitsOrCpf = /^[\d.\-\s,]{3,20}$/.test(rawTrimmed) && cleanDigits.length >= 3;
 
-    if (isPureDigitsOrCpf) {
+    if (isPureDigitsOrCpf && context.agent?.enableBooking) {
       // 1. Tenta validar como entrega de exame
-      const pendingExam = examService.findPendingExam(context.chatId, context.userMessage);
+      const pendingExam = examService.findPendingExam(context.chatId, context.userMessage, context.agent?.id);
       if (pendingExam) {
         const examAgent = new ExamDeliveryAgent();
         return await examAgent.execute(context);

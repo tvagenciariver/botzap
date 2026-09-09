@@ -13,6 +13,11 @@ export class ExamDeliveryAgent implements IAgent {
    * ou se a mensagem enviada for dígitos que correspondam a um exame pendente.
    */
   canHandle(context: AgentContext): boolean {
+    // 🔒 Empresas sem agenda ativa não utilizam o fluxo de entrega de exames
+    if (!context.agent?.enableBooking) {
+      return false;
+    }
+
     const pending = examService.getPendingExamsForChat(context.chatId, context.agent?.id);
     if (pending.length > 0) return true;
 

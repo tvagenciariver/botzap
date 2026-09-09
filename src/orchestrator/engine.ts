@@ -537,29 +537,26 @@ export class AgentOrchestrator {
       let canHandleExam = false;
 
       // 🔒 BLINDAGEM MÁXIMA DA PAUSA HUMANA:
-      // O bot JAMAIS deve quebrar a pausa se a mensagem for texto conversacional / conversa livre!
-      // A pausa só pode ser rompida automaticamente se:
-      // 1. O paciente digitou ESTRITAMENTE dígitos de CPF (3 a 11 dígitos) correspondentes a um exame pendente
-      // 2. O paciente digitou ESTRITAMENTE uma opção de lembrete (1/2/sim/não) correspondente a um agendamento pendente
-
-      const cleanMsg = (effectiveBody || '').trim().toLowerCase();
-      const cleanDigits = effectiveBody.replace(/\D/g, '');
-
-      // Verificação estrita para CPF:
-      // Deve conter entre 3 e 11 dígitos numéricos e a mensagem deve ser puramente dígitos/pontos/hífen/espaços
-      const isStrictlyCpfFormat = cleanDigits.length >= 3 && cleanDigits.length <= 11 &&
-        /^[0-9.\-\s]+$/.test(effectiveBody.trim());
-
-      if (isStrictlyCpfFormat && examAgent) {
-        const matchedExam = examService.findPendingExam(chatId, effectiveBody, agent.id);
-        if (matchedExam) {
-          canHandleExam = true;
-        }
-      }
-
-      // Verificação estrita para lembrete de agendamento:
-      // SÓ DEVE OBEDECER SE A EMPRESA FOR OPTANTE DA OPÇÃO DE AGENDA/AGENDAMENTO (agent.enableBooking === true)
+      // Empresas sem a opção de agenda ativada (enableBooking !== true) NUNCA despausam automaticamente!
+      // Visto que não possuem envio de exames nem lembretes de agenda, mesmo que digitem CPF e haja laudo,
+      // o bot JAMAIS despausa. A conversa permanece 100% com o atendente humano.
       if (agent.enableBooking) {
+        const cleanMsg = (effectiveBody || '').trim().toLowerCase();
+        const cleanDigits = effectiveBody.replace(/\D/g, '');
+
+        // 1. Verificação estrita para CPF:
+        // Deve conter entre 3 e 11 dígitos numéricos e a mensagem deve ser puramente dígitos/pontos/hífen/espaços
+        const isStrictlyCpfFormat = cleanDigits.length >= 3 && cleanDigits.length <= 11 &&
+          /^[0-9.\-\s]+$/.test(effectiveBody.trim());
+
+        if (isStrictlyCpfFormat && examAgent) {
+          const matchedExam = examService.findPendingExam(chatId, effectiveBody, agent.id);
+          if (matchedExam) {
+            canHandleExam = true;
+          }
+        }
+
+        // 2. Verificação estrita para lembrete de agendamento:
         const isStrictReminderChoice = ['1', '2', 'sim', 'nao', 'não', 'confirmo', 'cancelo', 'desisto'].includes(cleanMsg) ||
           /^1\s*[-.]?\s*sim$/i.test(cleanMsg) ||
           /^2\s*[-.]?\s*(não|nao|desistir|cancelar)$/i.test(cleanMsg);
