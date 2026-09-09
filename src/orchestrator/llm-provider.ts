@@ -40,12 +40,15 @@ export class LLMProviderManager {
   async generateReply(chatId: string, userMessage: string, contactName?: string, agent?: AgentProfile): Promise<LLMReplyResult> {
     const config = loadBotConfig();
     const primaryProvider = agent?.llmProvider || config.llmProvider || 'gemini';
+    const isTranscriptionEnabled = (agent?.enableAudioTranscription !== undefined)
+      ? agent.enableAudioTranscription
+      : (config.enableAudioTranscription ?? false);
 
     if (primaryProvider === 'openai') {
       try {
         const text = await openAIService.generateReply(chatId, userMessage, contactName, agent);
         return {
-          text,
+          text: this.sanitizeAudioRefusal(text, isTranscriptionEnabled),
           provider: 'openai',
           model: agent?.openaiModel || config.openaiModel || 'gpt-4o-mini'
         };
@@ -57,7 +60,7 @@ export class LLMProviderManager {
           console.log(`[LLMManager] Acionando contingência automática via Google Gemini...`);
           const text = await geminiService.generateReply(chatId, userMessage, contactName, agent);
           return {
-            text,
+            text: this.sanitizeAudioRefusal(text, isTranscriptionEnabled),
             provider: 'gemini',
             model: agent?.model || config.model || 'gemini-flash-lite-latest'
           };
@@ -69,7 +72,7 @@ export class LLMProviderManager {
       try {
         const text = await geminiService.generateReply(chatId, userMessage, contactName, agent);
         return {
-          text,
+          text: this.sanitizeAudioRefusal(text, isTranscriptionEnabled),
           provider: 'gemini',
           model: agent?.model || config.model || 'gemini-flash-lite-latest'
         };
@@ -80,8 +83,11 @@ export class LLMProviderManager {
         if (openaiKey && openaiKey !== 'sua_chave_openai_aqui') {
           console.log(`[LLMManager] Acionando contingência automática via OpenAI...`);
           const text = await openAIService.generateReply(chatId, userMessage, contactName, agent);
+          const isTranscriptionEnabled = (agent?.enableAudioTranscription !== undefined)
+            ? agent.enableAudioTranscription
+            : (config.enableAudioTranscription ?? false);
           return {
-            text,
+            text: this.sanitizeAudioRefusal(text, isTranscriptionEnabled),
             provider: 'openai',
             model: agent?.openaiModel || config.openaiModel || 'gpt-4o-mini'
           };
@@ -89,6 +95,23 @@ export class LLMProviderManager {
         throw err;
       }
     }
+  }
+
+  /**
+   * Sanitiza respostas da IA removendo recusas alucinadas de áudio quando a transcrição estiver ativa
+   */
+  private sanitizeAudioRefusal(text: string, isTranscriptionEnabled: boolean): string {
+    if (!isTranscriptionEnabled || !text) return text;
+
+    // Remove frases de recusa de áudio como:
+    // "Só nos comunicamos por mensagens de texto, imagens e documentos e por isso não consigo ouvir áudios."
+    const cleaned = text
+      .replace(/(?:por\s+favor\s*,?\s*)?(?:desculpe\s*,?\s*)?(?:lembrando\s+que\s+)?(?:só|somente)\s+(?:nos\s+)?comunicamos\s+por\s+mensagens?\s+de\s+texto[^.!?\n]*[.!?\n]*/gi, '')
+      .replace(/(?:desculpe\s*,?\s*)?(?:n[aã]o\s+(?:consigo|podemos?|é\s+poss[ií]vel)\s+(?:ouvir|escutar|reproduzir)\s+[aá]udios?[^.!?\n]*)[.!?\n]*/gi, '')
+      .replace(/(?:infelizmente\s*,?\s*)?(?:n[aã]o\s+ou[çc]o\s+[aá]udios?[^.!?\n]*)[.!?\n]*/gi, '')
+      .trim();
+
+    return cleaned || text;
   }
 
   /**

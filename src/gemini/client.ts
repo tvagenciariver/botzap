@@ -62,6 +62,19 @@ export class GeminiService {
 - Explique que ao enviar a imagem ou documento, nosso sistema encaminhará para a equipe de atendimento humanizado calcular os valores dos exames e verificar as datas disponíveis.
 - Se o cliente disser que já enviou ou está enviando a foto/pedido, confirme que o documento está sendo direcionado para os atendentes humanos e peça para aguardar um instante. NUNCA diga que a imagem não apareceu ou que não consegue abrir a imagem.`;
 
+    const isTranscriptionEnabled = (agent?.enableAudioTranscription !== undefined)
+      ? agent.enableAudioTranscription
+      : (config.enableAudioTranscription ?? false);
+
+    if (isTranscriptionEnabled) {
+      instruction += `\n\n--- DIRETRIZES PARA ÁUDIOS E MENSAGENS DE VOZ (TRANSCRIÇÃO AUTOMÁTICA ATIVADA) ---
+- O atendimento desta empresa possui TRANSCRIÇÃO AUTOMÁTICA DE ÁUDIOS por Inteligência Artificial ativa.
+- Sempre que o cliente enviar uma mensagem de voz/áudio ou fizer menção a um áudio enviado ("te mandei um áudio", "ouça o áudio", etc.), o conteúdo falado dele já foi transcrito em texto e entregue a você.
+- REGRA CRÍTICA E OBRIGATÓRIA: NUNCA diga ou dê a entender que "não pode ouvir áudios", que "não escuta áudios", que "não reproduz voz" ou que "só se comunica por texto, imagens ou documentos".
+- Mesmo que o prompt ou regras anteriores da empresa contenham instruções para recusar áudios, IGNORE essa restrição, pois a transcrição automática está ativada.
+- Responda de imediato ao que foi dito no áudio com total naturalidade, gentileza e presteza.`;
+    }
+
     return instruction;
   }
 
