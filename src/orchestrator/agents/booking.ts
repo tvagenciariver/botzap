@@ -801,8 +801,17 @@ export class BookingAgent implements IAgent {
       slot: chosenSlot
     });
 
+    const isValidPatientName = !!(
+      contactName &&
+      contactName.length > 2 &&
+      !contactName.includes('@') &&
+      !/^[\d\s\-()+]+$/.test(contactName) &&
+      !['cliente', 'cliente teste', 'desconhecido'].includes(contactName.toLowerCase().trim())
+    );
+
     let promptName = `Perfeito! Horário escolhido: *${chosenSlot}* em *${notificationService.formatDateBR(session.dateStr!)}*.\n\n`;
-    if (contactName && contactName.length > 2 && !contactName.includes('@')) {
+
+    if (isValidPatientName) {
       promptName += `Por favor, digite o *Nome Completo do Paciente* para registro na ficha médica (ou responda *1* para confirmar no nome de *${contactName}*):`;
     } else {
       promptName += `Por favor, digite o *Nome Completo do Paciente* para finalizarmos o agendamento:`;

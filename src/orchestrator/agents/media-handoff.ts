@@ -47,7 +47,15 @@ export class MediaHandoffAgent implements IAgent {
       ? ((context.agent.pauseDurationHours ? context.agent.pauseDurationHours * 60 : context.agent.pauseDurationMinutes) || 360)
       : ((config.pauseDurationHours ? config.pauseDurationHours * 60 : config.pauseDurationMinutes) || 360);
 
-    const nameGreeting = context.contactName && context.contactName !== 'Cliente' && context.contactName !== 'Cliente Teste'
+    const isValidName = !!(
+      context.contactName &&
+      context.contactName !== 'Cliente' &&
+      context.contactName !== 'Cliente Teste' &&
+      !/^[\d\s\-()+]+$/.test(context.contactName) &&
+      !context.contactName.includes('@')
+    );
+
+    const nameGreeting = isValidName
       ? `Olá, *${context.contactName}*! `
       : 'Olá! ';
 
@@ -59,9 +67,7 @@ export class MediaHandoffAgent implements IAgent {
         `Em instantes um de nossos atendentes irá te responder por aqui! Por favor, aguarde só um momento. 😊`;
     } else {
       // Interpolação de variáveis opcionais
-      const cleanName = (context.contactName && context.contactName !== 'Cliente' && context.contactName !== 'Cliente Teste')
-        ? context.contactName
-        : '';
+      const cleanName = isValidName ? context.contactName! : '';
       if (replyText.includes('{name}')) {
         replyText = replyText.replace(/{\s*name\s*}/gi, cleanName);
       } else if (cleanName && (replyText.startsWith('Recebemos') || replyText.startsWith('Identificamos') || replyText.startsWith('Já estou'))) {

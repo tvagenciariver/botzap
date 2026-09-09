@@ -326,7 +326,13 @@ export class AgentOrchestrator {
       return;
     }
 
-    const contactName = payload._data?.notifyName || payload.from.split('@')[0];
+    // Sanitização inteligente do nome do contato: só usa se for um nome real de perfil, nunca o número de telefone
+    const rawNotifyName = (payload._data?.notifyName || '').trim();
+    const isNumericName = /^[\d\s\-()+]+$/.test(rawNotifyName);
+    const contactName = (rawNotifyName && !isNumericName && !rawNotifyName.includes('@'))
+      ? rawNotifyName
+      : undefined;
+
     let effectiveBody = body || '';
     const isAudio = this.isAudioMessage(payload);
     const isImage = this.isImageMessage(payload);
