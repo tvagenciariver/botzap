@@ -1,8 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
 import { env, loadBotConfig } from '../config/index.js';
 import { WahaSendTextRequest, WahaSessionStatus } from './types.js';
-import { getAlternateBrazilianChatId } from '../appointments/phone-utils.js';
-export { getAlternateBrazilianChatId };
+import { getAlternateBrazilianChatId, getAllChatIdAliases, lidMapper } from '../appointments/phone-utils.js';
+export { getAlternateBrazilianChatId, getAllChatIdAliases, lidMapper };
 
 export class WahaClient {
   private client!: AxiosInstance;
@@ -101,22 +101,31 @@ export class WahaClient {
       return response.data;
     } catch (error: any) {
       const firstErrMsg = this.extractErrorMessage(error);
-      const altChatId = getAlternateBrazilianChatId(chatId);
 
-      // Se for número brasileiro e o envio inicial falhou, tenta o formato alternativo (com/sem 9)
-      if (altChatId) {
-        console.warn(`[WAHA] Primeiro envio para ${chatId} falhou (${firstErrMsg}). Tentando formato alternativo do 9º dígito: ${altChatId}...`);
+      // Se falhou com reply_to, tenta enviar direto sem citação
+      if (body.reply_to) {
+        console.warn(`[WAHA] Envio com reply_to para ${chatId} falhou (${firstErrMsg}). Tentando sem citação...`);
         try {
-          const altBody = { ...body, chatId: altChatId };
+          const noReplyBody = { ...body, reply_to: undefined };
+          const noReplyRes = await this.client.post('/api/sendText', noReplyBody);
+          return noReplyRes.data;
+        } catch {
+          // Continua para tentar aliases
+        }
+      }
+
+      // Tenta todos os aliases conhecidos (LID, 8/9 dígitos)
+      const allAliases = getAllChatIdAliases(chatId).filter(a => a !== chatId);
+      for (const altId of allAliases) {
+        console.warn(`[WAHA] Tentando envio para alias alternativo: ${altId}...`);
+        try {
+          // Tenta sem reply_to no alias para máxima compatibilidade
+          const altBody = { ...body, chatId: altId, reply_to: undefined };
           const altResponse = await this.client.post('/api/sendText', altBody);
-          console.log(`[WAHA] ✅ Sucesso no envio para o número alternativo ${altChatId}!`);
+          console.log(`[WAHA] ✅ Sucesso no envio para o alias alternativo ${altId}!`);
           return altResponse.data;
-        } catch (altError: any) {
-          const altErrMsg = this.extractErrorMessage(altError);
-          console.error(`[WAHA] Falha também no número alternativo ${altChatId}: ${altErrMsg}`);
-          const detailedError = new Error(`Erro WAHA para ${chatId} (${firstErrMsg}) e alternativa ${altChatId} (${altErrMsg})`);
-          (detailedError as any).response = error.response || altError.response;
-          throw detailedError;
+        } catch {
+          // continua para o próximo alias
         }
       }
 

@@ -11,6 +11,7 @@ import { memoryStore } from '../gemini/memory.js';
 import { wahaClient } from '../waha/client.js';
 import { loadBotConfig, env } from '../config/index.js';
 import { agentManager } from '../config/agent-manager.js';
+import { AgentProfile } from '../config/agent-types.js';
 import { WahaMessagePayload } from '../waha/types.js';
 import { getAlternateBrazilianChatId, lidMapper, getAllChatIdAliases } from '../appointments/phone-utils.js';
 import { examService } from '../appointments/exam-service.js';
@@ -101,6 +102,103 @@ export class AgentOrchestrator {
       mime.includes('msword') ||
       mime.includes('officedocument')
     );
+  }
+
+  /**
+   * Processa a transcrição de um áudio recebido e entrega diretamente no chat (WhatsApp / Chatwoot)
+   * para leitura imediata do atendente humano.
+   * Funciona inclusive quando o bot estiver pausado ou o agente estiver em pausa global.
+   */
+  async handleAudioTranscription(
+    payload: WahaMessagePayload,
+    chatId: string,
+    contactName: string | undefined,
+    sessionName: string | undefined,
+    agent: AgentProfile
+  ): Promise<string> {
+    const config = loadBotConfig();
+    const isTranscriptionEnabled = (agent.enableAudioTranscription !== undefined)
+      ? agent.enableAudioTranscription
+      : (config.enableAudioTranscription ?? false);
+
+    if (!isTranscriptionEnabled) {
+      console.log(`[Orchestrator] Áudio recebido de ${chatId}, mas a transcrição automática está desativada no agente [${agent.name}].`);
+      this.addLog({
+        type: 'info',
+        chatId,
+        contactName,
+        message: `[${agent.name}] Mensagem de áudio recebida de ${contactName || chatId}, mas a transcrição automática está desativada.`
+      });
+      return '';
+    }
+
+    console.log(`[Orchestrator] 🎙️ Áudio recebido de ${chatId} (${contactName || 'Contato'}). Baixando para transcrição com IA...`);
+    this.addLog({
+      type: 'info',
+      chatId,
+      contactName,
+      message: `[${agent.name}] 🎙️ Mensagem de áudio recebida. Baixando e transcrevendo via IA...`
+    });
+
+    try {
+      const downloaded = await wahaClient.downloadMedia(payload.media?.url, payload, sessionName);
+      if (!downloaded || !downloaded.buffer || downloaded.buffer.length === 0) {
+        console.warn(`[Orchestrator] Não foi possível baixar mídia de áudio para ${chatId}.`);
+        this.addLog({
+          type: 'error',
+          chatId,
+          contactName,
+          message: `[${agent.name}] ⚠️ Não foi possível baixar o arquivo de áudio da WAHA para transcrição.`
+        });
+        return '';
+      }
+
+      const transcribed = await audioTranscriber.transcribe(downloaded.buffer, downloaded.mimetype, agent);
+      if (!transcribed || transcribed.trim() === '') {
+        console.log(`[Orchestrator] Áudio de ${chatId} inaudível ou sem fala perceptível.`);
+        this.addLog({
+          type: 'info',
+          chatId,
+          contactName,
+          message: `[${agent.name}] 🎙️ Áudio inaudível ou sem fala discernível detectada.`
+        });
+        return '';
+      }
+
+      console.log(`[Orchestrator] ✅ Áudio transcrito com sucesso para ${chatId}: "${transcribed}"`);
+
+      // Adiciona a transcrição diretamente na conversa do WhatsApp citando o áudio recebido.
+      // Assim, o atendente humano no WhatsApp Web ou Chatwoot pode ler imediatamente o conteúdo!
+      const transcriptionReply = `🎤 *Transcrição do Áudio:*\n"${transcribed}"`;
+      try {
+        botTracker.recordBotMessage(chatId, transcriptionReply);
+        const activeSession = (sessionName && sessionName !== '*')
+          ? sessionName
+          : ((agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession);
+
+        await wahaClient.sendText(chatId, transcriptionReply, {
+          session: activeSession,
+          reply_to: payload.id
+        });
+        console.log(`[Orchestrator] 📤 Transcrição do áudio entregue no WhatsApp/Chatwoot com citação direta.`);
+      } catch (sendErr: any) {
+        console.warn(`[Orchestrator] Aviso ao enviar citação de transcrição do áudio para ${chatId}:`, sendErr.message);
+      }
+
+      // Registra no histórico da sessão para visibilidade nos atendimentos
+      memoryStore.addMessage(chatId, 'model', transcriptionReply, contactName);
+
+      return transcribed;
+    } catch (err: any) {
+      console.error(`[Orchestrator] Erro ao transcrever áudio de ${chatId}:`, err.message);
+      this.addLog({
+        type: 'error',
+        chatId,
+        contactName,
+        message: `[${agent.name}] ⚠️ Falha na transcrição do áudio: ${err.message}`
+      });
+      return '';
+    }
   }
 
   addLog(entry: Omit<LogEntry, 'id' | 'timestamp'>): void {
@@ -342,6 +440,18 @@ export class AgentOrchestrator {
         agentManager.updateAgent(agent.id, { isPausedGlobally: false, pausedGloballyUntil: undefined });
         console.log(`[SEGURANÇA][${agent.id}] Pausa global expirou automaticamente. Agente reativado.`);
       } else {
+        // Se for mensagem de áudio recebida, transcreve e entrega para o atendente ler mesmo com o agente em pausa global!
+        if (this.isAudioMessage(payload) && !fromMe) {
+          const rawNotifyName = (payload._data?.notifyName || '').trim();
+          const isNumericName = /^[\d\s\-()+]+$/.test(rawNotifyName);
+          const contactName = (rawNotifyName && !isNumericName && !rawNotifyName.includes('@'))
+            ? rawNotifyName
+            : undefined;
+
+          console.log(`[SEGURANÇA][${agent.id}] Agente em pausa global, mas transcrevendo áudio recebido para leitura do atendente humano...`);
+          await this.handleAudioTranscription(payload, chatId, contactName, sessionName, agent);
+        }
+
         console.warn(`[SEGURANÇA][${agent.id}] ⛔ Mensagem de ${chatId} BLOQUEADA — agente pausado globalmente (pânico). Sessão: "${sessionName}".`);
         this.addLog({
           type: 'info',
@@ -392,89 +502,16 @@ export class AgentOrchestrator {
     const isDocument = this.isDocumentMessage(payload);
 
     // 4.1. Processamento Inteligente de Áudio (Voz / PTT) com Transcrição IA
+    // Funciona mesmo quando o chat estiver pausado para atendimento humano!
     if (isAudio) {
-      const config = loadBotConfig();
-      const isTranscriptionEnabled = (agent.enableAudioTranscription !== undefined)
-        ? agent.enableAudioTranscription
-        : (config.enableAudioTranscription ?? false);
-
-      if (!isTranscriptionEnabled) {
-        console.log(`[Orchestrator] Áudio recebido de ${chatId}, mas a transcrição está desativada no agente [${agent.name}].`);
-        this.addLog({
-          type: 'info',
-          chatId,
-          contactName,
-          message: `[${agent.name}] Mensagem de áudio recebida de ${contactName}, mas a transcrição automática está desativada.`
-        });
+      const transcribed = await this.handleAudioTranscription(payload, chatId, contactName, sessionName, agent);
+      if (!transcribed || transcribed.trim() === '') {
         return;
       }
 
-      // Transcrição habilitada!
-      console.log(`[Orchestrator] 🎙️ Áudio recebido de ${chatId} (${contactName}). Baixando para transcrição com IA...`);
-      this.addLog({
-        type: 'info',
-        chatId,
-        contactName,
-        message: `[${agent.name}] 🎙️ Mensagem de áudio recebida. Baixando e transcrevendo via IA...`
-      });
-
-      try {
-        const downloaded = await wahaClient.downloadMedia(payload.media?.url, payload, sessionName);
-        if (!downloaded || !downloaded.buffer || downloaded.buffer.length === 0) {
-          console.warn(`[Orchestrator] Não foi possível baixar mídia de áudio para ${chatId}.`);
-          this.addLog({
-            type: 'error',
-            chatId,
-            contactName,
-            message: `[${agent.name}] ⚠️ Não foi possível baixar o arquivo de áudio da WAHA para transcrição.`
-          });
-          return;
-        }
-
-        const transcribed = await audioTranscriber.transcribe(downloaded.buffer, downloaded.mimetype, agent);
-        if (!transcribed || transcribed.trim() === '') {
-          console.log(`[Orchestrator] Áudio de ${chatId} inaudível ou sem fala perceptível.`);
-          this.addLog({
-            type: 'info',
-            chatId,
-            contactName,
-            message: `[${agent.name}] 🎙️ Áudio inaudível ou sem fala discernível detectada.`
-          });
-          return;
-        }
-
-        console.log(`[Orchestrator] ✅ Áudio transcrito com sucesso para ${chatId}: "${transcribed}"`);
-        transcribedAudioText = transcribed;
-        effectiveBody = transcribed;
-        payload.body = transcribed;
-
-        // Adiciona a transcrição diretamente na conversa do WhatsApp citando o áudio recebido.
-        // Assim, o atendente humano no WhatsApp Web ou Chatwoot pode ler imediatamente o conteúdo!
-        const transcriptionReply = `🎤 *Transcrição do Áudio:*\n"${transcribed}"`;
-        try {
-          botTracker.recordBotMessage(chatId, transcriptionReply);
-          const activeSession = (sessionName && sessionName !== '*')
-            ? sessionName
-            : ((agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession);
-
-          await wahaClient.sendText(chatId, transcriptionReply, {
-            session: activeSession,
-            reply_to: payload.id
-          });
-          console.log(`[Orchestrator] 📤 Transcrição do áudio entregue no WhatsApp/Chatwoot com citação direta.`);
-        } catch (sendErr: any) {
-          console.warn(`[Orchestrator] Aviso ao enviar citação de transcrição do áudio para ${chatId}:`, sendErr.message);
-        }
-      } catch (err: any) {
-        console.error(`[Orchestrator] Erro ao transcrever áudio de ${chatId}:`, err.message);
-        this.addLog({
-          type: 'error',
-          chatId,
-          contactName,
-          message: `[${agent.name}] ⚠️ Falha na transcrição do áudio: ${err.message}`
-        });
-        return;
-      }
+      transcribedAudioText = transcribed;
+      effectiveBody = transcribed;
+      payload.body = transcribed;
     }
 
     // 4.1b. Processamento Inteligente de Imagens e Documentos (Pedidos Médicos, Laudos, Receitas)
