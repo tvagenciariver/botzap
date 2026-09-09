@@ -657,8 +657,8 @@
               <button type="button" class="editor-tab-btn" data-modaltab="handoff">
                 <span class="tab-num">4</span>
                 <div class="tab-label-group">
-                  <strong>🤝 Transbordo & Pausa</strong>
-                  <small>Transferência e buffer</small>
+                  <strong>🎙️ Áudios, Transbordo & Pausa</strong>
+                  <small>Transcrição IA e transferências</small>
                 </div>
               </button>
               <button type="button" class="editor-tab-btn" data-modaltab="schedule">
@@ -1146,11 +1146,31 @@
                   <small class="form-hint">Tempo em horas que o bot aguarda antes de voltar a responder após um humano intervir (Padrão: 6h).</small>
                 </div>
                 <div class="form-group col-4">
-                  <label>Humanização & Áudios</label>
+                  <label>Experiência de Conversa</label>
                   <div class="checkbox-group">
                     <label><input type="checkbox" id="cfg-typing" name="enableTypingSimulation"> Simular Digitando...</label>
                     <label><input type="checkbox" id="cfg-seen" name="enableSendSeen"> Enviar Visto (Check Azul)</label>
-                    <label title="Converte áudios e mensagens de voz recebidas no WhatsApp em texto para os bots responderem via IA"><input type="checkbox" id="cfg-transcribe-audio" name="enableAudioTranscription"> 🎙️ Transcrever Áudios <span class="badge-tag-opt">Opcional</span></label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Bloco Dedicado: Transcrição Automática de Áudios Recebidos -->
+              <div style="margin-top: 16px; margin-bottom: 20px; padding: 14px 18px; background: rgba(59, 130, 246, 0.07); border: 1px solid rgba(59, 130, 246, 0.28); border-radius: 8px;">
+                <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;">
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; color: #60a5fa; display: flex; align-items: center; gap: 8px; font-size: 14px;">
+                      <span>🎙️ Transcrição Automática de Áudios Recebidos</span>
+                      <span class="badge badge-primary" style="font-size: 10px; padding: 2px 6px;">Exclusivo Áudios Recebidos</span>
+                    </div>
+                    <p style="font-size: 12px; color: var(--text-muted); margin: 6px 0 0 0; line-height: 1.45;">
+                      Quando ativado, todo áudio/nota de voz enviado pelo cliente no WhatsApp será automaticamente transcrito com IA e <strong>adicionado na conversa com citação direta</strong>. Isso permite que os atendentes humanos no <strong>WhatsApp Web</strong> e no <strong>Chatwoot</strong> leiam imediatamente o que o paciente falou, sem precisar ouvir o áudio. (Por padrão vem desmarcado).
+                    </p>
+                  </div>
+                  <div style="padding-top: 2px;">
+                    <label class="switch-row" style="margin: 0; white-space: nowrap; cursor: pointer;">
+                      <input type="checkbox" id="cfg-transcribe-audio" name="enableAudioTranscription">
+                      <span style="font-weight: 600; font-size: 13px; color: #93c5fd;">Ativar</span>
+                    </label>
                   </div>
                 </div>
               </div>
