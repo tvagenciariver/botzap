@@ -13,13 +13,13 @@ export class ExamDeliveryAgent implements IAgent {
    * ou se a mensagem enviada for dígitos que correspondam a um exame pendente.
    */
   canHandle(context: AgentContext): boolean {
-    const pending = examService.getPendingExamsForChat(context.chatId);
+    const pending = examService.getPendingExamsForChat(context.chatId, context.agent?.id);
     if (pending.length > 0) return true;
 
     // Também intercepta se o usuário digitou dígitos (possível CPF) e há exame não verificado
     const cleanDigits = context.userMessage.replace(/\D/g, '');
     if (cleanDigits.length >= 3 && cleanDigits.length <= 11) {
-      const match = examService.findPendingExam(context.chatId, context.userMessage);
+      const match = examService.findPendingExam(context.chatId, context.userMessage, context.agent?.id);
       if (match) return true;
     }
 
@@ -30,7 +30,8 @@ export class ExamDeliveryAgent implements IAgent {
     const verification = await examService.verifyCpfAndDeliver(
       context.chatId,
       context.userMessage,
-      context.session
+      context.session,
+      context.agent?.id
     );
 
     if (verification.transferredToHuman) {

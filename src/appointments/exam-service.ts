@@ -279,24 +279,33 @@ export class ExamService {
   /**
    * Localiza exames com status pendente de confirmação de CPF para este contato
    */
-  getPendingExamsForChat(chatId: string): ExamDispatch[] {
+  /**
+   * Localiza exames com status pendente de confirmação de CPF para este contato
+   */
+  getPendingExamsForChat(chatId: string, agentId?: string): ExamDispatch[] {
     this.loadFromDisk();
 
-    // 1. Suporte especial ao Simulador do painel web
+    // 1. Suporte seguro ao Simulador do painel web:
+    // O simulador SÓ deve interceptar se o laudo foi explicitamente disparado para o simulador ou para este chatId!
     if (isSimulatorChatId(chatId)) {
-      const simulatorPending = this.exams.filter(exam =>
+      return this.exams.filter(exam =>
         !exam.cpfVerified &&
-        (exam.target === 'patient' || exam.target === 'both')
+        (exam.target === 'patient' || exam.target === 'both') &&
+        (!agentId || agentId === '*' || !exam.agentId || exam.agentId === agentId) &&
+        (exam.patientChatId === chatId || exam.patientPhone === chatId)
       );
-      return simulatorPending.slice(0, 1);
     }
 
-    // 2. Busca por correspondência inteligente de telefone/chatId
+    // 2. Busca por correspondência inteligente de telefone/chatId para contatos reais
     return this.exams.filter(exam => {
       // Se já verificou CPF, não está pendente
       if (exam.cpfVerified) return false;
       // Se o envio é exclusivo para parceiro, dispensa CPF
       if (exam.target === 'partner') return false;
+      // Se um agentId foi especificado, respeita o isolamento por empresa
+      if (agentId && agentId !== '*' && exam.agentId && exam.agentId !== agentId) {
+        return false;
+      }
 
       // Correspondência inteligente direta
       if (matchPhoneOrChatId(exam.patientChatId, chatId) || matchPhoneOrChatId(exam.patientPhone, chatId)) {
@@ -323,23 +332,24 @@ export class ExamService {
    * Busca um exame pendente de validação de CPF, seja pelo chatId/telefone do contato,
    * ou pelo matching dos 3 primeiros dígitos do CPF informados na mensagem.
    */
-  findPendingExam(chatId?: string, messageText?: string): ExamDispatch | undefined {
+  findPendingExam(chatId?: string, messageText?: string, agentId?: string): ExamDispatch | undefined {
     this.loadFromDisk();
 
     // 1. Tenta buscar por chatId/telefone
     if (chatId) {
-      const pending = this.getPendingExamsForChat(chatId);
+      const pending = this.getPendingExamsForChat(chatId, agentId);
       if (pending.length > 0) return pending[0];
     }
 
     // 2. Se informou dígitos na mensagem, busca por correspondência de CPF
     if (messageText) {
       const cleanDigits = messageText.replace(/\D/g, '');
-      if (cleanDigits.length >= 3) {
+      if (cleanDigits.length >= 3 && cleanDigits.length <= 11) {
         const input3 = cleanDigits.substring(0, 3);
         const match = this.exams.find(exam => {
           if (exam.cpfVerified) return false;
           if (exam.target === 'partner') return false;
+          if (agentId && agentId !== '*' && exam.agentId && exam.agentId !== agentId) return false;
           const expected3 = (exam.patientCpf || '').replace(/\D/g, '').substring(0, 3);
           return expected3 && expected3 === input3;
         });
@@ -356,7 +366,8 @@ export class ExamService {
   async verifyCpfAndDeliver(
     chatId: string,
     inputMessage: string,
-    sessionName?: string
+    sessionName?: string,
+    agentId?: string
   ): Promise<{
     success: boolean;
     replyText: string;
@@ -365,13 +376,13 @@ export class ExamService {
     deliveredExams: ExamDispatch[];
   }> {
     this.loadFromDisk();
-    let pendingExams = this.getPendingExamsForChat(chatId);
+    let pendingExams = this.getPendingExamsForChat(chatId, agentId);
 
     const inputDigits = inputMessage.replace(/\D/g, '');
 
     // Se não encontrou pelo chatId diretamente, mas digitou 3+ dígitos, tenta encontrar por findPendingExam
     if (pendingExams.length === 0 && inputDigits.length >= 3) {
-      const fallbackExam = this.findPendingExam(chatId, inputMessage);
+      const fallbackExam = this.findPendingExam(chatId, inputMessage, agentId);
       if (fallbackExam) {
         pendingExams = [fallbackExam];
       }
