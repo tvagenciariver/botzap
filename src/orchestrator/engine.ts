@@ -12,7 +12,8 @@ import { wahaClient } from '../waha/client.js';
 import { loadBotConfig, env } from '../config/index.js';
 import { agentManager } from '../config/agent-manager.js';
 import { WahaMessagePayload } from '../waha/types.js';
-import { getAlternateBrazilianChatId } from '../appointments/phone-utils.js';
+import { getAlternateBrazilianChatId, lidMapper, getAllChatIdAliases } from '../appointments/phone-utils.js';
+import { examService } from '../appointments/exam-service.js';
 import { audioTranscriber } from './audio-transcriber.js';
 
 export interface LogEntry {
@@ -220,13 +221,40 @@ export class AgentOrchestrator {
 
     // Se o chatId veio no formato @lid (Linked Device), traduz para o chatId do telefone real (@c.us)
     if (chatId && chatId.endsWith('@lid')) {
-      const realPhone = payload._data?.author ||
+      const originalLid = chatId;
+      const rawCandidate = payload._data?.senderPn ||
+        payload._data?.key?.senderPn ||
+        payload.senderPn ||
+        payload.key?.senderPn ||
+        payload._data?.author ||
         payload._data?.key?.participant ||
         payload._data?.id?.participant ||
         payload._data?.participant ||
+        payload.author ||
+        payload.participant ||
+        payload._data?.contact?.number ||
+        payload._data?.contact?.id ||
+        payload._data?.sender?.id ||
+        payload._data?.sender?.phone ||
+        payload.pn ||
+        payload._data?.pn ||
         payload.replyTo?.participant ||
         payload._data?.from;
-      if (realPhone && (realPhone.endsWith('@c.us') || realPhone.endsWith('@s.whatsapp.net'))) {
+
+      let realPhone = '';
+      if (rawCandidate) {
+        const candidateStr = String(rawCandidate).trim();
+        if (candidateStr.endsWith('@c.us') || candidateStr.endsWith('@s.whatsapp.net')) {
+          realPhone = candidateStr;
+        } else if (!candidateStr.endsWith('@lid')) {
+          const digits = candidateStr.replace(/\D/g, '');
+          if (digits.length >= 10 && digits.length <= 13) {
+            realPhone = `${digits.startsWith('55') ? digits : '55' + digits}@c.us`;
+          }
+        }
+      }
+
+      if (realPhone) {
         let cleanReal = realPhone;
         if (cleanReal.includes(':')) {
           const atIdx = cleanReal.indexOf('@');
@@ -235,8 +263,32 @@ export class AgentOrchestrator {
             cleanReal = cleanReal.substring(0, colonIdx) + cleanReal.substring(atIdx);
           }
         }
-        console.log(`[Orchestrator] Mapeado chatId LID ${chatId} para telefone real: ${cleanReal}`);
+        if (cleanReal.endsWith('@s.whatsapp.net')) {
+          cleanReal = cleanReal.replace('@s.whatsapp.net', '@c.us');
+        }
+        console.log(`[Orchestrator] Mapeado chatId LID ${originalLid} para telefone real: ${cleanReal}`);
+        lidMapper.register(originalLid, cleanReal);
         chatId = cleanReal;
+      } else {
+        const cachedPhone = lidMapper.getPhone(originalLid);
+        if (cachedPhone) {
+          console.log(`[Orchestrator] Recuperado telefone real para LID ${originalLid} do registro: ${cachedPhone}`);
+          chatId = cachedPhone;
+        }
+      }
+    } else if (chatId) {
+      // Se o chatId é telefone real, verifica se o payload contém algum @lid para alimentar o mapeador bidirecional
+      const possibleLid = [
+        payload._data?.id?.remote,
+        from,
+        to,
+        payload.author,
+        payload._data?.author,
+        payload.participant
+      ].find(val => typeof val === 'string' && val.endsWith('@lid'));
+
+      if (possibleLid) {
+        lidMapper.register(possibleLid, chatId);
       }
     }
 
@@ -439,7 +491,7 @@ export class AgentOrchestrator {
       payload.body = effectiveBody;
     }
 
-    // 4.2. Se o bot estiver pausado para este chatId e agente, verifica se é interação de agendamento/lembrete ou validação de exame LGPD
+    // 4.2. Se o bot estiver pausado para este chatId e agente, verifica se é interação estrita de agendamento/lembrete ou validação de exame LGPD
     if (memoryStore.isChatPaused(chatId, agent.id)) {
       const bookingAgent = this.agents.find(a => a.name === 'BookingAgent');
       const examAgent = this.agents.find(a => a.name === 'ExamDeliveryAgent');
@@ -447,32 +499,52 @@ export class AgentOrchestrator {
       let canHandleBooking = false;
       let canHandleExam = false;
 
-      const testCtx = {
-        chatId,
-        userMessage: effectiveBody,
-        session: sessionName,
-        agent
-      };
+      // 🔒 BLINDAGEM MÁXIMA DA PAUSA HUMANA:
+      // O bot JAMAIS deve quebrar a pausa se a mensagem for texto conversacional / conversa livre!
+      // A pausa só pode ser rompida automaticamente se:
+      // 1. O paciente digitou ESTRITAMENTE dígitos de CPF (3 a 11 dígitos) correspondentes a um exame pendente
+      // 2. O paciente digitou ESTRITAMENTE uma opção de lembrete (1/2/sim/não) correspondente a um agendamento pendente
 
-      if (bookingAgent) {
-        canHandleBooking = await bookingAgent.canHandle(testCtx);
+      const cleanMsg = (effectiveBody || '').trim().toLowerCase();
+      const cleanDigits = effectiveBody.replace(/\D/g, '');
+
+      // Verificação estrita para CPF:
+      // Deve conter entre 3 e 11 dígitos numéricos e a mensagem deve ser puramente dígitos/pontos/hífen/espaços
+      const isStrictlyCpfFormat = cleanDigits.length >= 3 && cleanDigits.length <= 11 &&
+        /^[0-9.\-\s]+$/.test(effectiveBody.trim());
+
+      if (isStrictlyCpfFormat && examAgent) {
+        const matchedExam = examService.findPendingExam(chatId, effectiveBody, agent.id);
+        if (matchedExam) {
+          canHandleExam = true;
+        }
       }
-      if (examAgent) {
-        canHandleExam = await examAgent.canHandle(testCtx);
+
+      // Verificação estrita para lembrete de agendamento:
+      const isStrictReminderChoice = ['1', '2', 'sim', 'nao', 'não', 'confirmo', 'cancelo', 'desisto'].includes(cleanMsg) ||
+        /^1\s*[-.]?\s*sim$/i.test(cleanMsg) ||
+        /^2\s*[-.]?\s*(não|nao|desistir|cancelar)$/i.test(cleanMsg);
+
+      if (isStrictReminderChoice && bookingAgent) {
+        const testCtx = {
+          chatId,
+          userMessage: effectiveBody,
+          session: sessionName,
+          agent
+        };
+        canHandleBooking = await bookingAgent.canHandle(testCtx);
       }
 
       if (canHandleBooking || canHandleExam) {
         memoryStore.resumeChat(chatId, agent.id);
-        const altChat = getAlternateBrazilianChatId(chatId);
-        if (altChat) memoryStore.resumeChat(altChat, agent.id);
 
         const reason = canHandleExam ? 'validação de exame (CPF)' : 'agenda/lembrete';
-        console.log(`[Orchestrator] Contato ${chatId} interagiu com ${reason}. Pausa removida automaticamente.`);
+        console.log(`[Orchestrator] Contato ${chatId} enviou resposta estrita de ${reason} ("${effectiveBody}"). Pausa cancelada automaticamente.`);
         this.addLog({
           type: 'info',
           chatId,
           contactName,
-          message: `Contato ${chatId} respondeu a ${reason}. Pausa cancelada automaticamente.`
+          message: `Contato ${chatId} enviou resposta estrita de ${reason} ("${effectiveBody}"). Pausa cancelada automaticamente.`
         });
       } else {
         if (isAudio) {
@@ -486,12 +558,12 @@ export class AgentOrchestrator {
           return;
         }
 
-        console.log(`[Orchestrator] Bot [${agent.name}] pausado para ${chatId}, ignorando processamento.`);
+        console.log(`[Orchestrator] Bot [${agent.name}] pausado para ${chatId}. Atendimento humano ativo, ignorando mensagem: "${effectiveBody}"`);
         this.addLog({
           type: 'info',
           chatId,
           contactName,
-          message: `Mensagem recebida mas bot [${agent.name}] está pausado para este contato: "${effectiveBody}"`
+          message: `Atendimento humano ativo. Bot [${agent.name}] pausado ignorou mensagem: "${effectiveBody}"`
         });
         return;
       }

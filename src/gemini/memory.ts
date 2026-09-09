@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { getAllChatIdAliases } from '../appointments/phone-utils.js';
 
 export interface ChatMessage {
   role: 'user' | 'model';
@@ -180,32 +181,109 @@ export class MemoryStore {
   }
 
   isChatPaused(chatId: string, agentId?: string): boolean {
-    const key = this.getSessionKey(chatId, agentId);
-    const session = this.sessions.get(key);
-    if (!session) return false;
-    if (!session.isPaused) return false;
+    const aliases = getAllChatIdAliases(chatId);
+    const now = Date.now();
 
-    if (session.pausedUntil && Date.now() > session.pausedUntil) {
-      session.isPaused = false;
-      session.pausedUntil = undefined;
-      this.scheduleSave();
-      return false;
+    for (const alias of aliases) {
+      // 1. Chave específica com agentId
+      if (agentId && agentId !== 'default') {
+        const scopedKey = `${agentId}:${alias}`;
+        const scopedSession = this.sessions.get(scopedKey);
+        if (scopedSession && scopedSession.isPaused) {
+          if (scopedSession.pausedUntil && now > scopedSession.pausedUntil) {
+            scopedSession.isPaused = false;
+            scopedSession.pausedUntil = undefined;
+            this.scheduleSave();
+          } else {
+            return true;
+          }
+        }
+      }
+
+      // 2. Chave direta / global sem agentId
+      const directSession = this.sessions.get(alias);
+      if (directSession && directSession.isPaused) {
+        if (directSession.pausedUntil && now > directSession.pausedUntil) {
+          directSession.isPaused = false;
+          directSession.pausedUntil = undefined;
+          this.scheduleSave();
+        } else {
+          return true;
+        }
+      }
+
+      // 3. Qualquer sessão ativa de qualquer agente para este alias
+      for (const [key, session] of this.sessions.entries()) {
+        if ((key === alias || key.endsWith(`:${alias}`)) && session.isPaused) {
+          if (session.pausedUntil && now > session.pausedUntil) {
+            session.isPaused = false;
+            session.pausedUntil = undefined;
+            this.scheduleSave();
+          } else {
+            return true;
+          }
+        }
+      }
     }
 
-    return true;
+    return false;
   }
 
   pauseChat(chatId: string, durationMinutes: number, agentId?: string): void {
-    const session = this.getSession(chatId, agentId);
-    session.isPaused = true;
-    session.pausedUntil = Date.now() + durationMinutes * 60 * 1000;
+    const aliases = getAllChatIdAliases(chatId);
+    const pausedUntil = Date.now() + durationMinutes * 60 * 1000;
+
+    for (const alias of aliases) {
+      // Pausa chave direta
+      const directSession = this.getSession(alias);
+      directSession.isPaused = true;
+      directSession.pausedUntil = pausedUntil;
+
+      // Pausa chave com agentId se especificado
+      if (agentId && agentId !== 'default') {
+        const scopedSession = this.getSession(alias, agentId);
+        scopedSession.isPaused = true;
+        scopedSession.pausedUntil = pausedUntil;
+      }
+
+      // Também pausa todas as sessões existentes correspondentes a este alias
+      for (const [key, session] of this.sessions.entries()) {
+        if (key === alias || key.endsWith(`:${alias}`)) {
+          session.isPaused = true;
+          session.pausedUntil = pausedUntil;
+        }
+      }
+    }
+
     this.saveToDisk();
   }
 
   resumeChat(chatId: string, agentId?: string): void {
-    const session = this.getSession(chatId, agentId);
-    session.isPaused = false;
-    session.pausedUntil = undefined;
+    const aliases = getAllChatIdAliases(chatId);
+
+    for (const alias of aliases) {
+      const directSession = this.sessions.get(alias);
+      if (directSession) {
+        directSession.isPaused = false;
+        directSession.pausedUntil = undefined;
+      }
+
+      if (agentId && agentId !== 'default') {
+        const scopedSession = this.sessions.get(`${agentId}:${alias}`);
+        if (scopedSession) {
+          scopedSession.isPaused = false;
+          scopedSession.pausedUntil = undefined;
+        }
+      }
+
+      for (const [key, session] of this.sessions.entries()) {
+        if (key === alias || key.endsWith(`:${alias}`)) {
+          session.isPaused = false;
+          session.pausedUntil = undefined;
+        }
+      }
+    }
+
     this.saveToDisk();
   }
 

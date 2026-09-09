@@ -4,7 +4,7 @@ import { ExamDispatch, ExamDispatchAttempt, ExamDispatchTarget } from './types.j
 import { partnerManager } from './partner-manager.js';
 import { wahaClient } from '../waha/client.js';
 import { botTracker } from '../orchestrator/bot-tracker.js';
-import { formatToWhatsAppChatId, matchPhoneOrChatId, isSimulatorChatId, getAlternateBrazilianChatId } from './phone-utils.js';
+import { formatToWhatsAppChatId, matchPhoneOrChatId, isSimulatorChatId, getAlternateBrazilianChatId, getAllChatIdAliases } from './phone-utils.js';
 import { memoryStore } from '../gemini/memory.js';
 import { agentManager } from '../config/agent-manager.js';
 import { env } from '../config/index.js';
@@ -307,21 +307,16 @@ export class ExamService {
         return false;
       }
 
-      // Correspondência inteligente direta
-      if (matchPhoneOrChatId(exam.patientChatId, chatId) || matchPhoneOrChatId(exam.patientPhone, chatId)) {
-        return true;
-      }
-
-      // Correspondência com chatId alternativo do contato recebido (com/sem 9º dígito)
-      const altChatId = getAlternateBrazilianChatId(chatId);
-      if (altChatId && (matchPhoneOrChatId(exam.patientChatId, altChatId) || matchPhoneOrChatId(exam.patientPhone, altChatId))) {
-        return true;
-      }
-
-      // Correspondência com chatId alternativo do exame registrado
-      const altExamChatId = exam.patientChatId ? getAlternateBrazilianChatId(exam.patientChatId) : null;
-      if (altExamChatId && matchPhoneOrChatId(altExamChatId, chatId)) {
-        return true;
+      // Correspondência inteligente através de todos os aliases conhecidos (LID, 8/9 dígitos, etc)
+      const aliases = getAllChatIdAliases(chatId);
+      for (const alias of aliases) {
+        if (matchPhoneOrChatId(exam.patientChatId, alias) || matchPhoneOrChatId(exam.patientPhone, alias)) {
+          return true;
+        }
+        const altExamChatId = exam.patientChatId ? getAlternateBrazilianChatId(exam.patientChatId) : null;
+        if (altExamChatId && matchPhoneOrChatId(altExamChatId, alias)) {
+          return true;
+        }
       }
 
       return false;

@@ -36,6 +36,7 @@ data/users.json
 data/bot_config.json
 data/partners.json
 data/exams.json
+data/lid_mappings.json
 data/uploads/
 !data/.gitkeep
 scratch/

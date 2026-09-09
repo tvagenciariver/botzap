@@ -19,7 +19,7 @@ export class HandoffAgent implements IAgent {
     const handoffMessage = context.agent?.handoffMessage || config.handoffMessage || 'Transferindo para um de nossos atendentes humanos...';
 
     // Pausa o bot para este contato
-    memoryStore.pauseChat(context.chatId, pauseMinutes);
+    memoryStore.pauseChat(context.chatId, pauseMinutes, context.agent?.id);
 
     // Registra a mensagem no histórico de memória
     memoryStore.addMessage(context.chatId, 'user', context.userMessage, context.contactName);

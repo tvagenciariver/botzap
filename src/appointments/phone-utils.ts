@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 /**
  * Utilitários centralizados para telefone e ChatIDs do WhatsApp
  */
@@ -106,3 +109,197 @@ export function matchPhoneOrChatId(a?: string, b?: string): boolean {
 
   return false;
 }
+
+class LidPhoneMapper {
+  private lidToPhone: Map<string, string> = new Map();
+  private phoneToLid: Map<string, string> = new Map();
+  private filePath: string;
+  private saveTimer: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.filePath = path.resolve(process.cwd(), 'data', 'lid_mappings.json');
+    this.load();
+  }
+
+  private load(): void {
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const raw = fs.readFileSync(this.filePath, 'utf-8');
+        const data = JSON.parse(raw);
+        if (data && typeof data === 'object') {
+          for (const [lid, phone] of Object.entries(data)) {
+            if (typeof phone === 'string') {
+              this.lidToPhone.set(lid, phone);
+              this.phoneToLid.set(phone, lid);
+              const alt = getAlternateBrazilianChatId(phone);
+              if (alt) {
+                this.phoneToLid.set(alt, lid);
+              }
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[LidPhoneMapper] Aviso ao carregar lid_mappings.json:', err.message);
+    }
+  }
+
+  private scheduleSave(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      try {
+        const dir = path.dirname(this.filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const obj: Record<string, string> = {};
+        for (const [lid, phone] of this.lidToPhone.entries()) {
+          obj[lid] = phone;
+        }
+        fs.writeFileSync(this.filePath, JSON.stringify(obj, null, 2), 'utf-8');
+      } catch (err: any) {
+        console.error('[LidPhoneMapper] Erro ao salvar lid_mappings.json:', err.message);
+      }
+    }, 1000);
+  }
+
+  register(a: string, b: string): void {
+    if (!a || !b || a === b) return;
+    let lid = '';
+    let phone = '';
+
+    if (a.endsWith('@lid')) {
+      lid = a;
+      phone = b;
+    } else if (b.endsWith('@lid')) {
+      lid = b;
+      phone = a;
+    } else {
+      return;
+    }
+
+    if (lid.includes(':')) {
+      const atIdx = lid.indexOf('@');
+      const colonIdx = lid.indexOf(':');
+      if (colonIdx !== -1 && colonIdx < atIdx) {
+        lid = lid.substring(0, colonIdx) + lid.substring(atIdx);
+      }
+    }
+
+    let cleanPhone = phone;
+    if (cleanPhone.includes(':')) {
+      const atIdx = cleanPhone.indexOf('@');
+      const colonIdx = cleanPhone.indexOf(':');
+      if (colonIdx !== -1 && colonIdx < atIdx) {
+        cleanPhone = cleanPhone.substring(0, colonIdx) + cleanPhone.substring(atIdx);
+      }
+    }
+    if (cleanPhone.endsWith('@s.whatsapp.net')) {
+      cleanPhone = cleanPhone.replace('@s.whatsapp.net', '@c.us');
+    } else if (!cleanPhone.endsWith('@c.us')) {
+      cleanPhone = formatToWhatsAppChatId(cleanPhone);
+    }
+
+    if (!cleanPhone || !cleanPhone.endsWith('@c.us')) return;
+
+    this.lidToPhone.set(lid, cleanPhone);
+    this.phoneToLid.set(cleanPhone, lid);
+
+    const alt = getAlternateBrazilianChatId(cleanPhone);
+    if (alt) {
+      this.phoneToLid.set(alt, lid);
+    }
+
+    this.scheduleSave();
+  }
+
+  getPhone(lid: string): string | undefined {
+    let cleanLid = lid;
+    if (cleanLid.includes(':')) {
+      const atIdx = cleanLid.indexOf('@');
+      const colonIdx = cleanLid.indexOf(':');
+      if (colonIdx !== -1 && colonIdx < atIdx) {
+        cleanLid = cleanLid.substring(0, colonIdx) + cleanLid.substring(atIdx);
+      }
+    }
+    return this.lidToPhone.get(cleanLid) || this.lidToPhone.get(lid);
+  }
+
+  getLid(phone: string): string | undefined {
+    let cleanPhone = phone;
+    if (cleanPhone.includes(':')) {
+      const atIdx = cleanPhone.indexOf('@');
+      const colonIdx = cleanPhone.indexOf(':');
+      if (colonIdx !== -1 && colonIdx < atIdx) {
+        cleanPhone = cleanPhone.substring(0, colonIdx) + cleanPhone.substring(atIdx);
+      }
+    }
+    if (cleanPhone.endsWith('@s.whatsapp.net')) {
+      cleanPhone = cleanPhone.replace('@s.whatsapp.net', '@c.us');
+    }
+    const direct = this.phoneToLid.get(cleanPhone) || this.phoneToLid.get(phone);
+    if (direct) return direct;
+
+    const alt = getAlternateBrazilianChatId(cleanPhone);
+    if (alt) {
+      return this.phoneToLid.get(alt);
+    }
+    return undefined;
+  }
+}
+
+export const lidMapper = new LidPhoneMapper();
+
+/**
+ * Retorna todos os aliases conhecidos para um chatId (incluindo variações de 9º dígito
+ * e mapeamentos de @lid para @c.us e vice-versa).
+ */
+export function getAllChatIdAliases(chatId: string): string[] {
+  if (!chatId) return [];
+  const aliases = new Set<string>();
+
+  aliases.add(chatId);
+
+  // Remove sufixo de dispositivo multi-device (:1, :0) se houver
+  let cleanId = chatId;
+  if (cleanId.includes(':')) {
+    const atIdx = cleanId.indexOf('@');
+    const colonIdx = cleanId.indexOf(':');
+    if (colonIdx !== -1 && colonIdx < atIdx) {
+      cleanId = cleanId.substring(0, colonIdx) + cleanId.substring(atIdx);
+      aliases.add(cleanId);
+    }
+  }
+
+  // Normaliza @s.whatsapp.net para @c.us
+  if (cleanId.endsWith('@s.whatsapp.net')) {
+    const cUs = cleanId.replace('@s.whatsapp.net', '@c.us');
+    aliases.add(cUs);
+    cleanId = cUs;
+  }
+
+  // Se for LID
+  if (cleanId.endsWith('@lid')) {
+    const mappedPhone = lidMapper.getPhone(cleanId);
+    if (mappedPhone) {
+      aliases.add(mappedPhone);
+      const altPhone = getAlternateBrazilianChatId(mappedPhone);
+      if (altPhone) aliases.add(altPhone);
+    }
+  } else if (cleanId.endsWith('@c.us')) {
+    const altPhone = getAlternateBrazilianChatId(cleanId);
+    if (altPhone) {
+      aliases.add(altPhone);
+    }
+    const mappedLid = lidMapper.getLid(cleanId);
+    if (mappedLid) {
+      aliases.add(mappedLid);
+    }
+    if (altPhone) {
+      const altLid = lidMapper.getLid(altPhone);
+      if (altLid) aliases.add(altLid);
+    }
+  }
+
+  return Array.from(aliases);
+}
+

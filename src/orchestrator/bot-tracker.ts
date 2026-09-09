@@ -1,3 +1,5 @@
+import { getAllChatIdAliases } from '../appointments/phone-utils.js';
+
 /**
  * Rastreia mensagens enviadas pelo próprio bot para distinguir entre:
  * 1. Respostas automáticas do bot (que geram evento fromMe: true na WAHA)
@@ -16,18 +18,24 @@ export class BotMessageTracker {
 
     if (messageId) {
       this.sentMessageIds.add(messageId);
+      setTimeout(() => {
+        this.sentMessageIds.delete(messageId);
+      }, 90000);
     }
 
-    const cleanSnippet = text.trim().slice(0, 50);
-    const textKey = `${chatId}_${cleanSnippet}`;
-    this.sentTextSnippets.set(textKey, now);
-    this.recentBotReplies.set(chatId, now);
+    const cleanSnippet = (text || '').trim().slice(0, 50);
+    const aliases = getAllChatIdAliases(chatId);
 
-    // Remove do cache após 90 segundos
-    setTimeout(() => {
-      if (messageId) this.sentMessageIds.delete(messageId);
-      this.sentTextSnippets.delete(textKey);
-    }, 90000);
+    for (const alias of aliases) {
+      const textKey = `${alias}_${cleanSnippet}`;
+      this.sentTextSnippets.set(textKey, now);
+      this.recentBotReplies.set(alias, now);
+
+      // Remove do cache após 90 segundos
+      setTimeout(() => {
+        this.sentTextSnippets.delete(textKey);
+      }, 90000);
+    }
   }
 
   /**
@@ -41,18 +49,32 @@ export class BotMessageTracker {
       return true;
     }
 
-    // 2. Verificação por snippet do texto enviado recentemente
-    const cleanSnippet = text.trim().slice(0, 50);
-    const textKey = `${chatId}_${cleanSnippet}`;
-    const snippetTime = this.sentTextSnippets.get(textKey);
-    if (snippetTime && (now - snippetTime) < 90000) {
-      return true;
+    const cleanSnippet = (text || '').trim().slice(0, 50);
+    const aliases = getAllChatIdAliases(chatId);
+
+    // 2. Verificação por snippet do texto enviado recentemente por qualquer alias
+    if (cleanSnippet) {
+      for (const alias of aliases) {
+        const textKey = `${alias}_${cleanSnippet}`;
+        const snippetTime = this.sentTextSnippets.get(textKey);
+        if (snippetTime && (now - snippetTime) < 90000) {
+          return true;
+        }
+      }
     }
 
-    // 3. Verificação por proximidade temporal direta (delay de echo da WAHA de até 5 segundos)
-    const lastReplyTime = this.recentBotReplies.get(chatId);
-    if (lastReplyTime && (now - lastReplyTime) < 5000) {
-      return true;
+    // 3. Verificação por proximidade temporal direta:
+    // 🔒 REGRA DE OURO: Só podemos considerar como bot por proximidade temporal se NÃO houver texto
+    // (ex: envio de arquivo/mídia sem legenda) ou se for vazio!
+    // Se a mensagem contém texto digitado e esse texto NÃO bateu com nenhum snippet enviado pelo bot,
+    // significa COM 100% DE CERTEZA que foi um ATENDENTE HUMANO que digitou no WhatsApp Web / Celular!
+    if (!cleanSnippet || cleanSnippet.length === 0) {
+      for (const alias of aliases) {
+        const lastReplyTime = this.recentBotReplies.get(alias);
+        if (lastReplyTime && (now - lastReplyTime) < 5000) {
+          return true;
+        }
+      }
     }
 
     return false;

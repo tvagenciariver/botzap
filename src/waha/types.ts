@@ -20,7 +20,12 @@ export interface WahaMessagePayload {
     participant?: string;
     body?: string;
   };
+  author?: string;
+  participant?: string;
+  senderPn?: string;
+  key?: any;
   _data?: any;
+  [key: string]: any;
 }
 
 export interface WahaWebhookEvent {

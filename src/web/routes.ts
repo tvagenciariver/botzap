@@ -18,6 +18,7 @@ import { reminderScheduler } from '../appointments/reminder-scheduler.js';
 import { partnerManager } from '../appointments/partner-manager.js';
 
 import { examService } from '../appointments/exam-service.js';
+import { formatToWhatsAppChatId } from '../appointments/phone-utils.js';
 import { userManager } from '../auth/user-manager.js';
 import { UserSession, AppModule } from '../auth/user-types.js';
 
@@ -210,13 +211,30 @@ apiRouter.post('/webhook/chatwoot', async (req: Request, res: Response) => {
   const data = req.body;
   try {
     const eventType = data.event;
-    // Extrai o telefone do contato no formato do WhatsApp se disponível
-    const phoneNumber = data.conversation?.meta?.sender?.phone_number || data.sender?.phone_number;
-    
-    if (phoneNumber) {
-      const cleanPhone = phoneNumber.replace(/\D/g, '');
-      const chatId = `${cleanPhone}@c.us`;
+    // Extrai o identificador do contato no formato do WhatsApp a partir de todos os campos possíveis do Chatwoot
+    const rawIdentifier = data.conversation?.meta?.sender?.phone_number ||
+      data.sender?.phone_number ||
+      data.contact?.phone_number ||
+      data.conversation?.contact_inbox?.source_id ||
+      data.conversation?.channel?.recipient_id ||
+      data.conversation?.meta?.sender?.identifier;
 
+    let chatId = '';
+    if (rawIdentifier) {
+      const str = String(rawIdentifier).trim();
+      if (str.endsWith('@lid') || str.endsWith('@c.us')) {
+        chatId = str;
+      } else if (str.endsWith('@s.whatsapp.net')) {
+        chatId = str.replace('@s.whatsapp.net', '@c.us');
+      } else {
+        const cleanDigits = str.replace(/\D/g, '');
+        if (cleanDigits) {
+          chatId = formatToWhatsAppChatId(cleanDigits);
+        }
+      }
+    }
+
+    if (chatId) {
       // Se conversa foi resolvida pelo atendente humano no Chatwoot, reativa o bot para o próximo contato!
       if (eventType === 'conversation_resolved' || (eventType === 'conversation_status_changed' && data.status === 'resolved')) {
         memoryStore.resumeChat(chatId);
