@@ -5,7 +5,7 @@ import { getAlternateBrazilianChatId } from '../../appointments/phone-utils.js';
 
 export class MediaHandoffAgent implements IAgent {
   name = 'MediaHandoffAgent';
-  description = 'Detecta envio de fotos de pedidos médicos, laudos, receitas e imagens do paciente, respondendo com acolhimento e redirecionando para atendimento humanizado.';
+  description = 'Detecta envio de fotos, imagens, documentos e arquivos do cliente, respondendo com acolhimento e redirecionando para atendimento humanizado.';
 
   canHandle(context: AgentContext): boolean {
     // 1. Sinalização explícita via metadata
@@ -17,6 +17,8 @@ export class MediaHandoffAgent implements IAgent {
 
     // 2. Marcadores inseridos pelo orquestrador ao receber imagem ou documento da WAHA
     if (
+      raw.includes('[Imagem / Arquivo Anexo Enviado pelo Cliente]') ||
+      raw.includes('[Documento / Arquivo Anexo Enviado pelo Cliente]') ||
       raw.includes('[Imagem / Pedido Médico / Laudo Enviado pelo Paciente]') ||
       raw.includes('[Imagem/Documento Anexo]') ||
       raw.includes('[Documento / Pedido Médico Anexo]') ||
@@ -24,7 +26,9 @@ export class MediaHandoffAgent implements IAgent {
       raw.includes('[Imagem / Pedido Médico Anexo]') ||
       raw.startsWith('[Imagem') ||
       raw.startsWith('[Documento') ||
-      raw.startsWith('[Foto')
+      raw.startsWith('[Foto') ||
+      raw.startsWith('[Arquivo') ||
+      raw.startsWith('[Mídia')
     ) {
       return true;
     }
@@ -32,7 +36,7 @@ export class MediaHandoffAgent implements IAgent {
     // 3. Suporte a testes no simulador ou digitação explícita
     const lower = raw.toLowerCase();
     if (
-      (lower.includes('foto do pedido') || lower.includes('foto da receita') || lower.includes('foto do laudo') || lower.includes('imagem do exame') || lower.includes('laudo anexo')) &&
+      (lower.includes('foto do comprovante') || lower.includes('foto do documento') || lower.includes('foto do produto') || lower.includes('arquivo anexo') || lower.includes('documento anexo') || lower.includes('foto da receita') || lower.includes('foto do pedido') || lower.includes('laudo anexo')) &&
       (raw.startsWith('[') || raw.startsWith('*'))
     ) {
       return true;
@@ -61,9 +65,10 @@ export class MediaHandoffAgent implements IAgent {
 
     let replyText = context.agent?.mediaHandoffMessage?.trim() || config.mediaHandoffMessage?.trim();
 
-    if (!replyText) {
-      replyText = `${nameGreeting}Recebemos sua imagem / pedido médico com sucesso! 📄✅\n\n` +
-        `Já estou encaminhando seu documento para a nossa equipe de atendimento humanizado 👤 para calcular os valores e verificar a disponibilidade dos seus exames.\n\n` +
+    // Se não tiver mensagem configurada ou se ainda estiver com o texto legado engessado de exames médicos
+    if (!replyText || replyText.includes('disponibilidade dos seus exames')) {
+      replyText = `${nameGreeting}Recebemos seu arquivo / imagem com sucesso! 📄✅\n\n` +
+        `Já estou encaminhando para a nossa equipe de atendimento 👤 para analisar as informações.\n\n` +
         `Em instantes um de nossos atendentes irá te responder por aqui! Por favor, aguarde só um momento. 😊`;
     } else {
       // Interpolação de variáveis opcionais

@@ -763,12 +763,12 @@ chatForm?.addEventListener('submit', async (e) => {
 
 // Ações rápidas no simulador
 document.getElementById('sim-btn-send-photo')?.addEventListener('click', () => {
-  chatInput.value = '[Imagem / Pedido Médico / Laudo Enviado pelo Paciente]';
+  chatInput.value = '[Imagem / Foto Anexa Enviada pelo Cliente]';
   chatForm.dispatchEvent(new Event('submit'));
 });
 
 document.getElementById('sim-btn-send-doc')?.addEventListener('click', () => {
-  chatInput.value = '[Documento / Pedido Médico Anexo]: pedido_medico_requisicao.pdf';
+  chatInput.value = '[Documento / Arquivo Anexo Enviado pelo Cliente]: documento_anexo.pdf';
   chatForm.dispatchEvent(new Event('submit'));
 });
 
@@ -2762,7 +2762,7 @@ function openNewAgentModal() {
   document.getElementById('modal-agent-handoffMessage').value = 'Entendido! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que já iremos te atender! 👩‍💼';
   if (document.getElementById('modal-agent-mediaHandoffMessage')) {
     document.getElementById('modal-agent-mediaHandoffMessage').value =
-      'Olá, *{name}*! Recebemos sua imagem / pedido médico com sucesso! 📄✅\n\nJá estou encaminhando seu documento para a nossa equipe de atendimento humanizado 👤 para calcular os valores e verificar a disponibilidade dos seus exames.\n\nEm instantes um de nossos atendentes irá te responder por aqui! Por favor, aguarde só um momento. 😊';
+      'Olá, *{name}*! Recebemos seu arquivo / imagem com sucesso! 📄✅\n\nJá estou encaminhando para a nossa equipe de atendimento 👤 para analisar as informações.\n\nEm instantes um de nossos atendentes irá te responder por aqui! Por favor, aguarde só um momento. 😊';
   }
   document.getElementById('modal-agent-pauseHours').value = 6;
   document.getElementById('modal-agent-debounce').value = 2.5;

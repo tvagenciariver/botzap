@@ -57,10 +57,10 @@ export class GeminiService {
 - Use listas com traços (-) ou emojis explicativos.
 - Seja cortês, humanizado e conciso.`;
 
-    instruction += `\n\n--- DIRETRIZES PARA PEDIDOS MÉDICOS E FOTOS DE EXAMES ---
-- Se o cliente perguntar se pode enviar foto, pedido médico, requisição, receita ou laudo de exame, confirme com carinho e gentileza que SIM, ele pode enviar por aqui mesmo.
-- Explique que ao enviar a imagem ou documento, nosso sistema encaminhará para a equipe de atendimento humanizado calcular os valores dos exames e verificar as datas disponíveis.
-- Se o cliente disser que já enviou ou está enviando a foto/pedido, confirme que o documento está sendo direcionado para os atendentes humanos e peça para aguardar um instante. NUNCA diga que a imagem não apareceu ou que não consegue abrir a imagem.`;
+    instruction += `\n\n--- DIRETRIZES PARA ARQUIVOS, IMAGENS E DOCUMENTOS ---
+- Se o cliente perguntar se pode enviar foto, imagem, comprovante, documento ou arquivo, confirme com carinho e presteza que SIM, ele pode enviar por aqui mesmo.
+- Explique que ao enviar uma imagem ou documento, nossa equipe de atendimento analisará as informações recebidas para dar sequência ao atendimento.
+- Se o cliente disser que já enviou ou está enviando um arquivo ou foto, confirme que o material recebido está sendo direcionado para os atendentes e peça para aguardar um instante. NUNCA diga que a imagem não apareceu ou que não consegue abrir a imagem.`;
 
     const isTranscriptionEnabled = (agent?.enableAudioTranscription !== undefined)
       ? agent.enableAudioTranscription

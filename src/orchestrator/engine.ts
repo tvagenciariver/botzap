@@ -75,7 +75,7 @@ export class AgentOrchestrator {
   }
 
   /**
-   * Identifica se a mensagem recebida é uma imagem/foto (pedido médico, laudo, receita)
+   * Identifica se a mensagem recebida é uma imagem/foto (comprovante, foto, documento anexo)
    */
   isImageMessage(payload: WahaMessagePayload): boolean {
     if (!payload.hasMedia) return false;
@@ -514,16 +514,16 @@ export class AgentOrchestrator {
       payload.body = transcribed;
     }
 
-    // 4.1b. Processamento Inteligente de Imagens e Documentos (Pedidos Médicos, Laudos, Receitas)
+    // 4.1b. Processamento Inteligente de Imagens e Documentos
     if (isImage || isDocument) {
       if (!effectiveBody || effectiveBody.trim() === '') {
         effectiveBody = isImage
-          ? '[Imagem / Pedido Médico / Laudo Enviado pelo Paciente]'
-          : '[Documento / Pedido Médico Anexo]';
+          ? '[Imagem / Arquivo Anexo Enviado pelo Cliente]'
+          : '[Documento / Arquivo Anexo Enviado pelo Cliente]';
       } else {
         effectiveBody = isImage
-          ? `[Imagem / Pedido Médico Anexo]: ${effectiveBody.trim()}`
-          : `[Documento / Pedido Médico Anexo]: ${effectiveBody.trim()}`;
+          ? `[Imagem Anexa]: ${effectiveBody.trim()}`
+          : `[Documento Anexo]: ${effectiveBody.trim()}`;
       }
       payload.body = effectiveBody;
     }
@@ -626,9 +626,9 @@ export class AgentOrchestrator {
       message: isAudio
         ? `[${agent.name}] 🎙️ [Áudio Transcrito]: "${effectiveBody}"`
         : (isImage
-            ? `[${agent.name}] 📸 [Foto/Pedido Médico Recebido]: "${effectiveBody}"`
+            ? `[${agent.name}] 📸 [Imagem / Arquivo Recebido]: "${effectiveBody}"`
             : (isDocument
-                ? `[${agent.name}] 📄 [Documento/Laudo Recebido]: "${effectiveBody}"`
+                ? `[${agent.name}] 📄 [Documento / Arquivo Recebido]: "${effectiveBody}"`
                 : `[${agent.name}] ${effectiveBody}`))
     });
 
