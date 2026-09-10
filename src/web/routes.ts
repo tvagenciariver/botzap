@@ -409,6 +409,19 @@ apiRouter.post('/api/business-hours', requireAdmin, (req: Request, res: Response
 
     // Se for global ('all' ou sem agentId)
     const updated = saveBotConfig({ businessHours });
+
+    // Sincroniza também o agente padrão caso exista, evitando descompasso de horários
+    const defaultAgent = agentManager.getAgent('default');
+    if (defaultAgent) {
+      const holidays = businessHours.holidays || defaultAgent.businessHours?.holidays || updated.businessHours?.holidays || [];
+      const updatedBh = {
+        ...defaultAgent.businessHours,
+        ...businessHours,
+        holidays
+      };
+      agentManager.updateAgent('default', { businessHours: updatedBh });
+    }
+
     const status = checkBusinessHoursStatus(updated);
     res.json({
       success: true,
@@ -477,6 +490,13 @@ apiRouter.post('/api/business-hours/holidays', requireAdmin, (req: Request, res:
     globalList.push(newHoliday);
     saveBotConfig({ businessHours: { ...cfg.businessHours, holidays: globalList } });
 
+    const defaultAgent = agentManager.getAgent('default');
+    if (defaultAgent && defaultAgent.businessHours) {
+      agentManager.updateAgent('default', {
+        businessHours: { ...defaultAgent.businessHours, holidays: globalList }
+      });
+    }
+
     res.status(201).json({ success: true, holiday: newHoliday, message: 'Feriado/Indisponibilidade cadastrado com sucesso!' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -506,6 +526,13 @@ apiRouter.delete('/api/business-hours/holidays/:id', requireAdmin, (req: Request
     if (Array.isArray(cfg.businessHours?.holidays)) {
       const filtered = cfg.businessHours.holidays.filter(h => h.id !== id);
       saveBotConfig({ businessHours: { ...cfg.businessHours, holidays: filtered } });
+
+      const defaultAgent = agentManager.getAgent('default');
+      if (defaultAgent && defaultAgent.businessHours) {
+        agentManager.updateAgent('default', {
+          businessHours: { ...defaultAgent.businessHours, holidays: filtered }
+        });
+      }
     }
 
     res.json({ success: true, message: 'Feriado removido com sucesso!' });
@@ -563,6 +590,13 @@ apiRouter.post('/api/business-hours/holidays/load-national', requireAdmin, (req:
     }
 
     saveBotConfig({ businessHours: { ...cfg.businessHours, holidays: currentList } });
+
+    const defaultAgent = agentManager.getAgent('default');
+    if (defaultAgent && defaultAgent.businessHours) {
+      agentManager.updateAgent('default', {
+        businessHours: { ...defaultAgent.businessHours, holidays: currentList }
+      });
+    }
 
     res.json({ success: true, addedCount: count, count, message: `${count} feriados nacionais carregados com sucesso!` });
   } catch (err: any) {
@@ -877,9 +911,22 @@ apiRouter.put('/api/agents/:id', requireAdmin, (req: Request, res: Response) => 
       if (typeof updates.openaiApiKey === 'string' && updates.openaiApiKey.includes('••••')) {
         delete updates.openaiApiKey;
       }
+      // Se enviou businessHours, preserva holidays e timezone existentes
+      if (updates.businessHours && current.businessHours) {
+        updates.businessHours = {
+          ...current.businessHours,
+          ...updates.businessHours,
+          timezone: updates.businessHours.timezone || current.businessHours.timezone || 'America/Sao_Paulo',
+          holidays: updates.businessHours.holidays || current.businessHours.holidays || []
+        };
+      }
     }
 
     const updated = agentManager.updateAgent(id, updates);
+    if (id === 'default' && updates.businessHours) {
+      saveBotConfig({ businessHours: updated.businessHours });
+    }
+
     res.json({ success: true, agent: sanitizeAgentProfile(updated) });
   } catch (err: any) {
     res.status(400).json({ error: err.message });

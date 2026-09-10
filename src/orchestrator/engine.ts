@@ -705,6 +705,16 @@ export class AgentOrchestrator {
           agentName: response.agentName || agent.name,
           companyName: agent.companyName || agent.name
         });
+      } else if (response && !response.replyText && response.handled) {
+        this.addLog({
+          type: 'info',
+          chatId,
+          contactName,
+          message: `[${response.agentName || 'Horário Comercial'}] Mensagem recebida fora do expediente. Aviso não reenviado (cooldown de silêncio ativo para evitar repetições).`,
+          agentId: agent.id,
+          agentName: response.agentName || agent.name,
+          companyName: agent.companyName || agent.name
+        });
       }
     } catch (error: any) {
       if (agent.enableTypingSimulation !== false) {

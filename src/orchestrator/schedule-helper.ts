@@ -108,7 +108,7 @@ export function checkBusinessHoursStatus(
   configOrHours: BotConfig | BusinessHoursConfig | { businessHours?: BusinessHoursConfig },
   targetDate: Date = new Date()
 ): BusinessHoursStatus {
-  const bh: BusinessHoursConfig | undefined = (configOrHours as any)?.businessHours !== undefined
+  const bh: BusinessHoursConfig | undefined = (configOrHours && typeof configOrHours === 'object' && 'businessHours' in configOrHours)
     ? (configOrHours as any).businessHours
     : (configOrHours as BusinessHoursConfig);
   const timezone = bh?.timezone || 'America/Sao_Paulo';
