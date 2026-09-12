@@ -7520,7 +7520,7 @@ setupExamDropzone();
   // ---- Carregar lista de campanhas ----
   async function loadBlastCampaigns() {
     try {
-      const res = await fetch('/api/blast/campaigns');
+      const res = await fetchWithAuth('/api/blast/campaigns');
       const data = await res.json();
       renderCampaignList(data.campaigns || []);
     } catch (err) {
@@ -7576,7 +7576,7 @@ setupExamDropzone();
   async function loadBlastQueueDetail() {
     if (!blastCurrentCampaignId) return;
     try {
-      const res = await fetch(`/api/blast/campaigns/${blastCurrentCampaignId}`);
+      const res = await fetchWithAuth(`/api/blast/campaigns/${blastCurrentCampaignId}`);
       const data = await res.json();
       if (data.campaign) renderQueueDetail(data.campaign);
     } catch (err) {
@@ -7650,7 +7650,7 @@ setupExamDropzone();
   document.getElementById('btn-blast-start')?.addEventListener('click', async () => {
     if (!blastCurrentCampaignId) return;
     try {
-      const res = await fetch(`/api/blast/campaigns/${blastCurrentCampaignId}/start`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/blast/campaigns/${blastCurrentCampaignId}/start`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) { showToast(data.error || 'Erro ao iniciar', 'error'); return; }
       showToast('Campanha iniciada!', 'success');
@@ -7662,7 +7662,7 @@ setupExamDropzone();
   document.getElementById('btn-blast-pause')?.addEventListener('click', async () => {
     if (!blastCurrentCampaignId) return;
     try {
-      const res = await fetch(`/api/blast/campaigns/${blastCurrentCampaignId}/pause`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/blast/campaigns/${blastCurrentCampaignId}/pause`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) { showToast(data.error || 'Erro ao pausar', 'error'); return; }
       showToast('Pausa solicitada — aguarde o envio atual terminar.', 'info');
@@ -7674,7 +7674,7 @@ setupExamDropzone();
     if (!blastCurrentCampaignId) return;
     if (!confirm('Cancelar esta campanha? Os envios pendentes serão marcados como cancelados.')) return;
     try {
-      const res = await fetch(`/api/blast/campaigns/${blastCurrentCampaignId}/cancel`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/blast/campaigns/${blastCurrentCampaignId}/cancel`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) { showToast(data.error || 'Erro ao cancelar', 'error'); return; }
       showToast('Campanha cancelada.', 'info');
@@ -7686,7 +7686,7 @@ setupExamDropzone();
   window.blastDeleteCampaign = async function (id) {
     if (!confirm('Excluir esta campanha permanentemente?')) return;
     try {
-      const res = await fetch(`/api/blast/campaigns/${id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`/api/blast/campaigns/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) { showToast(data.error || 'Erro ao excluir', 'error'); return; }
       showToast('Campanha excluída.', 'success');
@@ -7724,6 +7724,11 @@ setupExamDropzone();
   document.getElementById('btn-close-blast-modal')?.addEventListener('click', closeBlastModal);
   document.getElementById('btn-blast-modal-cancel')?.addEventListener('click', closeBlastModal);
 
+  // Prevenir submit padrão do form se alguém apertar enter dentro dele
+  document.getElementById('form-blast-create')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+  });
+
   // Preview de contatos em tempo real
   document.getElementById('blast-contacts-raw')?.addEventListener('input', function () {
     const contacts = parseContacts(this.value);
@@ -7736,39 +7741,55 @@ setupExamDropzone();
   });
 
   // ---- Criar Campanha ----
-  document.getElementById('btn-blast-modal-create')?.addEventListener('click', async () => {
-    const name = document.getElementById('blast-name').value.trim();
-    const agentId = document.getElementById('blast-agent-select').value;
-    const baseMessage = document.getElementById('blast-base-message').value.trim();
-    const rawContacts = document.getElementById('blast-contacts-raw').value;
+  document.getElementById('btn-blast-modal-create')?.addEventListener('click', async (e) => {
+    if (e) e.preventDefault();
+    const btnCreate = document.getElementById('btn-blast-modal-create');
+    const name = document.getElementById('blast-name')?.value?.trim();
+    const agentId = document.getElementById('blast-agent-select')?.value || 'default';
+    const baseMessage = document.getElementById('blast-base-message')?.value?.trim();
+    const rawContacts = document.getElementById('blast-contacts-raw')?.value || '';
     const contacts = parseContacts(rawContacts);
 
     if (!name) { showToast('Informe o nome da campanha.', 'error'); return; }
     if (!baseMessage) { showToast('Informe a mensagem base.', 'error'); return; }
-    if (!contacts.length) { showToast('Nenhum contato válido encontrado. Verifique o formato: Nome,Telefone', 'error'); return; }
+    if (!contacts.length) { showToast('Nenhum contato válido encontrado. Verifique o formato: Nome,Telefone (um por linha)', 'error'); return; }
 
     const settings = {
-      minInterval: parseInt(document.getElementById('blast-min-interval').value) || 25,
-      maxInterval: parseInt(document.getElementById('blast-max-interval').value) || 75,
-      batchSize: parseInt(document.getElementById('blast-batch-size').value) || 25,
-      batchPauseMinutes: parseInt(document.getElementById('blast-batch-pause').value) || 15,
+      minInterval: parseInt(document.getElementById('blast-min-interval')?.value) || 25,
+      maxInterval: parseInt(document.getElementById('blast-max-interval')?.value) || 75,
+      batchSize: parseInt(document.getElementById('blast-batch-size')?.value) || 25,
+      batchPauseMinutes: parseInt(document.getElementById('blast-batch-pause')?.value) || 15,
     };
 
+    if (btnCreate) {
+      btnCreate.disabled = true;
+      btnCreate.textContent = 'Criando...';
+    }
+
     try {
-      const res = await fetch('/api/blast/campaigns', {
+      const res = await fetchWithAuth('/api/blast/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, agentId, baseMessage, contacts, settings })
       });
       const data = await res.json();
-      if (!res.ok) { showToast(data.error || 'Erro ao criar campanha', 'error'); return; }
+      if (!res.ok) { 
+        showToast(data.error || 'Erro ao criar campanha', 'error'); 
+        return; 
+      }
       showToast(`Campanha "${name}" criada com ${contacts.length} contatos!`, 'success');
       closeBlastModal();
       loadBlastCampaigns();
-      // Abrir automaticamente o detalhe
+      // Abrir automaticamente o detalhe da fila
       setTimeout(() => blastOpenCampaign(data.campaign.id), 300);
     } catch (err) {
-      showToast('Erro ao criar campanha', 'error');
+      showToast('Erro ao criar campanha: ' + (err.message || err), 'error');
+      console.error('[Blast] Erro ao criar:', err);
+    } finally {
+      if (btnCreate) {
+        btnCreate.disabled = false;
+        btnCreate.textContent = '✉️ Criar Campanha';
+      }
     }
   });
 
