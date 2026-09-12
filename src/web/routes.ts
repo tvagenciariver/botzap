@@ -1831,21 +1831,40 @@ apiRouter.get('/api/waha/groups', requireAuth, async (req: Request, res: Respons
     const rawGroups = await wahaClient.getGroups(session);
 
     const groups = rawGroups.map((g: any) => {
-      const participantsCount = Array.isArray(g.participants)
-        ? g.participants.length
-        : (g.participantsCount || (g._data?.participants?.length) || 0);
+      let id = '';
+      if (typeof g === 'string') id = g;
+      else if (typeof g?.id === 'string') id = g.id;
+      else if (typeof g?.id?._serialized === 'string') id = g.id._serialized;
+      else if (typeof g?.JID === 'string') id = g.JID;
+      else if (typeof g?.jid === 'string') id = g.jid;
+      else if (typeof g?._serialized === 'string') id = g._serialized;
+      else if (typeof g?.id === 'object' && g?.id !== null) {
+        id = `${g.id.user || ''}@${g.id.server || 'g.us'}`;
+      }
+
+      const name = g?.subject || g?.name || g?.Name || g?.groupMetadata?.subject || 'Grupo sem nome';
+
+      let participantsCount = 0;
+      if (Array.isArray(g?.participants)) participantsCount = g.participants.length;
+      else if (Array.isArray(g?.groupMetadata?.participants)) participantsCount = g.groupMetadata.participants.length;
+      else if (typeof g?.participantsCount === 'number') participantsCount = g.participantsCount;
+      else if (typeof g?.size === 'number') participantsCount = g.size;
+
+      const description = g?.description || g?.groupMetadata?.desc || '';
 
       return {
-        id: g.id?._serialized || g.id || '',
-        name: g.subject || g.name || 'Grupo sem nome',
+        id,
+        name,
         participantsCount,
-        description: g.description || ''
+        description
       };
-    }).filter((g: any) => g.id.includes('@g.us'));
+    }).filter((g: any) => g.id && (g.id.includes('@g.us') || g.id.includes('-')));
 
-    res.json({ groups });
+    console.log(`[WAHA] Grupos processados para sessão "${session || 'default'}":`, groups.length);
+    res.json({ groups, count: groups.length });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[WAHA] Erro em GET /api/waha/groups:', err.message);
+    res.status(500).json({ error: err.message, groups: [] });
   }
 });
 
@@ -1911,16 +1930,24 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
 
       // Se nenhum grupo foi passado explicitamente, busca todos os grupos
       let allGroupsMap: Record<string, string> = {};
-      if (targetGroupIds.length === 0 || source === 'all') {
-        const allGroups = await wahaClient.getGroups(targetSession).catch(() => []);
-        for (const g of allGroups) {
-          const gId = g.id?._serialized || g.id || '';
-          const gName = g.subject || g.name || 'Grupo';
-          if (gId) allGroupsMap[gId] = gName;
+      const allGroups = await wahaClient.getGroups(targetSession).catch(() => []);
+      for (const g of allGroups) {
+        let gId = '';
+        if (typeof g === 'string') gId = g;
+        else if (typeof g?.id === 'string') gId = g.id;
+        else if (typeof g?.id?._serialized === 'string') gId = g.id._serialized;
+        else if (typeof g?.JID === 'string') gId = g.JID;
+        else if (typeof g?.jid === 'string') gId = g.jid;
+        else if (typeof g?.id === 'object' && g?.id !== null) {
+          gId = `${g.id.user || ''}@${g.id.server || 'g.us'}`;
         }
-        if (targetGroupIds.length === 0) {
-          targetGroupIds = Object.keys(allGroupsMap);
-        }
+
+        const gName = g?.subject || g?.name || g?.Name || g?.groupMetadata?.subject || 'Grupo';
+        if (gId) allGroupsMap[gId] = gName;
+      }
+
+      if (targetGroupIds.length === 0) {
+        targetGroupIds = Object.keys(allGroupsMap);
       }
 
       for (const gId of targetGroupIds) {
@@ -1928,15 +1955,22 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
         const participants = await wahaClient.getGroupParticipants(gId, targetSession).catch(() => []);
 
         for (const p of participants) {
-          // No WAHA, o participante pode ter "pn" (Phone Number) ou "id"
-          const rawId = p.pn || p.id?._serialized || p.id || '';
-          // Pula LIDs puros que não revelam número de telefone real
-          if (rawId.includes('@lid') && !p.pn) continue;
+          // No WAHA, o participante pode ter "pn" (Phone Number) ou "id" ou "jid"
+          let rawId = '';
+          if (typeof p === 'string') rawId = p;
+          else if (p?.pn) rawId = p.pn;
+          else if (typeof p?.id === 'string') rawId = p.id;
+          else if (p?.id?._serialized) rawId = p.id._serialized;
+          else if (p?.id?.user) rawId = p.id.user;
+          else if (p?.jid) rawId = p.jid;
 
-          const phone = cleanPhone(rawId.replace('@c.us', ''));
+          // Pula LIDs puros que não revelam número de telefone real
+          if (rawId.includes('@lid') && !p?.pn) continue;
+
+          const phone = cleanPhone(rawId);
           if (phone.length < 10) continue;
 
-          const name = (p.name || p.pushname || '').trim() || `${defaultName} (${groupName})`;
+          const name = (p?.name || p?.pushname || p?.shortName || '').trim() || `${defaultName} (${groupName})`;
           rawList.push({ name, phone, source: `Grupo: ${groupName}` });
         }
       }

@@ -7899,17 +7899,23 @@ setupExamDropzone();
   async function loadExtractorGroups() {
     const session = selExtractorSession?.value || 'default';
     if (listExtractorGroups) {
-      listExtractorGroups.innerHTML = '<p style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 10px;">Carregando grupos da instância...</p>';
+      listExtractorGroups.innerHTML = '<p style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 10px;">⏳ Buscando grupos na instância da WAHA...</p>';
     }
 
     try {
       const res = await fetchWithAuth(`/api/waha/groups?session=${encodeURIComponent(session)}`);
       const data = await res.json();
+      if (!res.ok) {
+        if (listExtractorGroups) {
+          listExtractorGroups.innerHTML = `<p style="text-align: center; color: #f87171; font-size: 12px; padding: 10px;">Erro ao carregar grupos da WAHA: ${escapeHtml(data.error || 'Erro na requisição')}</p>`;
+        }
+        return;
+      }
       extractorAvailableGroups = (data.groups || []).map(g => ({ ...g, selected: false }));
       renderExtractorGroupsList();
     } catch (err) {
       if (listExtractorGroups) {
-        listExtractorGroups.innerHTML = '<p style="text-align: center; color: #f87171; font-size: 12px; padding: 10px;">Falha ao carregar grupos da WAHA.</p>';
+        listExtractorGroups.innerHTML = `<p style="text-align: center; color: #f87171; font-size: 12px; padding: 10px;">Falha ao conectar com o servidor: ${escapeHtml(err.message || err)}</p>`;
       }
     }
   }
@@ -7920,7 +7926,12 @@ setupExamDropzone();
     const filtered = extractorAvailableGroups.filter(g => g.name.toLowerCase().includes(term) || g.id.toLowerCase().includes(term));
 
     if (!filtered.length) {
-      listExtractorGroups.innerHTML = '<p style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 10px;">Nenhum grupo encontrado.</p>';
+      const sessionName = selExtractorSession?.value || 'default';
+      listExtractorGroups.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 16px;">
+        <p style="margin-bottom: 6px; font-weight: 600;">Nenhum grupo encontrado na instância "${escapeHtml(sessionName)}".</p>
+        <p style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">Certifique-se de que o WhatsApp conectado nesta sessão realmente participa de grupos.</p>
+        <button type="button" class="btn btn-outline btn-xs" onclick="document.getElementById('btn-extractor-reload-groups').click()">🔄 Tentar Novamente</button>
+      </div>`;
       updateExtractorGroupsCount();
       return;
     }
@@ -7971,7 +7982,12 @@ setupExamDropzone();
     extractorAvailableGroups.forEach(g => g.selected = false);
     renderExtractorGroupsList();
   });
-  document.getElementById('btn-extractor-reload-groups')?.addEventListener('click', loadExtractorGroups);
+  document.getElementById('btn-extractor-reload-groups')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-extractor-reload-groups');
+    if (btn) btn.textContent = '🔄 Atualizando...';
+    await loadExtractorGroups();
+    if (btn) btn.textContent = '🔄 Recarregar Grupos';
+  });
 
   // Executar Extração
   btnExtractorRun?.addEventListener('click', async () => {

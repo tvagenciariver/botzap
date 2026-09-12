@@ -319,38 +319,128 @@ export class WahaClient {
   }
 
   /**
-   * Obtém lista de grupos da sessão na WAHA
+   * Helper interno para normalizar dados retornados pela WAHA (Array ou Object com IDs)
    */
-  async getGroups(session?: string): Promise<any[]> {
-    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
-    try {
-      const res = await this.client.get(`/api/${sessionName}/groups`);
-      if (Array.isArray(res.data)) return res.data;
-    } catch (err: any) {
-      console.warn(`[WAHA] Erro ao buscar grupos (${sessionName}):`, this.extractErrorMessage(err));
+  private normalizeList(data: any): any[] {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (typeof data === 'object') {
+      if (Array.isArray(data.data)) return data.data;
+      if (Array.isArray(data.groups)) return data.groups;
+      if (Array.isArray(data.chats)) return data.chats;
+      if (Array.isArray(data.contacts)) return data.contacts;
+      if (Array.isArray(data.participants)) return data.participants;
+      if (Array.isArray(data.result)) return data.result;
+      const values = Object.values(data);
+      if (values.length > 0 && typeof values[0] === 'object') {
+        return values;
+      }
     }
     return [];
   }
 
   /**
-   * Obtém participantes de um grupo específico
+   * Obtém lista de grupos da sessão na WAHA (com suporte a todos os engines: NOWEB, WEBJS, GOWS, WPP)
+   */
+  async getGroups(session?: string): Promise<any[]> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+
+    // Tentativa 1: /api/{session}/groups com limit
+    try {
+      const res = await this.client.get(`/api/${sessionName}/groups`, { params: { limit: 500 } });
+      const groups = this.normalizeList(res.data);
+      if (groups.length > 0) return groups;
+    } catch (err1: any) {
+      // continua para tentativa 2
+    }
+
+    // Tentativa 2: /api/{session}/groups sem query params
+    try {
+      const res = await this.client.get(`/api/${sessionName}/groups`);
+      const groups = this.normalizeList(res.data);
+      if (groups.length > 0) return groups;
+    } catch (err2: any) {
+      // continua para tentativa 3
+    }
+
+    // Tentativa 3: Se NOWEB tiver reset de cache de grupos (/api/{session}/groups/refresh)
+    try {
+      await this.client.post(`/api/${sessionName}/groups/refresh`).catch(() => null);
+      const res = await this.client.get(`/api/${sessionName}/groups`);
+      const groups = this.normalizeList(res.data);
+      if (groups.length > 0) return groups;
+    } catch (err3: any) {
+      // continua
+    }
+
+    // Tentativa 4 (INFALÍVEL): Extrair grupos das conversas gerais (/api/{session}/chats)
+    try {
+      const chatsRes = await this.client.get(`/api/${sessionName}/chats`, { params: { limit: 500 } });
+      const chats = this.normalizeList(chatsRes.data);
+      const groupChats = chats.filter((c: any) => {
+        const id = (typeof c.id === 'string' ? c.id : (c.id?._serialized || c.JID || c.jid || '')).toLowerCase();
+        return c.isGroup === true || id.includes('@g.us') || c.id?.server === 'g.us';
+      });
+      if (groupChats.length > 0) {
+        console.log(`[WAHA] ${groupChats.length} grupos recuperados via lista de chats da sessão "${sessionName}"`);
+        return groupChats;
+      }
+    } catch (err4: any) {
+      console.warn(`[WAHA] Erro ao buscar chats de grupo (${sessionName}):`, this.extractErrorMessage(err4));
+    }
+
+    return [];
+  }
+
+  /**
+   * Obtém participantes de um grupo específico (compatível com múltiplos endpoints e formatos)
    */
   async getGroupParticipants(groupId: string, session?: string): Promise<any[]> {
     const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    const safeId = encodeURIComponent(groupId);
+
+    // Tentativa 1: /api/{session}/groups/{id}/participants
     try {
-      const res = await this.client.get(`/api/${sessionName}/groups/${encodeURIComponent(groupId)}/participants`);
-      if (Array.isArray(res.data)) return res.data;
-    } catch (err: any) {
-      try {
-        // Fallback: tentar obter do próprio grupo /api/{session}/groups/{id}
-        const groupRes = await this.client.get(`/api/${sessionName}/groups/${encodeURIComponent(groupId)}`);
-        if (Array.isArray(groupRes.data?.participants)) {
-          return groupRes.data.participants;
-        }
-      } catch (err2: any) {
-        console.warn(`[WAHA] Erro ao buscar participantes do grupo ${groupId}:`, this.extractErrorMessage(err2));
-      }
+      const res = await this.client.get(`/api/${sessionName}/groups/${safeId}/participants`);
+      const list = this.normalizeList(res.data);
+      if (list.length > 0) return list;
+    } catch (err1: any) {
+      // continua
     }
+
+    // Tentativa 2: /api/{session}/groups/{id}/participants/v2
+    try {
+      const res = await this.client.get(`/api/${sessionName}/groups/${safeId}/participants/v2`);
+      const list = this.normalizeList(res.data);
+      if (list.length > 0) return list;
+    } catch (err2: any) {
+      // continua
+    }
+
+    // Tentativa 3: /api/{session}/groups/{id}
+    try {
+      const groupRes = await this.client.get(`/api/${sessionName}/groups/${safeId}`);
+      if (groupRes.data) {
+        if (Array.isArray(groupRes.data.participants)) return groupRes.data.participants;
+        if (Array.isArray(groupRes.data.groupMetadata?.participants)) return groupRes.data.groupMetadata.participants;
+        const norm = this.normalizeList(groupRes.data.participants || groupRes.data);
+        if (norm.length > 0) return norm;
+      }
+    } catch (err3: any) {
+      // continua
+    }
+
+    // Tentativa 4: /api/{session}/chats/{id}
+    try {
+      const chatRes = await this.client.get(`/api/${sessionName}/chats/${safeId}`);
+      if (chatRes.data) {
+        if (Array.isArray(chatRes.data.participants)) return chatRes.data.participants;
+        if (Array.isArray(chatRes.data.groupMetadata?.participants)) return chatRes.data.groupMetadata.participants;
+      }
+    } catch (err4: any) {
+      console.warn(`[WAHA] Erro ao buscar participantes do grupo ${groupId}:`, this.extractErrorMessage(err4));
+    }
+
     return [];
   }
 
