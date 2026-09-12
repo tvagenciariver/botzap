@@ -7623,14 +7623,14 @@ setupExamDropzone();
     tbodyEl.innerHTML = campaign.queue.map((item, idx) => {
       const color = statusColor(item.status);
       const genMsg = item.generatedMessage
-        ? `<span title="${escapeHtml(item.generatedMessage)}">${escapeHtml(item.generatedMessage.slice(0, 60))}${item.generatedMessage.length > 60 ? '…' : ''}</span>`
-        : '<span style="color: var(--text-muted);">Aguardando</span>';
+        ? `<div title="${escapeHtml(item.generatedMessage)}" style="white-space: pre-line; max-height: 70px; overflow-y: auto; background: rgba(255,255,255,0.03); padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); line-height: 1.35;">${escapeHtml(item.generatedMessage)}</div>`
+        : '<span style="color: var(--text-muted);">Aguardando geração</span>';
       const errBadge = item.errorMessage ? `<br><small style="color:#f87171;">${escapeHtml(item.errorMessage.slice(0, 80))}</small>` : '';
       return `<tr>
         <td>${idx + 1}</td>
         <td>${escapeHtml(item.recipientName)}</td>
-        <td style="font-size:11px;">${escapeHtml(item.phone)}</td>
-        <td style="max-width: 220px;">${genMsg}</td>
+        <td style="font-size:11px; white-space:nowrap;">${escapeHtml(item.phone)}</td>
+        <td style="min-width: 280px; max-width: 420px;">${genMsg}</td>
         <td style="color:${color}; font-weight:600; white-space:nowrap;">${statusLabel(item.status)}${errBadge}</td>
         <td style="font-size:11px; white-space:nowrap;">${item.sentAt ? new Date(item.sentAt).toLocaleString('pt-BR') : '—'}</td>
       </tr>`;

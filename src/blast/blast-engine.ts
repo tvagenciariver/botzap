@@ -1,4 +1,4 @@
-﻿import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { wahaClient } from '../waha/client.js';
 import { agentManager } from '../config/agent-manager.js';
 import { env, loadBotConfig } from '../config/index.js';
@@ -24,19 +24,43 @@ function toChatId(phone: string): string {
   return digits;
 }
 
-/** Reescreve a mensagem usando Gemini (texto humanizado, diferente por contato) */
+/** Reescreve a mensagem usando Gemini (texto humanizado, diferente por contato, com emojis e quebras de linha) */
 async function rewriteWithGemini(originalMessage: string, contactName: string, apiKey: string): Promise<string> {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-flash-lite-latest' });
 
-    const prompt = `Voce e um assistente de marketing. Reescreva a mensagem abaixo com palavras DIFERENTES, mantendo exatamente o mesmo significado, todos os links, numeros, dados e o nome do destinatario. Mantenha o tom amigavel e informal. Retorne APENAS o texto reescrito, sem explicacoes ou comentarios adicionais.
+    const prompt = `Você é um especialista em copywriting e comunicação via WhatsApp.
+Reescreva a mensagem abaixo com palavras diferentes, tornando-a natural, humanizada, atraente e muito bem estruturada para leitura rápida no WhatsApp.
 
-Destinatario: ${contactName}
-Mensagem original: ${originalMessage}`;
+DIRETRIZES OBRIGATÓRIAS:
+1. FORMATAÇÃO E ESTRUTURA:
+   - Use QUEBRAS DE LINHA (parágrafos curtos) para deixar o texto leve e agradável de ler. NUNCA envie um bloco único de texto sem espaçamento.
+   - Use emojis pertinentes e expressivos estrategicamente (ex: 👋 no cumprimento, 💡 ou 🚀 em destaques, 📲 ou 👉 em chamadas/links, 📅 em datas, etc.).
+   - Pode usar *negrito* do WhatsApp para destacar pontos-chave importantes (não use '#' para títulos, o WhatsApp não suporta markdown '#' de títulos).
+
+2. FIDELIDADE E DADOS:
+   - Mantenha RIGOROSAMENTE o mesmo significado, todos os links (URLs completas e intactas), números de telefone, valores, endereços e dados originais.
+   - Dirija-se ao destinatário pelo nome "${contactName}".
+
+3. TOM DE VOZ:
+   - Cordial, profissional, empático e envolvente.
+
+4. SAÍDA:
+   - Retorne APENAS o texto pronto da mensagem para WhatsApp, sem introduções, aspas extras ou explicações adicionais.
+
+Destinatário: ${contactName}
+Mensagem original:
+${originalMessage}`;
 
     const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
+    let text = result.response.text().trim();
+
+    // Sanitizar títulos markdown (# Título) para WhatsApp (*Título*)
+    text = text.replace(/^#{1,6}\s*(.+)$/gm, '*$1*');
+    // Remover aspas no início e fim se a IA tiver envelopado
+    text = text.replace(/^["'](.*)["']$/s, '$1').trim();
+
     return text || originalMessage;
   } catch (err: any) {
     console.warn('[BlastEngine] Falha ao reescrever com Gemini, usando mensagem original:', err.message);
