@@ -286,6 +286,75 @@ export class WahaClient {
   }
 
   /**
+   * Obtém lista de contatos salvos da sessão na WAHA
+   */
+  async getContacts(session?: string): Promise<any[]> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    try {
+      const res = await this.client.get('/api/contacts/all', { params: { session: sessionName } });
+      if (Array.isArray(res.data)) return res.data;
+    } catch (err1: any) {
+      try {
+        const res2 = await this.client.get('/api/contacts', { params: { session: sessionName } });
+        if (Array.isArray(res2.data)) return res2.data;
+      } catch (err2: any) {
+        console.warn(`[WAHA] Erro ao buscar contatos (${sessionName}):`, this.extractErrorMessage(err2));
+      }
+    }
+    return [];
+  }
+
+  /**
+   * Obtém lista de conversas/chats da sessão na WAHA
+   */
+  async getChats(session?: string): Promise<any[]> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    try {
+      const res = await this.client.get(`/api/${sessionName}/chats`);
+      if (Array.isArray(res.data)) return res.data;
+    } catch (err: any) {
+      console.warn(`[WAHA] Erro ao buscar chats (${sessionName}):`, this.extractErrorMessage(err));
+    }
+    return [];
+  }
+
+  /**
+   * Obtém lista de grupos da sessão na WAHA
+   */
+  async getGroups(session?: string): Promise<any[]> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    try {
+      const res = await this.client.get(`/api/${sessionName}/groups`);
+      if (Array.isArray(res.data)) return res.data;
+    } catch (err: any) {
+      console.warn(`[WAHA] Erro ao buscar grupos (${sessionName}):`, this.extractErrorMessage(err));
+    }
+    return [];
+  }
+
+  /**
+   * Obtém participantes de um grupo específico
+   */
+  async getGroupParticipants(groupId: string, session?: string): Promise<any[]> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    try {
+      const res = await this.client.get(`/api/${sessionName}/groups/${encodeURIComponent(groupId)}/participants`);
+      if (Array.isArray(res.data)) return res.data;
+    } catch (err: any) {
+      try {
+        // Fallback: tentar obter do próprio grupo /api/{session}/groups/{id}
+        const groupRes = await this.client.get(`/api/${sessionName}/groups/${encodeURIComponent(groupId)}`);
+        if (Array.isArray(groupRes.data?.participants)) {
+          return groupRes.data.participants;
+        }
+      } catch (err2: any) {
+        console.warn(`[WAHA] Erro ao buscar participantes do grupo ${groupId}:`, this.extractErrorMessage(err2));
+      }
+    }
+    return [];
+  }
+
+  /**
    * Testa a conexão completa com a WAHA e retorna detalhes da sessão
    */
   async testConnection(session?: string): Promise<{ success: boolean; message: string; sessionStatus?: string; sessions?: string[] }> {

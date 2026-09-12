@@ -1699,7 +1699,10 @@
               </div>
             </div>
           </div>
-          <div class="tab-header-actions">
+          <div class="tab-header-actions" style="display: flex; gap: 8px;">
+            <button class="btn btn-outline btn-sm" id="btn-blast-open-extractor">
+              📥 Extrair Contatos da WAHA
+            </button>
             <button class="btn btn-primary btn-sm" id="btn-blast-new">
               ✉️ Nova Campanha
             </button>
@@ -1799,7 +1802,12 @@
 
           <!-- Contatos -->
           <div class="form-group" style="margin-bottom: 16px;">
-            <label for="blast-contacts-raw">Lista de Contatos *</label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label for="blast-contacts-raw" style="margin-bottom: 0;">Lista de Contatos *</label>
+              <button type="button" class="btn btn-outline btn-xs" id="btn-blast-import-waha" title="Extrair contatos ou grupos diretamente do WhatsApp via WAHA">
+                📥 Importar da WAHA
+              </button>
+            </div>
             <textarea id="blast-contacts-raw" class="form-control" rows="6"
               placeholder="Cole um contato por linha no formato: Nome,Telefone&#10;&#10;Exemplos:&#10;João Silva,5587988001122&#10;Maria Santos,5581999887766&#10;Pedro Alves,5511912345678"></textarea>
             <small style="color: var(--text-muted);">Formato: <code>Nome,Telefone</code> — um por linha. O telefone deve ter código do país (55 para Brasil).</small>
@@ -1837,6 +1845,138 @@
       <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: flex-end; gap: 10px;">
         <button type="button" class="btn btn-outline" id="btn-blast-modal-cancel">Cancelar</button>
         <button type="button" class="btn btn-primary" id="btn-blast-modal-create">✉️ Criar Campanha</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Extrator de Contatos e Grupos da WAHA -->
+  <div id="modal-waha-extractor-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 780px; width: 95%;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">📥</span>
+          <div>
+            <h3>Extrator de Contatos da WAHA</h3>
+            <p>Importe contatos individuais ou participantes de grupos da instância conectada</p>
+          </div>
+        </div>
+        <button type="button" class="btn-modal-close" id="btn-close-extractor-modal">✕</button>
+      </div>
+
+      <div class="modal-body" style="padding: 20px; max-height: 80vh; overflow-y: auto;">
+        <!-- Configuração da Extração -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+          <!-- Sessão WAHA -->
+          <div class="form-group">
+            <label for="extractor-session-select">Instância / Sessão WAHA *</label>
+            <select id="extractor-session-select" class="form-control"></select>
+            <small style="color: var(--text-muted);">Sessão conectada do WhatsApp para extração.</small>
+          </div>
+
+          <!-- Nome Padrão -->
+          <div class="form-group">
+            <label for="extractor-default-name">Nome padrão (quando não salvo)</label>
+            <input type="text" id="extractor-default-name" class="form-control" value="Cliente" placeholder="Ex: Cliente, Amigo...">
+            <small style="color: var(--text-muted);">Usado para contatos sem nome na agenda.</small>
+          </div>
+        </div>
+
+        <!-- Tipo de Origem -->
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-weight: 600;">Origem dos Dados:</label>
+          <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="radio" name="extractor-source" value="contacts" checked style="accent-color: #6366f1;">
+              <span>👤 Contatos Salvos & Conversas Recentes</span>
+            </label>
+            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="radio" name="extractor-source" value="groups" style="accent-color: #6366f1;">
+              <span>👥 Grupos do WhatsApp</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Seção de Grupos (exibida quando "groups" selecionado) -->
+        <div id="extractor-groups-section" style="display: none; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255,255,255,0.02);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <strong style="font-size: 13px;">Selecione os Grupos:</strong>
+            <button type="button" class="btn btn-outline btn-xs" id="btn-extractor-reload-groups">🔄 Recarregar Grupos</button>
+          </div>
+          <div style="margin-bottom: 8px;">
+            <input type="text" id="extractor-group-search" class="form-control form-control-sm" placeholder="🔍 Filtrar grupos por nome...">
+          </div>
+          <div id="extractor-groups-list" style="max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: rgba(0,0,0,0.2);">
+            <p style="text-align: center; color: var(--text-muted); font-size: 12px;">Carregando grupos...</p>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 11px; color: var(--text-muted);">
+            <div style="display: flex; gap: 10px;">
+              <a href="#" id="extractor-select-all-groups" style="color: #6366f1; text-decoration: none;">Selecionar Todos</a>
+              <span>·</span>
+              <a href="#" id="extractor-deselect-all-groups" style="color: var(--text-muted); text-decoration: none;">Desmarcar Todos</a>
+            </div>
+            <span id="extractor-groups-selected-count">0 selecionados</span>
+          </div>
+        </div>
+
+        <!-- Opções & Botão Extrair -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+          <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px;">
+            <input type="checkbox" id="extractor-dedup" checked style="accent-color: #6366f1;">
+            <span>Remover telefones duplicados</span>
+          </label>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-extractor-run">
+            🔍 Buscar / Extrair Contatos
+          </button>
+        </div>
+
+        <!-- Tabela de Resultados -->
+        <div id="extractor-results-container" style="display: none; border-top: 1px solid var(--border); padding-top: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+            <div>
+              <strong style="font-size: 13px;">Contatos Encontrados:</strong>
+              <span id="extractor-count-badge" class="badge" style="margin-left: 6px; background: rgba(99,102,241,0.2); color: #a5b4fc; padding: 2px 8px; border-radius: 12px;">0</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="text" id="extractor-filter-input" class="form-control form-control-sm" placeholder="🔍 Filtrar resultado..." style="width: 180px;">
+              <button type="button" class="btn btn-outline btn-xs" id="btn-extractor-select-all">Marcar Todos</button>
+              <button type="button" class="btn btn-outline btn-xs" id="btn-extractor-deselect-all">Desmarcar</button>
+            </div>
+          </div>
+
+          <div style="max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px;">
+            <table class="table" id="extractor-table" style="font-size: 12px; margin-bottom: 0;">
+              <thead>
+                <tr>
+                  <th style="width: 36px; text-align: center;"><input type="checkbox" id="extractor-th-check" checked></th>
+                  <th>Nome</th>
+                  <th>Telefone</th>
+                  <th>Origem</th>
+                </tr>
+              </thead>
+              <tbody id="extractor-table-tbody">
+                <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">Nenhum contato extraído.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-outline btn-sm" id="btn-extractor-export-csv" style="display: none;">
+            💾 Baixar CSV
+          </button>
+          <button type="button" class="btn btn-outline btn-sm" id="btn-extractor-export-txt" style="display: none;">
+            📄 Baixar TXT
+          </button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-outline" id="btn-extractor-cancel">Fechar</button>
+          <button type="button" class="btn btn-success" id="btn-extractor-use-in-campaign" style="display: none;">
+            📥 Inserir no Disparador (<span id="extractor-btn-count">0</span>)
+          </button>
+        </div>
       </div>
     </div>
   </div>

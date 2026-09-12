@@ -1791,5 +1791,179 @@ apiRouter.get('/api/blast/status', requireAuth, (_req: Request, res: Response) =
   });
 });
 
+// ============================================================================
+// EXTRATOR DE CONTATOS & GRUPOS DA WAHA
+// ============================================================================
+
+/** Lista sessões ativas da WAHA disponíveis */
+apiRouter.get('/api/waha/sessions', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const rawSessions = await wahaClient.listSessions();
+    const activeSessions = rawSessions.map((s: any) => ({
+      name: s.name,
+      status: s.status,
+      me: s.me
+    }));
+
+    // Adiciona sessões vinculadas aos agentes cadastrados caso não estejam na lista
+    const agents = agentManager.listAgents();
+    for (const ag of agents) {
+      const sName = (ag.wahaSession && ag.wahaSession !== '*') ? ag.wahaSession : 'default';
+      if (!activeSessions.some((s: any) => s.name === sName)) {
+        activeSessions.push({ name: sName, status: 'CONFIGURED', me: undefined });
+      }
+    }
+
+    if (activeSessions.length === 0) {
+      activeSessions.push({ name: 'default', status: 'UNKNOWN', me: undefined });
+    }
+
+    res.json({ sessions: activeSessions });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Lista grupos da sessão com contagem de membros */
+apiRouter.get('/api/waha/groups', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const session = (req.query.session as string) || undefined;
+    const rawGroups = await wahaClient.getGroups(session);
+
+    const groups = rawGroups.map((g: any) => {
+      const participantsCount = Array.isArray(g.participants)
+        ? g.participants.length
+        : (g.participantsCount || (g._data?.participants?.length) || 0);
+
+      return {
+        id: g.id?._serialized || g.id || '',
+        name: g.subject || g.name || 'Grupo sem nome',
+        participantsCount,
+        description: g.description || ''
+      };
+    }).filter((g: any) => g.id.includes('@g.us'));
+
+    res.json({ groups });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Extrai e higieniza contatos individuais ou de grupos da WAHA */
+apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { session, source, groupIds, removeDuplicates = true, defaultName = 'Cliente' } = req.body as {
+      session?: string;
+      source: 'contacts' | 'groups' | 'all';
+      groupIds?: string[];
+      removeDuplicates?: boolean;
+      defaultName?: string;
+    };
+
+    const targetSession = session || 'default';
+    const rawList: { name: string; phone: string; source: string }[] = [];
+
+    // Função interna para limpar e normalizar telefone brasileiro
+    const cleanPhone = (val: string): string => {
+      if (!val) return '';
+      let digits = val.replace(/\D/g, '');
+      if (!digits) return '';
+      // Se for número brasileiro com 10 ou 11 dígitos sem o 55, adiciona 55
+      if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) {
+        digits = '55' + digits;
+      }
+      return digits;
+    };
+
+    // 1. Extração de Contatos Individuais
+    if (source === 'contacts' || source === 'all') {
+      const [contacts, chats] = await Promise.all([
+        wahaClient.getContacts(targetSession).catch(() => []),
+        wahaClient.getChats(targetSession).catch(() => [])
+      ]);
+
+      // Processar contatos salvos da agenda
+      for (const c of contacts) {
+        if (c.isGroup || c.id?.includes('@g.us')) continue;
+        const rawPhone = c.number || c.id?.replace('@c.us', '') || '';
+        const phone = cleanPhone(rawPhone);
+        if (phone.length < 10) continue;
+
+        const name = (c.name || c.pushname || c.shortName || '').trim() || defaultName;
+        rawList.push({ name, phone, source: 'Contatos' });
+      }
+
+      // Processar conversas ativas (chats individuais)
+      for (const ch of chats) {
+        const chatId = ch.id?._serialized || ch.id || '';
+        if (chatId.includes('@g.us') || chatId.includes('@broadcast')) continue;
+        const phone = cleanPhone(chatId.replace('@c.us', ''));
+        if (phone.length < 10) continue;
+
+        const name = (ch.name || ch.pushname || '').trim() || defaultName;
+        rawList.push({ name, phone, source: 'Conversas Recentes' });
+      }
+    }
+
+    // 2. Extração de Grupos
+    if (source === 'groups' || source === 'all') {
+      let targetGroupIds = groupIds && groupIds.length > 0 ? groupIds : [];
+
+      // Se nenhum grupo foi passado explicitamente, busca todos os grupos
+      let allGroupsMap: Record<string, string> = {};
+      if (targetGroupIds.length === 0 || source === 'all') {
+        const allGroups = await wahaClient.getGroups(targetSession).catch(() => []);
+        for (const g of allGroups) {
+          const gId = g.id?._serialized || g.id || '';
+          const gName = g.subject || g.name || 'Grupo';
+          if (gId) allGroupsMap[gId] = gName;
+        }
+        if (targetGroupIds.length === 0) {
+          targetGroupIds = Object.keys(allGroupsMap);
+        }
+      }
+
+      for (const gId of targetGroupIds) {
+        const groupName = allGroupsMap[gId] || 'Grupo';
+        const participants = await wahaClient.getGroupParticipants(gId, targetSession).catch(() => []);
+
+        for (const p of participants) {
+          // No WAHA, o participante pode ter "pn" (Phone Number) ou "id"
+          const rawId = p.pn || p.id?._serialized || p.id || '';
+          // Pula LIDs puros que não revelam número de telefone real
+          if (rawId.includes('@lid') && !p.pn) continue;
+
+          const phone = cleanPhone(rawId.replace('@c.us', ''));
+          if (phone.length < 10) continue;
+
+          const name = (p.name || p.pushname || '').trim() || `${defaultName} (${groupName})`;
+          rawList.push({ name, phone, source: `Grupo: ${groupName}` });
+        }
+      }
+    }
+
+    // 3. Higienização e Remoção de Duplicados
+    const finalList: { name: string; phone: string; source: string }[] = [];
+    const seen = new Set<string>();
+
+    for (const item of rawList) {
+      if (removeDuplicates) {
+        if (seen.has(item.phone)) continue;
+        seen.add(item.phone);
+      }
+      finalList.push(item);
+    }
+
+    res.json({
+      success: true,
+      count: finalList.length,
+      contacts: finalList
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 

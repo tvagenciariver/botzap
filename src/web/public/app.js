@@ -7793,6 +7793,402 @@ setupExamDropzone();
     }
   });
 
+  // ============================================================================
+  // EXTRATOR DE CONTATOS & GRUPOS DA WAHA (UI)
+  // ============================================================================
+  let isExtractorFromCampaignModal = false;
+  let extractorAvailableGroups = [];
+  let extractorExtractedContacts = [];
+
+  const modalExtractor = document.getElementById('modal-waha-extractor-overlay');
+  const selExtractorSession = document.getElementById('extractor-session-select');
+  const inpExtractorDefaultName = document.getElementById('extractor-default-name');
+  const secExtractorGroups = document.getElementById('extractor-groups-section');
+  const listExtractorGroups = document.getElementById('extractor-groups-list');
+  const inpExtractorGroupSearch = document.getElementById('extractor-group-search');
+  const countExtractorGroupsSelected = document.getElementById('extractor-groups-selected-count');
+  const chkExtractorDedup = document.getElementById('extractor-dedup');
+  const btnExtractorRun = document.getElementById('btn-extractor-run');
+  const boxExtractorResults = document.getElementById('extractor-results-container');
+  const badgeExtractorCount = document.getElementById('extractor-count-badge');
+  const inpExtractorFilter = document.getElementById('extractor-filter-input');
+  const tbodyExtractorTable = document.getElementById('extractor-table-tbody');
+  const thCheckExtractor = document.getElementById('extractor-th-check');
+  const btnExtractorUseInCampaign = document.getElementById('btn-extractor-use-in-campaign');
+  const spanExtractorBtnCount = document.getElementById('extractor-btn-count');
+  const btnExtractorExportCsv = document.getElementById('btn-extractor-export-csv');
+  const btnExtractorExportTxt = document.getElementById('btn-extractor-export-txt');
+
+  async function openExtractorModal(fromCampaignModal = false) {
+    isExtractorFromCampaignModal = fromCampaignModal;
+    extractorExtractedContacts = [];
+    extractorAvailableGroups = [];
+
+    // Reset da UI
+    if (boxExtractorResults) boxExtractorResults.style.display = 'none';
+    if (btnExtractorUseInCampaign) btnExtractorUseInCampaign.style.display = 'none';
+    if (btnExtractorExportCsv) btnExtractorExportCsv.style.display = 'none';
+    if (btnExtractorExportTxt) btnExtractorExportTxt.style.display = 'none';
+    if (inpExtractorFilter) inpExtractorFilter.value = '';
+    if (inpExtractorGroupSearch) inpExtractorGroupSearch.value = '';
+
+    // Marcar radio contatos por padrão
+    const radioContacts = document.querySelector('input[name="extractor-source"][value="contacts"]');
+    if (radioContacts) radioContacts.checked = true;
+    if (secExtractorGroups) secExtractorGroups.style.display = 'none';
+
+    // Carregar sessões disponíveis
+    if (selExtractorSession) {
+      selExtractorSession.innerHTML = '<option value="">Carregando instâncias...</option>';
+      try {
+        const res = await fetchWithAuth('/api/waha/sessions');
+        const data = await res.json();
+        const sessions = data.sessions || [];
+        if (sessions.length) {
+          selExtractorSession.innerHTML = sessions.map(s => {
+            const statusLabel = s.status ? ` (${s.status})` : '';
+            return `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}${statusLabel}</option>`;
+          }).join('');
+        } else {
+          selExtractorSession.innerHTML = '<option value="default">default (Padrão)</option>';
+        }
+      } catch (err) {
+        selExtractorSession.innerHTML = '<option value="default">default (Padrão)</option>';
+      }
+
+      // Se veio do modal de campanha e tem agente selecionado, tenta selecionar a mesma sessão
+      if (fromCampaignModal) {
+        const agentSel = document.getElementById('blast-agent-select');
+        if (agentSel && agentSel.value) {
+          const agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+            ? allAgents
+            : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+          const ag = agents.find(a => a.id === agentSel.value);
+          if (ag && ag.wahaSession && ag.wahaSession !== '*') {
+            selExtractorSession.value = ag.wahaSession;
+          }
+        }
+      }
+    }
+
+    if (modalExtractor) modalExtractor.style.display = 'flex';
+  }
+
+  function closeExtractorModal() {
+    if (modalExtractor) modalExtractor.style.display = 'none';
+  }
+
+  // Alternar fonte (Contatos vs Grupos)
+  document.querySelectorAll('input[name="extractor-source"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      const isGroups = e.target.value === 'groups';
+      if (secExtractorGroups) secExtractorGroups.style.display = isGroups ? 'block' : 'none';
+      if (isGroups) {
+        loadExtractorGroups();
+      }
+    });
+  });
+
+  // Mudar sessão
+  selExtractorSession?.addEventListener('change', () => {
+    const isGroups = document.querySelector('input[name="extractor-source"]:checked')?.value === 'groups';
+    if (isGroups) loadExtractorGroups();
+  });
+
+  // Carregar grupos da sessão
+  async function loadExtractorGroups() {
+    const session = selExtractorSession?.value || 'default';
+    if (listExtractorGroups) {
+      listExtractorGroups.innerHTML = '<p style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 10px;">Carregando grupos da instância...</p>';
+    }
+
+    try {
+      const res = await fetchWithAuth(`/api/waha/groups?session=${encodeURIComponent(session)}`);
+      const data = await res.json();
+      extractorAvailableGroups = (data.groups || []).map(g => ({ ...g, selected: false }));
+      renderExtractorGroupsList();
+    } catch (err) {
+      if (listExtractorGroups) {
+        listExtractorGroups.innerHTML = '<p style="text-align: center; color: #f87171; font-size: 12px; padding: 10px;">Falha ao carregar grupos da WAHA.</p>';
+      }
+    }
+  }
+
+  function renderExtractorGroupsList() {
+    if (!listExtractorGroups) return;
+    const term = (inpExtractorGroupSearch?.value || '').toLowerCase().trim();
+    const filtered = extractorAvailableGroups.filter(g => g.name.toLowerCase().includes(term) || g.id.toLowerCase().includes(term));
+
+    if (!filtered.length) {
+      listExtractorGroups.innerHTML = '<p style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 10px;">Nenhum grupo encontrado.</p>';
+      updateExtractorGroupsCount();
+      return;
+    }
+
+    listExtractorGroups.innerHTML = filtered.map(g => {
+      return `<div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; margin: 0; font-size: 12px;">
+          <input type="checkbox" class="extractor-group-chk" data-group-id="${escapeHtml(g.id)}" ${g.selected ? 'checked' : ''} style="accent-color: #6366f1;">
+          <span style="font-weight: 600;">${escapeHtml(g.name)}</span>
+        </label>
+        <span class="badge" style="font-size: 11px; background: rgba(255,255,255,0.06); color: var(--text-muted); padding: 2px 6px; border-radius: 10px;">
+          👥 ${g.participantsCount || 0} membros
+        </span>
+      </div>`;
+    }).join('');
+
+    // Eventos dos checkboxes de grupo
+    listExtractorGroups.querySelectorAll('.extractor-group-chk').forEach(chk => {
+      chk.addEventListener('change', (e) => {
+        const gid = e.target.getAttribute('data-group-id');
+        const grp = extractorAvailableGroups.find(g => g.id === gid);
+        if (grp) grp.selected = e.target.checked;
+        updateExtractorGroupsCount();
+      });
+    });
+
+    updateExtractorGroupsCount();
+  }
+
+  function updateExtractorGroupsCount() {
+    const selectedCount = extractorAvailableGroups.filter(g => g.selected).length;
+    if (countExtractorGroupsSelected) {
+      countExtractorGroupsSelected.textContent = `${selectedCount} selecionado(s)`;
+    }
+  }
+
+  // Filtragem de grupos ao digitar
+  inpExtractorGroupSearch?.addEventListener('input', renderExtractorGroupsList);
+
+  // Selecionar / Desmarcar todos os grupos
+  document.getElementById('extractor-select-all-groups')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    extractorAvailableGroups.forEach(g => g.selected = true);
+    renderExtractorGroupsList();
+  });
+  document.getElementById('extractor-deselect-all-groups')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    extractorAvailableGroups.forEach(g => g.selected = false);
+    renderExtractorGroupsList();
+  });
+  document.getElementById('btn-extractor-reload-groups')?.addEventListener('click', loadExtractorGroups);
+
+  // Executar Extração
+  btnExtractorRun?.addEventListener('click', async () => {
+    const session = selExtractorSession?.value || 'default';
+    const source = document.querySelector('input[name="extractor-source"]:checked')?.value || 'contacts';
+    const defaultName = inpExtractorDefaultName?.value?.trim() || 'Cliente';
+    const removeDuplicates = chkExtractorDedup ? chkExtractorDedup.checked : true;
+
+    let groupIds = [];
+    if (source === 'groups') {
+      groupIds = extractorAvailableGroups.filter(g => g.selected).map(g => g.id);
+      if (groupIds.length === 0) {
+        if (!confirm('Nenhum grupo específico foi marcado. Deseja extrair membros de TODOS os grupos desta instância?')) {
+          return;
+        }
+      }
+    }
+
+    btnExtractorRun.disabled = true;
+    btnExtractorRun.textContent = '⏳ Extraindo da WAHA...';
+
+    try {
+      const res = await fetchWithAuth('/api/waha/extract-contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session, source, groupIds, defaultName, removeDuplicates })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Erro ao extrair contatos', 'error');
+        return;
+      }
+
+      extractorExtractedContacts = (data.contacts || []).map(c => ({ ...c, selected: true }));
+
+      if (extractorExtractedContacts.length === 0) {
+        showToast('Nenhum contato encontrado nesta busca.', 'warning');
+      } else {
+        showToast(`${extractorExtractedContacts.length} contato(s) extraído(s) com sucesso!`, 'success');
+      }
+
+      renderExtractorResults();
+
+      if (boxExtractorResults) boxExtractorResults.style.display = 'block';
+      if (btnExtractorUseInCampaign) btnExtractorUseInCampaign.style.display = 'inline-block';
+      if (btnExtractorExportCsv) btnExtractorExportCsv.style.display = 'inline-block';
+      if (btnExtractorExportTxt) btnExtractorExportTxt.style.display = 'inline-block';
+
+    } catch (err) {
+      showToast('Erro ao extrair contatos: ' + (err.message || err), 'error');
+      console.error('[Extractor] Erro:', err);
+    } finally {
+      btnExtractorRun.disabled = false;
+      btnExtractorRun.textContent = '🔍 Buscar / Extrair Contatos';
+    }
+  });
+
+  // Renderizar Tabela de Resultados
+  function renderExtractorResults() {
+    if (!tbodyExtractorTable) return;
+    const filterTerm = (inpExtractorFilter?.value || '').toLowerCase().trim();
+    const filtered = extractorExtractedContacts.filter(c => 
+      c.name.toLowerCase().includes(filterTerm) || 
+      c.phone.includes(filterTerm) || 
+      (c.source && c.source.toLowerCase().includes(filterTerm))
+    );
+
+    if (badgeExtractorCount) badgeExtractorCount.textContent = extractorExtractedContacts.length;
+    updateExtractorBtnCount();
+
+    if (!filtered.length) {
+      tbodyExtractorTable.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 16px;">Nenhum contato corresponde ao filtro.</td></tr>';
+      return;
+    }
+
+    tbodyExtractorTable.innerHTML = filtered.map((c) => {
+      return `<tr>
+        <td style="text-align: center;">
+          <input type="checkbox" class="extractor-item-chk" data-phone="${escapeHtml(c.phone)}" ${c.selected ? 'checked' : ''} style="accent-color: #6366f1;">
+        </td>
+        <td><strong>${escapeHtml(c.name)}</strong></td>
+        <td style="font-family: monospace; font-size: 11px;">${escapeHtml(c.phone)}</td>
+        <td><span style="font-size: 11px; color: var(--text-muted);">${escapeHtml(c.source || 'WAHA')}</span></td>
+      </tr>`;
+    }).join('');
+
+    // Eventos dos checkboxes individuais
+    tbodyExtractorTable.querySelectorAll('.extractor-item-chk').forEach(chk => {
+      chk.addEventListener('change', (e) => {
+        const ph = e.target.getAttribute('data-phone');
+        const item = extractorExtractedContacts.find(c => c.phone === ph);
+        if (item) item.selected = e.target.checked;
+        updateExtractorBtnCount();
+      });
+    });
+  }
+
+  function updateExtractorBtnCount() {
+    const count = extractorExtractedContacts.filter(c => c.selected).length;
+    if (spanExtractorBtnCount) spanExtractorBtnCount.textContent = count;
+  }
+
+  // Filtro de resultados
+  inpExtractorFilter?.addEventListener('input', renderExtractorResults);
+
+  // Marcar / Desmarcar todos os resultados
+  thCheckExtractor?.addEventListener('change', (e) => {
+    const chk = e.target.checked;
+    extractorExtractedContacts.forEach(c => c.selected = chk);
+    renderExtractorResults();
+  });
+  document.getElementById('btn-extractor-select-all')?.addEventListener('click', () => {
+    extractorExtractedContacts.forEach(c => c.selected = true);
+    if (thCheckExtractor) thCheckExtractor.checked = true;
+    renderExtractorResults();
+  });
+  document.getElementById('btn-extractor-deselect-all')?.addEventListener('click', () => {
+    extractorExtractedContacts.forEach(c => c.selected = false);
+    if (thCheckExtractor) thCheckExtractor.checked = false;
+    renderExtractorResults();
+  });
+
+  // Exportar CSV
+  btnExtractorExportCsv?.addEventListener('click', () => {
+    const selected = extractorExtractedContacts.filter(c => c.selected);
+    if (!selected.length) {
+      showToast('Selecione pelo menos um contato para exportar.', 'warning');
+      return;
+    }
+    const session = selExtractorSession?.value || 'default';
+    const csvContent = '\uFEFFNome,Telefone,Origem\n' + selected.map(c => `"${c.name.replace(/"/g, '""')}","${c.phone}","${(c.source || '').replace(/"/g, '""')}"`).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contatos_waha_${session}_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Arquivo CSV com ${selected.length} contatos baixado!`, 'success');
+  });
+
+  // Exportar TXT (formato pronto para o disparador)
+  btnExtractorExportTxt?.addEventListener('click', () => {
+    const selected = extractorExtractedContacts.filter(c => c.selected);
+    if (!selected.length) {
+      showToast('Selecione pelo menos um contato para exportar.', 'warning');
+      return;
+    }
+    const session = selExtractorSession?.value || 'default';
+    const txtContent = selected.map(c => `${c.name},${c.phone}`).join('\n');
+    const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lista_disparo_waha_${session}_${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Arquivo TXT com ${selected.length} contatos baixado!`, 'success');
+  });
+
+  // Inserir no Disparador
+  btnExtractorUseInCampaign?.addEventListener('click', () => {
+    const selected = extractorExtractedContacts.filter(c => c.selected);
+    if (!selected.length) {
+      showToast('Nenhum contato selecionado na lista.', 'warning');
+      return;
+    }
+
+    const session = selExtractorSession?.value || 'default';
+    const formattedText = selected.map(c => `${c.name},${c.phone}`).join('\n');
+
+    const textarea = document.getElementById('blast-contacts-raw');
+
+    if (isExtractorFromCampaignModal && textarea) {
+      // Veio do modal de campanha que já estava aberto
+      if (textarea.value.trim()) {
+        textarea.value = textarea.value.trim() + '\n' + formattedText;
+      } else {
+        textarea.value = formattedText;
+      }
+      textarea.dispatchEvent(new Event('input'));
+      closeExtractorModal();
+      showToast(`${selected.length} contatos inseridos na campanha!`, 'success');
+    } else {
+      // Abriu a partir do botão do cabeçalho -> abre o modal de nova campanha com contatos pré-preenchidos
+      closeExtractorModal();
+      openBlastModal();
+
+      setTimeout(() => {
+        const ta = document.getElementById('blast-contacts-raw');
+        if (ta) {
+          ta.value = formattedText;
+          ta.dispatchEvent(new Event('input'));
+        }
+
+        // Tenta vincular o agente que usa essa sessão
+        const agentSel = document.getElementById('blast-agent-select');
+        if (agentSel) {
+          const agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+            ? allAgents
+            : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+          const matchAg = agents.find(a => a.wahaSession === session);
+          if (matchAg) {
+            agentSel.value = matchAg.id;
+          }
+        }
+        showToast(`${selected.length} contatos carregados na Nova Campanha!`, 'success');
+      }, 300);
+    }
+  });
+
+  // Gatilhos de Abertura e Fechamento
+  document.getElementById('btn-blast-open-extractor')?.addEventListener('click', () => openExtractorModal(false));
+  document.getElementById('btn-blast-import-waha')?.addEventListener('click', () => openExtractorModal(true));
+  document.getElementById('btn-close-extractor-modal')?.addEventListener('click', closeExtractorModal);
+  document.getElementById('btn-extractor-cancel')?.addEventListener('click', closeExtractorModal);
+
   // ---- Inicializar quando a aba for ativada ----
   document.addEventListener('tabChanged', (e) => {
     if (e.detail?.tab === 'blast') {
@@ -7806,3 +8202,4 @@ setupExamDropzone();
   }
 
 })();
+
