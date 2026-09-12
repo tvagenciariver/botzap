@@ -393,7 +393,48 @@ export class WahaClient {
   }
 
   /**
-   * Obtém participantes de um grupo específico (compatível com múltiplos endpoints e formatos)
+   * Obtém mapeamento de LIDs para Phone Numbers (LID -> PN) da WAHA
+   */
+  async getLids(session?: string): Promise<Array<{ lid: string; pn?: string }>> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    try {
+      const res = await this.client.get(`/api/${sessionName}/lids`);
+      const list = Array.isArray(res.data) ? res.data : [];
+      for (const item of list) {
+        if (item?.lid && item?.pn) {
+          lidMapper.register(item.lid, item.pn);
+        }
+      }
+      return list;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Obtém mensagens recentes de um chat ou grupo para extração de participantes ativos
+   */
+  async getChatMessages(chatId: string, limit: number = 100, session?: string): Promise<any[]> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    const cleanId = (typeof chatId === 'string' ? chatId : '').trim();
+    if (!cleanId) return [];
+
+    try {
+      const res = await this.client.get(`/api/${sessionName}/chats/${cleanId}/messages`, { params: { limit } });
+      return Array.isArray(res.data) ? res.data : [];
+    } catch {
+      try {
+        const encId = encodeURIComponent(cleanId);
+        const res = await this.client.get(`/api/${sessionName}/chats/${encId}/messages`, { params: { limit } });
+        return Array.isArray(res.data) ? res.data : [];
+      } catch {
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Obtém participantes de um grupo específico (compatível com todos os endpoints, versões e fallback por mensagens)
    */
   async getGroupParticipants(groupId: string, session?: string): Promise<any[]> {
     const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
@@ -402,10 +443,28 @@ export class WahaClient {
 
     console.log(`[WAHA] Buscando participantes do grupo "${cleanId}" na sessão "${sessionName}"...`);
 
-    // Tentativa 1: /api/{session}/groups/{id}/participants (ID direto sem %40)
+    const extractFromGroupData = (data: any): any[] => {
+      if (!data) return [];
+      if (Array.isArray(data) && data.length > 0) return data;
+      if (Array.isArray(data.participants) && data.participants.length > 0) return data.participants;
+      if (Array.isArray(data.groupMetadata?.participants) && data.groupMetadata.participants.length > 0) return data.groupMetadata.participants;
+      if (typeof data.participants === 'object' && data.participants !== null) {
+        const vals = Object.values(data.participants);
+        if (vals.length > 0) return vals;
+      }
+      if (typeof data.groupMetadata?.participants === 'object' && data.groupMetadata.participants !== null) {
+        const vals = Object.values(data.groupMetadata.participants);
+        if (vals.length > 0) return vals;
+      }
+      const norm = this.normalizeList(data);
+      if (norm.length > 0) return norm;
+      return [];
+    };
+
+    // Tentativa 1: /api/{session}/groups/{id}/participants
     try {
       const res = await this.client.get(`/api/${sessionName}/groups/${cleanId}/participants`);
-      const list = this.normalizeList(res.data);
+      const list = extractFromGroupData(res.data);
       if (list.length > 0) {
         console.log(`[WAHA] ✅ ${list.length} participantes encontrados (tentativa 1) para ${cleanId}`);
         return list;
@@ -414,10 +473,10 @@ export class WahaClient {
       console.warn(`[WAHA] Tentativa 1 falhou (${cleanId}):`, this.extractErrorMessage(err1));
     }
 
-    // Tentativa 2: /api/{session}/groups/{id}/participants/ (com barra final conforme rota do NestJS)
+    // Tentativa 2: /api/{session}/groups/{id}/participants/ (trailing slash)
     try {
       const res = await this.client.get(`/api/${sessionName}/groups/${cleanId}/participants/`);
-      const list = this.normalizeList(res.data);
+      const list = extractFromGroupData(res.data);
       if (list.length > 0) {
         console.log(`[WAHA] ✅ ${list.length} participantes encontrados (tentativa 2 com slash) para ${cleanId}`);
         return list;
@@ -429,7 +488,7 @@ export class WahaClient {
     // Tentativa 3: /api/{session}/groups/{id}/participants/v2
     try {
       const res = await this.client.get(`/api/${sessionName}/groups/${cleanId}/participants/v2`);
-      const list = this.normalizeList(res.data);
+      const list = extractFromGroupData(res.data);
       if (list.length > 0) {
         console.log(`[WAHA] ✅ ${list.length} participantes encontrados (tentativa 3 v2) para ${cleanId}`);
         return list;
@@ -438,33 +497,72 @@ export class WahaClient {
       // continua
     }
 
-    // Tentativa 4: /api/{session}/groups/{id} (retorna objeto completo do grupo com campo participants)
+    // Tentativa 4: /api/{session}/groups/{id} (retorna objeto completo do grupo)
     try {
       const groupRes = await this.client.get(`/api/${sessionName}/groups/${cleanId}`);
-      if (groupRes.data) {
-        if (Array.isArray(groupRes.data.participants) && groupRes.data.participants.length > 0) {
-          console.log(`[WAHA] ✅ ${groupRes.data.participants.length} participantes encontrados (tentativa 4 getGroup)`);
-          return groupRes.data.participants;
-        }
-        if (Array.isArray(groupRes.data.groupMetadata?.participants) && groupRes.data.groupMetadata.participants.length > 0) {
-          console.log(`[WAHA] ✅ ${groupRes.data.groupMetadata.participants.length} participantes encontrados (tentativa 4 metadata)`);
-          return groupRes.data.groupMetadata.participants;
-        }
-        const norm = this.normalizeList(groupRes.data.participants || groupRes.data);
-        if (norm.length > 0) return norm;
+      const list = extractFromGroupData(groupRes.data);
+      if (list.length > 0) {
+        console.log(`[WAHA] ✅ ${list.length} participantes encontrados (tentativa 4 getGroup) para ${cleanId}`);
+        return list;
       }
     } catch (err4: any) {
       console.warn(`[WAHA] Tentativa 4 falhou (${cleanId}):`, this.extractErrorMessage(err4));
     }
 
-    // Tentativa 5: encodeURIComponent (caso algum reverse proxy exija %40)
+    // Tentativa 5: /api/{session}/chats/{id} (retorna objeto do chat com groupMetadata)
+    try {
+      const chatRes = await this.client.get(`/api/${sessionName}/chats/${cleanId}`);
+      const list = extractFromGroupData(chatRes.data);
+      if (list.length > 0) {
+        console.log(`[WAHA] ✅ ${list.length} participantes encontrados (tentativa 5 getChat) para ${cleanId}`);
+        return list;
+      }
+    } catch (err5: any) {
+      // continua
+    }
+
+    // Tentativa 6: Variantes com encodeURIComponent
     try {
       const encId = encodeURIComponent(cleanId);
       const res = await this.client.get(`/api/${sessionName}/groups/${encId}/participants`);
-      const list = this.normalizeList(res.data);
+      const list = extractFromGroupData(res.data);
       if (list.length > 0) return list;
-    } catch (err5: any) {
-      // continua
+    } catch {}
+
+    try {
+      const encId = encodeURIComponent(cleanId);
+      const res = await this.client.get(`/api/${sessionName}/groups/${encId}`);
+      const list = extractFromGroupData(res.data);
+      if (list.length > 0) return list;
+    } catch {}
+
+    // Tentativa 7 (FALLBACK POR MENSAGENS RECENTES DO GRUPO):
+    // Se o endpoint de participantes estiver inacessível pelo engine da WAHA, extrai os membros que mandaram mensagens
+    try {
+      console.log(`[WAHA] Tentando extrair membros ativos através das mensagens recentes de "${cleanId}"...`);
+      const messages = await this.getChatMessages(cleanId, 100, sessionName);
+      if (messages.length > 0) {
+        const participantMap = new Map<string, any>();
+        for (const m of messages) {
+          const sender = m.author || m.participant || m._data?.author || m._data?.participant || (m.from && !m.from.includes('@g.us') ? m.from : '');
+          if (sender && !sender.includes('@broadcast') && !sender.includes('@g.us')) {
+            const senderId = typeof sender === 'string' ? sender : (sender.id?._serialized || sender.id || '');
+            if (senderId && !participantMap.has(senderId)) {
+              participantMap.set(senderId, {
+                id: senderId,
+                name: m._data?.notifyName || m.notifyName || m._data?.pushName || m.pushName || ''
+              });
+            }
+          }
+        }
+        const senderList = Array.from(participantMap.values());
+        if (senderList.length > 0) {
+          console.log(`[WAHA] ✅ ${senderList.length} participantes ativos encontrados via mensagens recentes para ${cleanId}`);
+          return senderList;
+        }
+      }
+    } catch (errMsg: any) {
+      console.warn(`[WAHA] Fallback por mensagens falhou (${cleanId}):`, this.extractErrorMessage(errMsg));
     }
 
     console.warn(`[WAHA] ⚠️ Nenhuma tentativa retornou participantes para o grupo: ${cleanId}`);
