@@ -397,50 +397,77 @@ export class WahaClient {
    */
   async getGroupParticipants(groupId: string, session?: string): Promise<any[]> {
     const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
-    const safeId = encodeURIComponent(groupId);
+    const cleanId = (typeof groupId === 'string' ? groupId : '').trim();
+    if (!cleanId) return [];
 
-    // Tentativa 1: /api/{session}/groups/{id}/participants
+    console.log(`[WAHA] Buscando participantes do grupo "${cleanId}" na sessão "${sessionName}"...`);
+
+    // Tentativa 1: /api/{session}/groups/{id}/participants (ID direto sem %40)
     try {
-      const res = await this.client.get(`/api/${sessionName}/groups/${safeId}/participants`);
+      const res = await this.client.get(`/api/${sessionName}/groups/${cleanId}/participants`);
       const list = this.normalizeList(res.data);
-      if (list.length > 0) return list;
+      if (list.length > 0) {
+        console.log(`[WAHA] ✅ ${list.length} participantes encontrados (tentativa 1) para ${cleanId}`);
+        return list;
+      }
     } catch (err1: any) {
-      // continua
+      console.warn(`[WAHA] Tentativa 1 falhou (${cleanId}):`, this.extractErrorMessage(err1));
     }
 
-    // Tentativa 2: /api/{session}/groups/{id}/participants/v2
+    // Tentativa 2: /api/{session}/groups/{id}/participants/ (com barra final conforme rota do NestJS)
     try {
-      const res = await this.client.get(`/api/${sessionName}/groups/${safeId}/participants/v2`);
+      const res = await this.client.get(`/api/${sessionName}/groups/${cleanId}/participants/`);
       const list = this.normalizeList(res.data);
-      if (list.length > 0) return list;
+      if (list.length > 0) {
+        console.log(`[WAHA] ✅ ${list.length} participantes encontrados (tentativa 2 com slash) para ${cleanId}`);
+        return list;
+      }
     } catch (err2: any) {
       // continua
     }
 
-    // Tentativa 3: /api/{session}/groups/{id}
+    // Tentativa 3: /api/{session}/groups/{id}/participants/v2
     try {
-      const groupRes = await this.client.get(`/api/${sessionName}/groups/${safeId}`);
-      if (groupRes.data) {
-        if (Array.isArray(groupRes.data.participants)) return groupRes.data.participants;
-        if (Array.isArray(groupRes.data.groupMetadata?.participants)) return groupRes.data.groupMetadata.participants;
-        const norm = this.normalizeList(groupRes.data.participants || groupRes.data);
-        if (norm.length > 0) return norm;
+      const res = await this.client.get(`/api/${sessionName}/groups/${cleanId}/participants/v2`);
+      const list = this.normalizeList(res.data);
+      if (list.length > 0) {
+        console.log(`[WAHA] ✅ ${list.length} participantes encontrados (tentativa 3 v2) para ${cleanId}`);
+        return list;
       }
     } catch (err3: any) {
       // continua
     }
 
-    // Tentativa 4: /api/{session}/chats/{id}
+    // Tentativa 4: /api/{session}/groups/{id} (retorna objeto completo do grupo com campo participants)
     try {
-      const chatRes = await this.client.get(`/api/${sessionName}/chats/${safeId}`);
-      if (chatRes.data) {
-        if (Array.isArray(chatRes.data.participants)) return chatRes.data.participants;
-        if (Array.isArray(chatRes.data.groupMetadata?.participants)) return chatRes.data.groupMetadata.participants;
+      const groupRes = await this.client.get(`/api/${sessionName}/groups/${cleanId}`);
+      if (groupRes.data) {
+        if (Array.isArray(groupRes.data.participants) && groupRes.data.participants.length > 0) {
+          console.log(`[WAHA] ✅ ${groupRes.data.participants.length} participantes encontrados (tentativa 4 getGroup)`);
+          return groupRes.data.participants;
+        }
+        if (Array.isArray(groupRes.data.groupMetadata?.participants) && groupRes.data.groupMetadata.participants.length > 0) {
+          console.log(`[WAHA] ✅ ${groupRes.data.groupMetadata.participants.length} participantes encontrados (tentativa 4 metadata)`);
+          return groupRes.data.groupMetadata.participants;
+        }
+        const norm = this.normalizeList(groupRes.data.participants || groupRes.data);
+        if (norm.length > 0) return norm;
       }
     } catch (err4: any) {
-      console.warn(`[WAHA] Erro ao buscar participantes do grupo ${groupId}:`, this.extractErrorMessage(err4));
+      console.warn(`[WAHA] Tentativa 4 falhou (${cleanId}):`, this.extractErrorMessage(err4));
     }
 
+    // Tentativa 5: encodeURIComponent (caso algum reverse proxy exija %40)
+    try {
+      const encId = encodeURIComponent(cleanId);
+      const res = await this.client.get(`/api/${sessionName}/groups/${encId}/participants`);
+      const list = this.normalizeList(res.data);
+      if (list.length > 0) return list;
+    } catch (err5: any) {
+      // continua
+    }
+
+    console.warn(`[WAHA] ⚠️ Nenhuma tentativa retornou participantes para o grupo: ${cleanId}`);
     return [];
   }
 

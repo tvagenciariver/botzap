@@ -7937,13 +7937,16 @@ setupExamDropzone();
     }
 
     listExtractorGroups.innerHTML = filtered.map(g => {
+      const badgeText = (g.participantsCount && g.participantsCount > 0)
+        ? `👥 ${g.participantsCount} membros`
+        : `👥 Grupo WhatsApp`;
       return `<div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.05);">
         <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; margin: 0; font-size: 12px;">
           <input type="checkbox" class="extractor-group-chk" data-group-id="${escapeHtml(g.id)}" ${g.selected ? 'checked' : ''} style="accent-color: #6366f1;">
           <span style="font-weight: 600;">${escapeHtml(g.name)}</span>
         </label>
-        <span class="badge" style="font-size: 11px; background: rgba(255,255,255,0.06); color: var(--text-muted); padding: 2px 6px; border-radius: 10px;">
-          👥 ${g.participantsCount || 0} membros
+        <span class="badge" style="font-size: 11px; background: rgba(99,102,241,0.15); color: #c7d2fe; padding: 2px 8px; border-radius: 10px;">
+          ${badgeText}
         </span>
       </div>`;
     }).join('');
