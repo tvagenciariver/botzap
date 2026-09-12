@@ -540,7 +540,8 @@ function switchToTab(targetTab) {
     chats: 'Conversas Ativas & Pausa do Bot',
     logs: 'Logs em Tempo Real do Orquestrador',
     integration: 'Integração WAHA API & Chatwoot',
-    users: 'Gestão de Usuários & Equipe de Atendimento'
+    users: 'Gestão de Usuários & Equipe de Atendimento',
+    blast: 'Disparador de Mensagem em Massa'
   };
   const pageTitle = document.getElementById('page-title');
   if (pageTitle) pageTitle.textContent = titles[targetTab] || 'BotZap';
@@ -565,6 +566,8 @@ function switchToTab(targetTab) {
     }
     if (targetTab === 'integration' && currentUser?.role === 'admin') loadWahaConfig();
     if (targetTab === 'users' && currentUser?.role === 'admin') loadUsers();
+    // Disparador de mensagem
+    document.dispatchEvent(new CustomEvent('tabChanged', { detail: { tab: targetTab } }));
   }
 }
 
@@ -7465,5 +7468,320 @@ initStatusCardState();
 // Inicializa Drag & Drop de exames no carregamento
 setupExamDropzone();
 
+// ============================================================================
+// DISPARADOR DE MENSAGEM (BLAST)
+// ============================================================================
+(function () {
+  let blastCurrentCampaignId = null;
+  let blastPollInterval = null;
 
+  // ---- Utilitários ----
+  function statusLabel(status) {
+    const map = {
+      idle: '⏸ Aguardando',
+      running: '▶️ Enviando',
+      paused: '⏸ Pausado',
+      completed: '✅ Concluído',
+      cancelled: '❌ Cancelado',
+      pending: '🕐 Pendente',
+      sent: '✅ Enviado',
+      failed: '❌ Falha',
+    };
+    return map[status] || status;
+  }
 
+  function statusColor(status) {
+    const map = {
+      idle: '#94a3b8',
+      running: '#60a5fa',
+      paused: '#fbbf24',
+      completed: '#34d399',
+      cancelled: '#f87171',
+      pending: '#94a3b8',
+      sent: '#34d399',
+      failed: '#f87171',
+    };
+    return map[status] || '#94a3b8';
+  }
+
+  function parseContacts(raw) {
+    return raw.split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0 && line.includes(','))
+      .map(line => {
+        const idx = line.indexOf(',');
+        const name = line.slice(0, idx).trim();
+        const phone = line.slice(idx + 1).trim().replace(/\D/g, '');
+        return { name, phone };
+      })
+      .filter(c => c.name && c.phone.length >= 10);
+  }
+
+  // ---- Carregar lista de campanhas ----
+  async function loadBlastCampaigns() {
+    try {
+      const res = await fetch('/api/blast/campaigns');
+      const data = await res.json();
+      renderCampaignList(data.campaigns || []);
+    } catch (err) {
+      console.error('[Blast] Erro ao carregar campanhas:', err);
+    }
+  }
+
+  function renderCampaignList(campaigns) {
+    const listEl = document.getElementById('blast-campaigns-list');
+    if (!listEl) return;
+
+    if (!campaigns.length) {
+      listEl.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 20px;">Nenhuma campanha criada ainda. Clique em "Nova Campanha" para começar.</p>';
+      return;
+    }
+
+    const rows = campaigns.map(c => {
+      const sent = c.queue.filter(q => q.status === 'sent').length;
+      const failed = c.queue.filter(q => q.status === 'failed').length;
+      const total = c.queue.length;
+      const color = statusColor(c.status);
+      return `<tr style="cursor: pointer;" onclick="blastOpenCampaign('${c.id}')">
+        <td><strong>${escapeHtml(c.name)}</strong></td>
+        <td>${c.contacts.length} contatos</td>
+        <td><span style="color:${color}; font-weight:600;">${statusLabel(c.status)}</span></td>
+        <td>${sent}/${total} enviados${failed ? ` · <span style="color:#f87171;">${failed} falha(s)</span>` : ''}</td>
+        <td style="font-size:11px; color: var(--text-muted);">${c.createdAt ? new Date(c.createdAt).toLocaleString('pt-BR') : '—'}</td>
+        <td>
+          <button class="btn btn-danger btn-xs" onclick="event.stopPropagation(); blastDeleteCampaign('${c.id}')" title="Excluir campanha">🗑️</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    listEl.innerHTML = `<table class="table" style="font-size: 13px;">
+      <thead><tr>
+        <th>Nome</th><th>Contatos</th><th>Status</th><th>Progresso</th><th>Criada em</th><th></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  // ---- Abrir detalhe da campanha ----
+  window.blastOpenCampaign = function (id) {
+    blastCurrentCampaignId = id;
+    document.getElementById('blast-campaigns-card').style.display = 'none';
+    document.getElementById('blast-queue-card').style.display = 'block';
+    loadBlastQueueDetail();
+    // Auto-poll a cada 3 segundos
+    clearInterval(blastPollInterval);
+    blastPollInterval = setInterval(loadBlastQueueDetail, 3000);
+  };
+
+  async function loadBlastQueueDetail() {
+    if (!blastCurrentCampaignId) return;
+    try {
+      const res = await fetch(`/api/blast/campaigns/${blastCurrentCampaignId}`);
+      const data = await res.json();
+      if (data.campaign) renderQueueDetail(data.campaign);
+    } catch (err) {
+      console.error('[Blast] Erro ao recarregar fila:', err);
+    }
+  }
+
+  function renderQueueDetail(campaign) {
+    const titleEl = document.getElementById('blast-queue-title');
+    const badgeEl = document.getElementById('blast-status-badge');
+    const progressEl = document.getElementById('blast-progress-text');
+    const tbodyEl = document.getElementById('blast-queue-tbody');
+
+    if (titleEl) titleEl.textContent = `📨 Fila: ${campaign.name}`;
+    if (badgeEl) {
+      badgeEl.textContent = statusLabel(campaign.status);
+      badgeEl.style.color = statusColor(campaign.status);
+    }
+
+    const sent = campaign.queue.filter(q => q.status === 'sent').length;
+    const failed = campaign.queue.filter(q => q.status === 'failed').length;
+    const total = campaign.queue.length;
+    if (progressEl) progressEl.textContent = `${sent} enviados · ${failed} falharam · ${total - sent - failed} pendentes`;
+
+    // Atualiza botões conforme status
+    const btnStart = document.getElementById('btn-blast-start');
+    const btnPause = document.getElementById('btn-blast-pause');
+    const btnCancel = document.getElementById('btn-blast-cancel');
+    if (btnStart) btnStart.disabled = campaign.status === 'running' || campaign.status === 'completed' || campaign.status === 'cancelled';
+    if (btnPause) btnPause.disabled = campaign.status !== 'running';
+    if (btnCancel) btnCancel.disabled = campaign.status === 'completed' || campaign.status === 'cancelled';
+
+    // Parar polling se finalizado
+    if (campaign.status === 'completed' || campaign.status === 'cancelled') {
+      clearInterval(blastPollInterval);
+    }
+
+    if (!tbodyEl) return;
+    if (!campaign.queue.length) {
+      tbodyEl.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Fila vazia.</td></tr>';
+      return;
+    }
+
+    tbodyEl.innerHTML = campaign.queue.map((item, idx) => {
+      const color = statusColor(item.status);
+      const genMsg = item.generatedMessage
+        ? `<span title="${escapeHtml(item.generatedMessage)}">${escapeHtml(item.generatedMessage.slice(0, 60))}${item.generatedMessage.length > 60 ? '…' : ''}</span>`
+        : '<span style="color: var(--text-muted);">Aguardando</span>';
+      const errBadge = item.errorMessage ? `<br><small style="color:#f87171;">${escapeHtml(item.errorMessage.slice(0, 80))}</small>` : '';
+      return `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtml(item.recipientName)}</td>
+        <td style="font-size:11px;">${escapeHtml(item.phone)}</td>
+        <td style="max-width: 220px;">${genMsg}</td>
+        <td style="color:${color}; font-weight:600; white-space:nowrap;">${statusLabel(item.status)}${errBadge}</td>
+        <td style="font-size:11px; white-space:nowrap;">${item.sentAt ? new Date(item.sentAt).toLocaleString('pt-BR') : '—'}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ---- Voltar para lista ----
+  document.getElementById('btn-blast-back')?.addEventListener('click', () => {
+    clearInterval(blastPollInterval);
+    blastCurrentCampaignId = null;
+    document.getElementById('blast-queue-card').style.display = 'none';
+    document.getElementById('blast-campaigns-card').style.display = 'block';
+    loadBlastCampaigns();
+  });
+
+  // ---- Iniciar ----
+  document.getElementById('btn-blast-start')?.addEventListener('click', async () => {
+    if (!blastCurrentCampaignId) return;
+    try {
+      const res = await fetch(`/api/blast/campaigns/${blastCurrentCampaignId}/start`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Erro ao iniciar', 'error'); return; }
+      showToast('Campanha iniciada!', 'success');
+      loadBlastQueueDetail();
+    } catch (err) { showToast('Erro ao iniciar campanha', 'error'); }
+  });
+
+  // ---- Pausar ----
+  document.getElementById('btn-blast-pause')?.addEventListener('click', async () => {
+    if (!blastCurrentCampaignId) return;
+    try {
+      const res = await fetch(`/api/blast/campaigns/${blastCurrentCampaignId}/pause`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Erro ao pausar', 'error'); return; }
+      showToast('Pausa solicitada — aguarde o envio atual terminar.', 'info');
+    } catch (err) { showToast('Erro ao pausar', 'error'); }
+  });
+
+  // ---- Cancelar ----
+  document.getElementById('btn-blast-cancel')?.addEventListener('click', async () => {
+    if (!blastCurrentCampaignId) return;
+    if (!confirm('Cancelar esta campanha? Os envios pendentes serão marcados como cancelados.')) return;
+    try {
+      const res = await fetch(`/api/blast/campaigns/${blastCurrentCampaignId}/cancel`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Erro ao cancelar', 'error'); return; }
+      showToast('Campanha cancelada.', 'info');
+      loadBlastQueueDetail();
+    } catch (err) { showToast('Erro ao cancelar', 'error'); }
+  });
+
+  // ---- Deletar campanha ----
+  window.blastDeleteCampaign = async function (id) {
+    if (!confirm('Excluir esta campanha permanentemente?')) return;
+    try {
+      const res = await fetch(`/api/blast/campaigns/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Erro ao excluir', 'error'); return; }
+      showToast('Campanha excluída.', 'success');
+      loadBlastCampaigns();
+    } catch (err) { showToast('Erro ao excluir campanha', 'error'); }
+  };
+
+  // ---- Botão Refresh ----
+  document.getElementById('btn-blast-refresh')?.addEventListener('click', loadBlastCampaigns);
+
+  // ---- Modal Nova Campanha ----
+  function openBlastModal() {
+    // Preencher select de agentes
+    const agentSel = document.getElementById('blast-agent-select');
+    if (agentSel) {
+      const agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+        ? allAgents
+        : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+      agentSel.innerHTML = agents.length
+        ? agents.map(a => `<option value="${a.id}">${escapeHtml(a.companyName || a.name)} — ${a.wahaSession || 'default'}</option>`).join('')
+        : '<option value="default">Agente Padrão (default)</option>';
+    }
+    document.getElementById('blast-name').value = '';
+    document.getElementById('blast-base-message').value = '';
+    document.getElementById('blast-contacts-raw').value = '';
+    document.getElementById('blast-contacts-preview').textContent = '';
+    document.getElementById('modal-blast-overlay').style.display = 'flex';
+  }
+
+  function closeBlastModal() {
+    document.getElementById('modal-blast-overlay').style.display = 'none';
+  }
+
+  document.getElementById('btn-blast-new')?.addEventListener('click', openBlastModal);
+  document.getElementById('btn-close-blast-modal')?.addEventListener('click', closeBlastModal);
+  document.getElementById('btn-blast-modal-cancel')?.addEventListener('click', closeBlastModal);
+
+  // Preview de contatos em tempo real
+  document.getElementById('blast-contacts-raw')?.addEventListener('input', function () {
+    const contacts = parseContacts(this.value);
+    const preview = document.getElementById('blast-contacts-preview');
+    if (preview) {
+      preview.textContent = contacts.length
+        ? `✅ ${contacts.length} contato(s) detectado(s)`
+        : (this.value.trim() ? '⚠️ Nenhum contato válido detectado. Use o formato: Nome,Telefone' : '');
+    }
+  });
+
+  // ---- Criar Campanha ----
+  document.getElementById('btn-blast-modal-create')?.addEventListener('click', async () => {
+    const name = document.getElementById('blast-name').value.trim();
+    const agentId = document.getElementById('blast-agent-select').value;
+    const baseMessage = document.getElementById('blast-base-message').value.trim();
+    const rawContacts = document.getElementById('blast-contacts-raw').value;
+    const contacts = parseContacts(rawContacts);
+
+    if (!name) { showToast('Informe o nome da campanha.', 'error'); return; }
+    if (!baseMessage) { showToast('Informe a mensagem base.', 'error'); return; }
+    if (!contacts.length) { showToast('Nenhum contato válido encontrado. Verifique o formato: Nome,Telefone', 'error'); return; }
+
+    const settings = {
+      minInterval: parseInt(document.getElementById('blast-min-interval').value) || 25,
+      maxInterval: parseInt(document.getElementById('blast-max-interval').value) || 75,
+      batchSize: parseInt(document.getElementById('blast-batch-size').value) || 25,
+      batchPauseMinutes: parseInt(document.getElementById('blast-batch-pause').value) || 15,
+    };
+
+    try {
+      const res = await fetch('/api/blast/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, agentId, baseMessage, contacts, settings })
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(data.error || 'Erro ao criar campanha', 'error'); return; }
+      showToast(`Campanha "${name}" criada com ${contacts.length} contatos!`, 'success');
+      closeBlastModal();
+      loadBlastCampaigns();
+      // Abrir automaticamente o detalhe
+      setTimeout(() => blastOpenCampaign(data.campaign.id), 300);
+    } catch (err) {
+      showToast('Erro ao criar campanha', 'error');
+    }
+  });
+
+  // ---- Inicializar quando a aba for ativada ----
+  document.addEventListener('tabChanged', (e) => {
+    if (e.detail?.tab === 'blast') {
+      loadBlastCampaigns();
+    }
+  });
+
+  // Também carregar se a aba já estiver ativa ao iniciar
+  if (document.querySelector('[data-tab="blast"].active')) {
+    loadBlastCampaigns();
+  }
+
+})();

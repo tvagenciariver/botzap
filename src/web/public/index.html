@@ -120,7 +120,10 @@
           <span class="nav-icon">🔌</span> Conectar WAHA / Chatwoot
         </button>
         <button class="nav-btn" data-tab="users" data-admin-only="true">
-          <span class="nav-icon">👥</span> Usuários & Equipe
+          <span class="nav-icon">👥</span> Usuários &amp; Equipe
+        </button>
+        <button class="nav-btn" data-tab="blast" data-module="blast">
+          <span class="nav-icon">📤</span> Disparador de Mensagem
         </button>
       </nav>
 
@@ -1683,13 +1686,160 @@
           </form>
         </div>
       </section>
+
+      <!-- TAB: Disparador de Mensagem -->
+      <section class="tab-pane" id="pane-blast">
+        <div class="card tab-header-card">
+          <div class="tab-header-left">
+            <div class="tab-header-title">
+              <span class="tab-header-icon">📤</span>
+              <div>
+                <h2>Disparador de Mensagem</h2>
+                <p>Envie mensagens em massa para listas de contatos com reescrita automática por IA</p>
+              </div>
+            </div>
+          </div>
+          <div class="tab-header-actions">
+            <button class="btn btn-primary btn-sm" id="btn-blast-new">
+              ✉️ Nova Campanha
+            </button>
+          </div>
+        </div>
+
+        <!-- Lista de Campanhas existentes -->
+        <div class="card" id="blast-campaigns-card" style="margin-top: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+            <h3 style="margin: 0; font-size: 15px;">📋 Campanhas</h3>
+            <button class="btn btn-outline btn-xs" id="btn-blast-refresh">🔄 Atualizar</button>
+          </div>
+          <div id="blast-campaigns-list">
+            <p style="color: var(--text-muted); text-align: center; padding: 20px;">Nenhuma campanha criada ainda.</p>
+          </div>
+        </div>
+
+        <!-- Detalhe / Fila da Campanha Selecionada -->
+        <div class="card" id="blast-queue-card" style="margin-top: 16px; display: none;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+            <h3 style="margin: 0; font-size: 15px;" id="blast-queue-title">📨 Fila de Envio</h3>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-primary btn-sm" id="btn-blast-start">▶️ Iniciar</button>
+              <button class="btn btn-outline btn-sm" id="btn-blast-pause">⏸️ Pausar</button>
+              <button class="btn btn-danger btn-sm" id="btn-blast-cancel">⏹️ Cancelar</button>
+              <button class="btn btn-outline btn-sm" id="btn-blast-back">← Voltar</button>
+            </div>
+          </div>
+
+          <!-- Status Badge -->
+          <div style="margin-bottom: 12px;">
+            <span style="font-size: 12px; color: var(--text-muted);">Status da campanha:</span>
+            <span id="blast-status-badge" class="badge" style="margin-left: 8px; font-size: 12px; padding: 3px 10px; border-radius: 20px; background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3);">—</span>
+            <span id="blast-progress-text" style="margin-left: 12px; font-size: 12px; color: var(--text-muted);"></span>
+          </div>
+
+          <!-- Tabela da Fila -->
+          <div style="overflow-x: auto;">
+            <table class="table" id="blast-queue-table" style="font-size: 12px;">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Destinatário</th>
+                  <th>Telefone</th>
+                  <th>Mensagem Gerada (IA)</th>
+                  <th>Status</th>
+                  <th>Enviado em</th>
+                </tr>
+              </thead>
+              <tbody id="blast-queue-tbody">
+                <tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Nenhum item na fila.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
   <!-- Toast Notification Container -->
-  <div id="toast-container"></div>
+  <div id="toast-container"></div>  <!-- MODAL: Nova Campanha Disparador -->
+  <div id="modal-blast-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 660px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">📤</span>
+          <div>
+            <h3>Nova Campanha de Disparo</h3>
+            <p>Configure a mensagem, os contatos e as opções anti-spam</p>
+          </div>
+        </div>
+        <button type="button" class="btn-modal-close" id="btn-close-blast-modal">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 20px; max-height: 80vh; overflow-y: auto;">
+        <form id="form-blast-create">
 
+          <!-- Nome da campanha -->
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="blast-name">Nome da Campanha *</label>
+            <input type="text" id="blast-name" class="form-control" placeholder="Ex: Promoção de Setembro" required>
+          </div>
 
+          <!-- Agente -->
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="blast-agent-select">Sessão WAHA (Agente) *</label>
+            <select id="blast-agent-select" class="form-control"></select>
+            <small style="color: var(--text-muted);">O disparo será feito pelo número WhatsApp vinculado a este agente.</small>
+          </div>
+
+          <!-- Mensagem Base -->
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="blast-base-message">Mensagem Base *</label>
+            <textarea id="blast-base-message" class="form-control" rows="5"
+              placeholder="Olá {{nome}}, temos uma novidade especial para você!&#10;&#10;Acesse: https://exemplo.com"></textarea>
+            <small style="color: var(--text-muted);">Use <strong>&#123;&#123;nome&#125;&#125;</strong> para personalizar com o nome do contato. A IA reescreverá cada mensagem de forma única.</small>
+          </div>
+
+          <!-- Contatos -->
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="blast-contacts-raw">Lista de Contatos *</label>
+            <textarea id="blast-contacts-raw" class="form-control" rows="6"
+              placeholder="Cole um contato por linha no formato: Nome,Telefone&#10;&#10;Exemplos:&#10;João Silva,5587988001122&#10;Maria Santos,5581999887766&#10;Pedro Alves,5511912345678"></textarea>
+            <small style="color: var(--text-muted);">Formato: <code>Nome,Telefone</code> — um por linha. O telefone deve ter código do país (55 para Brasil).</small>
+            <div id="blast-contacts-preview" style="margin-top: 8px; font-size: 12px; color: #a5b4fc;"></div>
+          </div>
+
+          <hr style="border-color: var(--border); margin: 20px 0;">
+          <h4 style="margin: 0 0 14px; font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">⚙️ Configurações Anti-Spam</h4>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <!-- Intervalo mínimo -->
+            <div class="form-group">
+              <label for="blast-min-interval">Intervalo Mínimo (seg)</label>
+              <input type="number" id="blast-min-interval" class="form-control" value="25" min="5" max="300">
+            </div>
+            <!-- Intervalo máximo -->
+            <div class="form-group">
+              <label for="blast-max-interval">Intervalo Máximo (seg)</label>
+              <input type="number" id="blast-max-interval" class="form-control" value="75" min="10" max="600">
+            </div>
+            <!-- Tamanho do lote -->
+            <div class="form-group">
+              <label for="blast-batch-size">Envios por Lote</label>
+              <input type="number" id="blast-batch-size" class="form-control" value="25" min="1" max="500">
+            </div>
+            <!-- Pausa entre lotes -->
+            <div class="form-group">
+              <label for="blast-batch-pause">Pausa entre Lotes (min)</label>
+              <input type="number" id="blast-batch-pause" class="form-control" value="15" min="1" max="120">
+            </div>
+          </div>
+
+        </form>
+      </div>
+      <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="button" class="btn btn-outline" id="btn-blast-modal-cancel">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btn-blast-modal-create">✉️ Criar Campanha</button>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL: Configuração de Lembretes Automáticos D-1 -->
   <div id="modal-reminder-config-overlay" class="modal-overlay" style="display: none;">

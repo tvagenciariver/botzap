@@ -38,5 +38,6 @@ data/partners.json
 data/exams.json
 data/lid_mappings.json
 data/uploads/
+data/blast_campaigns.json
 !data/.gitkeep
 scratch/

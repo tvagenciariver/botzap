@@ -20,6 +20,9 @@ import { partnerManager } from '../appointments/partner-manager.js';
 import { examService } from '../appointments/exam-service.js';
 import { formatToWhatsAppChatId } from '../appointments/phone-utils.js';
 import { userManager } from '../auth/user-manager.js';
+import { blastStore } from '../blast/blast-store.js';
+import { blastEngine } from '../blast/blast-engine.js';
+import { BlastCampaign, BlastContact, BlastSettings } from '../blast/types.js';
 import { UserSession, AppModule } from '../auth/user-types.js';
 
 declare global {
@@ -1639,5 +1642,154 @@ apiRouter.delete('/api/exams/:id', requireModule('exams'), (req: Request, res: R
     res.status(400).json({ error: err.message });
   }
 });
+
+// ============================================================================
+// DISPARADOR DE MENSAGEM (BLAST)
+// ============================================================================
+
+/** Lista todas as campanhas */
+apiRouter.get('/api/blast/campaigns', requireAuth, (_req: Request, res: Response) => {
+  try {
+    const campaigns = blastStore.list();
+    res.json({ campaigns });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Retorna uma campanha específica com a fila atualizada */
+apiRouter.get('/api/blast/campaigns/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const campaign = blastStore.get(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
+    res.json({ campaign });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Cria nova campanha e enfileira os contatos */
+apiRouter.post('/api/blast/campaigns', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { name, agentId, baseMessage, contacts, settings } = req.body as {
+      name: string;
+      agentId: string;
+      baseMessage: string;
+      contacts: BlastContact[];
+      settings?: Partial<BlastSettings>;
+    };
+
+    if (!name || !baseMessage || !contacts || contacts.length === 0) {
+      return res.status(400).json({ error: 'Informe: name, baseMessage e contacts (array).' });
+    }
+
+    const finalSettings: BlastSettings = {
+      minInterval: settings?.minInterval ?? 25,
+      maxInterval: settings?.maxInterval ?? 75,
+      batchSize: settings?.batchSize ?? 25,
+      batchPauseMinutes: settings?.batchPauseMinutes ?? 15
+    };
+
+    const now = new Date().toISOString();
+    const campaignId = `blast_${Date.now()}`;
+
+    const queue = contacts.map((c, idx) => ({
+      id: `${campaignId}_${idx}`,
+      recipientName: c.name,
+      phone: c.phone,
+      originalMessage: baseMessage.replace(/\{\{nome\}\}/gi, c.name),
+      generatedMessage: '',
+      status: 'pending' as const
+    }));
+
+    const campaign: BlastCampaign = {
+      id: campaignId,
+      name,
+      agentId: agentId || 'default',
+      baseMessage,
+      contacts,
+      queue,
+      settings: finalSettings,
+      status: 'idle',
+      createdAt: now
+    };
+
+    blastStore.save(campaign);
+    res.status(201).json({ success: true, campaign });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** Inicia ou retoma a execução de uma campanha */
+apiRouter.post('/api/blast/campaigns/:id/start', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const campaign = blastStore.get(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
+    if (campaign.status === 'completed' || campaign.status === 'cancelled') {
+      return res.status(400).json({ error: `Campanha já está ${campaign.status}.` });
+    }
+
+    // Execução assíncrona em background
+    blastEngine.start(req.params.id).catch(err => {
+      console.error('[Blast] Erro fatal na campanha:', err.message);
+      blastStore.updateStatus(req.params.id, 'idle');
+    });
+
+    res.json({ success: true, message: 'Campanha iniciada em background.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** Pausa a campanha em execução */
+apiRouter.post('/api/blast/campaigns/:id/pause', requireAuth, (req: Request, res: Response) => {
+  try {
+    if (blastEngine.getCurrentCampaignId() !== req.params.id) {
+      return res.status(400).json({ error: 'Esta campanha não está em execução.' });
+    }
+    blastEngine.pause();
+    res.json({ success: true, message: 'Pausa solicitada. Aguarde o envio atual terminar.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** Cancela a campanha em execução */
+apiRouter.post('/api/blast/campaigns/:id/cancel', requireAuth, (req: Request, res: Response) => {
+  try {
+    if (blastEngine.getCurrentCampaignId() === req.params.id) {
+      blastEngine.cancel();
+    } else {
+      blastStore.updateStatus(req.params.id, 'cancelled', { completedAt: new Date().toISOString() });
+    }
+    res.json({ success: true, message: 'Cancelamento solicitado.' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** Deleta campanha (apenas se não estiver rodando) */
+apiRouter.delete('/api/blast/campaigns/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    if (blastEngine.getCurrentCampaignId() === req.params.id) {
+      return res.status(400).json({ error: 'Não é possível deletar uma campanha em execução. Cancele primeiro.' });
+    }
+    const ok = blastStore.delete(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'Campanha não encontrada.' });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** Retorna status do engine (campanha atual rodando) */
+apiRouter.get('/api/blast/status', requireAuth, (_req: Request, res: Response) => {
+  res.json({
+    running: blastEngine.isRunning(),
+    currentCampaignId: blastEngine.getCurrentCampaignId()
+  });
+});
+
 
 
