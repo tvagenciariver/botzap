@@ -1884,37 +1884,10 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
     const targetSession = session || 'default';
     const rawList: { name: string; phone: string; source: string }[] = [];
 
-    // Carrega mapeamento de LIDs conhecidos da WAHA
-    const lidsMap = new Map<string, string>();
-    try {
-      const lidsList = await wahaClient.getLids(targetSession).catch(() => []);
-      for (const item of lidsList) {
-        if (item?.lid && item?.pn) {
-          lidsMap.set(item.lid, item.pn);
-          const cleanPn = item.pn.replace('@c.us', '').replace(/\D/g, '');
-          if (cleanPn) lidsMap.set(item.lid.split('@')[0], cleanPn);
-        }
-      }
-    } catch {}
-
-    // Função interna para limpar e normalizar telefone brasileiro ou LID
+    // Função interna para limpar e normalizar telefone brasileiro (somente dígitos válidos)
     const cleanPhone = (val: string): string => {
       if (!val) return '';
-      const trimmed = val.trim();
-      // Se for LID, preserva o formato @lid para que a WAHA consiga disparar
-      if (trimmed.includes('@lid')) {
-        let cleanLid = trimmed;
-        if (cleanLid.includes(':')) {
-          const atIdx = cleanLid.indexOf('@');
-          const colonIdx = cleanLid.indexOf(':');
-          if (colonIdx !== -1 && colonIdx < atIdx) {
-            cleanLid = cleanLid.substring(0, colonIdx) + cleanLid.substring(atIdx);
-          }
-        }
-        return cleanLid;
-      }
-
-      let digits = trimmed.replace(/\D/g, '');
+      let digits = val.replace(/\D/g, '');
       if (!digits) return '';
       // Se for número brasileiro com 10 ou 11 dígitos sem o 55, adiciona 55
       if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) {
@@ -1932,7 +1905,7 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
 
       // Processar contatos salvos da agenda
       for (const c of contacts) {
-        if (c.isGroup || c.id?.includes('@g.us')) continue;
+        if (c.isGroup || c.id?.includes('@g.us') || c.id?.includes('@broadcast') || c.id?.includes('@lid')) continue;
         const rawPhone = c.number || c.id?.replace('@c.us', '') || '';
         const phone = cleanPhone(rawPhone);
         if (phone.length < 10) continue;
@@ -1944,7 +1917,7 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
       // Processar conversas ativas (chats individuais)
       for (const ch of chats) {
         const chatId = ch.id?._serialized || ch.id || '';
-        if (chatId.includes('@g.us') || chatId.includes('@broadcast')) continue;
+        if (typeof chatId !== 'string' || chatId.includes('@g.us') || chatId.includes('@broadcast') || chatId.includes('@lid')) continue;
         const phone = cleanPhone(chatId.replace('@c.us', ''));
         if (phone.length < 10) continue;
 
@@ -1981,8 +1954,6 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
         targetGroupIds = Object.keys(allGroupsMap);
       }
 
-      console.log(`[WAHA Extractor] Extraindo contatos para sessão "${targetSession}", grupos=${targetGroupIds.length}`);
-
       for (const gId of targetGroupIds) {
         const groupObj = allGroupsMap[gId] || {};
         const groupName = groupObj.subject || groupObj.name || groupObj.Name || groupObj.groupMetadata?.subject || 'Grupo';
@@ -1991,22 +1962,18 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
         let participants: any[] = [];
         if (Array.isArray(groupObj.participants) && groupObj.participants.length > 0) {
           participants = groupObj.participants;
-          console.log(`[WAHA Extractor] ✅ ${participants.length} participantes já embutidos no grupo "${groupName}"`);
         } else if (Array.isArray(groupObj.groupMetadata?.participants) && groupObj.groupMetadata.participants.length > 0) {
           participants = groupObj.groupMetadata.participants;
-          console.log(`[WAHA Extractor] ✅ ${participants.length} participantes embutidos em groupMetadata para "${groupName}"`);
         } else if (typeof groupObj.participants === 'object' && groupObj.participants !== null) {
           participants = Object.values(groupObj.participants);
         } else if (typeof groupObj.groupMetadata?.participants === 'object' && groupObj.groupMetadata?.participants !== null) {
           participants = Object.values(groupObj.groupMetadata.participants);
         }
 
-        // Passo 2: Se não vieram embutidos, busca via getGroupParticipants com todas as tentativas e fallbacks
+        // Passo 2: Se não vieram embutidos, busca via getGroupParticipants
         if (participants.length === 0) {
           participants = await wahaClient.getGroupParticipants(gId, targetSession).catch(() => []);
         }
-
-        console.log(`[WAHA Extractor] Grupo "${groupName}" (${gId}): ${participants.length} participante(s) obtido(s).`);
 
         for (const p of participants) {
           let rawId = '';
@@ -2015,39 +1982,24 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
           if (typeof p === 'string') {
             rawId = p;
           } else if (p && typeof p === 'object') {
-            // Prioridade para Phone Number real (pn ou phoneNumber)
-            if (p.pn && typeof p.pn === 'string' && !p.pn.includes('@lid')) {
-              rawId = p.pn;
-            } else if (p.phoneNumber && typeof p.phoneNumber === 'string' && !p.phoneNumber.includes('@lid')) {
-              rawId = p.phoneNumber;
-            } else if (typeof p.id === 'string') {
-              rawId = p.id;
-            } else if (p.id?._serialized) {
-              rawId = p.id._serialized;
-            } else if (p.id?.user) {
-              rawId = p.id.user;
-            } else if (p.jid) {
-              rawId = p.jid;
-            } else if (p.user) {
-              rawId = p.user;
-            }
-
+            rawId = p.pn || p.phoneNumber || p.number || (typeof p.id === 'string' ? p.id : (p.id?.user || p.id?._serialized || p.jid || p.user || ''));
             name = (p.name || p.pushname || p.pushName || p.notifyName || p.shortName || '').trim();
           }
 
           if (!rawId) continue;
 
-          // Se for LID, tenta resolver para número real de telefone via lidsMap e lidMapper
+          // Se for LID, tenta resolver pelo lidMapper local
           if (rawId.includes('@lid')) {
-            const cleanLid = rawId.split(':')[0];
-            const resolvedPn = lidsMap.get(cleanLid) || lidsMap.get(cleanLid.split('@')[0]) || lidMapper.getPhone(cleanLid);
+            const resolvedPn = lidMapper.getPhone(rawId) || lidMapper.getPhone(rawId.split(':')[0]);
             if (resolvedPn) {
               rawId = resolvedPn;
+            } else {
+              continue;
             }
           }
 
-          const phone = cleanPhone(rawId);
-          if (phone.length < 8) continue; // Precisa ter tamanho mínimo válido (telefone ou LID)
+          const phone = cleanPhone(rawId.replace('@c.us', '').replace('@s.whatsapp.net', ''));
+          if (phone.length < 10) continue;
 
           if (!name) {
             name = `${defaultName} (${groupName})`;
@@ -2069,8 +2021,6 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
       }
       finalList.push(item);
     }
-
-    console.log(`[WAHA Extractor] Extração concluída: ${finalList.length} contatos prontos.`);
 
     res.json({
       success: true,
