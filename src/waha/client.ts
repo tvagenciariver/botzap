@@ -321,6 +321,50 @@ export class WahaClient {
   }
 
   /**
+   * Obtém detalhes de um contato (nome, pushname) da WAHA
+   */
+  async getContact(contactId: string, session?: string): Promise<any | null> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    const cleanId = (typeof contactId === 'string' ? contactId : '').trim();
+    if (!cleanId) return null;
+
+    try {
+      const res = await this.client.get(`/api/${sessionName}/contacts/${cleanId}`, { timeout: 3000 });
+      return res.data || null;
+    } catch {
+      try {
+        const encId = encodeURIComponent(cleanId);
+        const res = await this.client.get(`/api/${sessionName}/contacts/${encId}`, { timeout: 3000 });
+        return res.data || null;
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  /**
+   * Obtém mensagens recentes de um chat ou grupo para captura de notifyName / pushName
+   */
+  async getChatMessages(chatId: string, limit: number = 100, session?: string): Promise<any[]> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    const cleanId = (typeof chatId === 'string' ? chatId : '').trim();
+    if (!cleanId) return [];
+
+    try {
+      const res = await this.client.get(`/api/${sessionName}/chats/${cleanId}/messages`, { params: { limit }, timeout: 5000 });
+      return Array.isArray(res.data) ? res.data : [];
+    } catch {
+      try {
+        const encId = encodeURIComponent(cleanId);
+        const res = await this.client.get(`/api/${sessionName}/chats/${encId}/messages`, { params: { limit }, timeout: 5000 });
+        return Array.isArray(res.data) ? res.data : [];
+      } catch {
+        return [];
+      }
+    }
+  }
+
+  /**
    * Helper interno para normalizar dados retornados pela WAHA (Array ou Object com IDs)
    */
   private normalizeList(data: any): any[] {

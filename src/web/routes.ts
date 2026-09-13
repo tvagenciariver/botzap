@@ -1954,9 +1954,58 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
         targetGroupIds = Object.keys(allGroupsMap);
       }
 
+      // Nível 1: Carregar agenda de contatos e chats da sessão em lote para mapear nomes reais
+      const knownNamesMap = new Map<string, string>();
+      try {
+        const [savedContacts, recentChats] = await Promise.all([
+          wahaClient.getContacts(targetSession).catch(() => []),
+          wahaClient.getChats(targetSession).catch(() => [])
+        ]);
+
+        for (const c of savedContacts) {
+          const contactName = (c.name || c.pushname || c.shortName || '').trim();
+          if (!contactName) continue;
+          if (c.number) knownNamesMap.set(c.number.replace(/\D/g, ''), contactName);
+          if (c.id) {
+            const cleanId = typeof c.id === 'string' ? c.id : (c.id._serialized || c.id.user || '');
+            if (cleanId) {
+              knownNamesMap.set(cleanId, contactName);
+              knownNamesMap.set(cleanId.replace('@c.us', '').replace('@s.whatsapp.net', ''), contactName);
+              knownNamesMap.set(cleanId.split('@')[0], contactName);
+            }
+          }
+        }
+
+        for (const ch of recentChats) {
+          const chatName = (ch.name || ch.pushname || '').trim();
+          if (!chatName) continue;
+          const chatId = typeof ch.id === 'string' ? ch.id : (ch.id?._serialized || ch.id?.user || '');
+          if (chatId) {
+            knownNamesMap.set(chatId, chatName);
+            knownNamesMap.set(chatId.replace('@c.us', '').replace('@s.whatsapp.net', ''), chatName);
+            knownNamesMap.set(chatId.split('@')[0], chatName);
+          }
+        }
+      } catch {}
+
       for (const gId of targetGroupIds) {
         const groupObj = allGroupsMap[gId] || {};
         const groupName = groupObj.subject || groupObj.name || groupObj.Name || groupObj.groupMetadata?.subject || 'Grupo';
+
+        // Nível 2: Capturar nomes de exibição (pushName / notifyName) de mensagens recentes do próprio grupo
+        const groupSenderNames = new Map<string, string>();
+        try {
+          const recentMsgs = await wahaClient.getChatMessages(gId, 100, targetSession).catch(() => []);
+          for (const m of recentMsgs) {
+            const pushName = (m._data?.notifyName || m.notifyName || m._data?.pushName || m.pushName || '').trim();
+            if (!pushName) continue;
+            const sender = m.author || m.participant || m._data?.author || m._data?.participant || (m.from && !m.from.includes('@g.us') ? m.from : '');
+            if (sender && typeof sender === 'string') {
+              groupSenderNames.set(sender, pushName);
+              groupSenderNames.set(sender.split('@')[0], pushName);
+            }
+          }
+        } catch {}
 
         // Passo 1: Verificar se os participantes JÁ vieram embutidos no objeto do grupo
         let participants: any[] = [];
@@ -1976,9 +2025,8 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
         }
 
         console.log(`[WAHA Extractor] Grupo "${groupName}" (${gId}): ${participants.length} participante(s) recebido(s).`);
-        if (participants.length > 0) {
-          console.log(`[WAHA Extractor] Amostra do 1º participante de "${groupName}":`, JSON.stringify(participants[0]));
-        }
+
+        const currentGroupRawList: { name: string; phone: string; source: string; rawId: string }[] = [];
 
         for (const p of participants) {
           let rawId = '';
@@ -1999,7 +2047,6 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
             if (resolvedPn) {
               phone = cleanPhone(resolvedPn);
             } else {
-              // Preserva o identificador @lid para que a WAHA consiga disparar
               phone = rawId.split(':')[0].trim();
             }
           } else {
@@ -2008,11 +2055,43 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
 
           if (!phone || phone.length < 8) continue;
 
+          // Se não veio com nome no participante, tenta resolver nos mapas em memória
           if (!name) {
-            name = `${defaultName} (${groupName})`;
+            name = knownNamesMap.get(phone)
+              || knownNamesMap.get(rawId)
+              || knownNamesMap.get(rawId.split('@')[0])
+              || groupSenderNames.get(rawId)
+              || groupSenderNames.get(rawId.split('@')[0])
+              || groupSenderNames.get(phone)
+              || '';
           }
 
-          rawList.push({ name, phone, source: `Grupo: ${groupName}` });
+          currentGroupRawList.push({ name, phone, source: `Grupo: ${groupName}`, rawId });
+        }
+
+        // Nível 3: Para membros sem nome, faz consulta rápida de perfil na WAHA (em lotes)
+        const missingNames = currentGroupRawList.filter(item => !item.name);
+        if (missingNames.length > 0 && missingNames.length <= 40) {
+          await Promise.all(
+            missingNames.map(async (item) => {
+              try {
+                const targetQueryId = item.rawId || item.phone;
+                const profile = await wahaClient.getContact(targetQueryId, targetSession).catch(() => null);
+                const foundName = (profile?.name || profile?.pushname || profile?.shortName || '').trim();
+                if (foundName) {
+                  item.name = foundName;
+                }
+              } catch {}
+            })
+          );
+        }
+
+        // Nível 4: Se ainda não tiver nome, usa defaultName limpo (sem poluir com o nome do grupo)
+        for (const item of currentGroupRawList) {
+          if (!item.name) {
+            item.name = defaultName;
+          }
+          rawList.push({ name: item.name, phone: item.phone, source: item.source });
         }
       }
     }
