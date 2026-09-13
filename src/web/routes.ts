@@ -1975,6 +1975,11 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
           participants = await wahaClient.getGroupParticipants(gId, targetSession).catch(() => []);
         }
 
+        console.log(`[WAHA Extractor] Grupo "${groupName}" (${gId}): ${participants.length} participante(s) recebido(s).`);
+        if (participants.length > 0) {
+          console.log(`[WAHA Extractor] Amostra do 1º participante de "${groupName}":`, JSON.stringify(participants[0]));
+        }
+
         for (const p of participants) {
           let rawId = '';
           let name = '';
@@ -1988,18 +1993,20 @@ apiRouter.post('/api/waha/extract-contacts', requireAuth, async (req: Request, r
 
           if (!rawId) continue;
 
-          // Se for LID, tenta resolver pelo lidMapper local
+          let phone = '';
           if (rawId.includes('@lid')) {
             const resolvedPn = lidMapper.getPhone(rawId) || lidMapper.getPhone(rawId.split(':')[0]);
             if (resolvedPn) {
-              rawId = resolvedPn;
+              phone = cleanPhone(resolvedPn);
             } else {
-              continue;
+              // Preserva o identificador @lid para que a WAHA consiga disparar
+              phone = rawId.split(':')[0].trim();
             }
+          } else {
+            phone = cleanPhone(rawId.replace('@c.us', '').replace('@s.whatsapp.net', ''));
           }
 
-          const phone = cleanPhone(rawId.replace('@c.us', '').replace('@s.whatsapp.net', ''));
-          if (phone.length < 10) continue;
+          if (!phone || phone.length < 8) continue;
 
           if (!name) {
             name = `${defaultName} (${groupName})`;

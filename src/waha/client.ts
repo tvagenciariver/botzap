@@ -421,12 +421,22 @@ export class WahaClient {
       return [];
     };
 
-    // Tentativa 1: Endpoint nativo oficial GET /api/{session}/groups/{groupId}/participants
+    // Tentativa 1: Endpoint v2 que resolve 'pn' (número de telefone real dos membros)
+    try {
+      const res = await this.client.get(`/api/${sessionName}/groups/${cleanId}/participants/v2`, { timeout: 15000 });
+      const list = extractParticipants(res.data);
+      if (list.length > 0) {
+        console.log(`[WAHA] ✅ ${list.length} participantes retornados pelo endpoint v2 para ${cleanId}`);
+        return list;
+      }
+    } catch {}
+
+    // Tentativa 2: Endpoint nativo oficial v1 GET /api/{session}/groups/{groupId}/participants
     try {
       const res = await this.client.get(`/api/${sessionName}/groups/${cleanId}/participants`, { timeout: 15000 });
       const list = extractParticipants(res.data);
       if (list.length > 0) {
-        console.log(`[WAHA] ✅ ${list.length} participantes retornados pelo endpoint oficial para ${cleanId}`);
+        console.log(`[WAHA] ✅ ${list.length} participantes retornados pelo endpoint oficial v1 para ${cleanId}`);
         return list;
       }
     } catch (err1: any) {

@@ -17,11 +17,12 @@ function rand(min: number, max: number): number {
 
 /** Formata numero de telefone para chatId WAHA */
 function toChatId(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  if (!digits.endsWith('@c.us')) {
-    return `${digits}@c.us`;
+  const trimmed = (phone || '').trim();
+  if (trimmed.includes('@lid') || trimmed.includes('@g.us') || trimmed.includes('@c.us')) {
+    return trimmed;
   }
-  return digits;
+  const digits = trimmed.replace(/\D/g, '');
+  return `${digits}@c.us`;
 }
 
 /** Reescreve a mensagem usando Gemini (texto humanizado, diferente por contato, com emojis e quebras de linha) */
