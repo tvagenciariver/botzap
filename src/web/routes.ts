@@ -1668,19 +1668,31 @@ apiRouter.get('/api/blast/campaigns/:id', requireAuth, (req: Request, res: Respo
   }
 });
 
-/** Cria nova campanha e enfileira os contatos */
+/** Cria nova campanha e enfileira os contatos (suporta agendamento com data/hora) */
 apiRouter.post('/api/blast/campaigns', requireAuth, (req: Request, res: Response) => {
   try {
-    const { name, agentId, baseMessage, contacts, settings } = req.body as {
+    const { name, agentId, baseMessage, contacts, settings, scheduledAt } = req.body as {
       name: string;
       agentId: string;
       baseMessage: string;
       contacts: BlastContact[];
       settings?: Partial<BlastSettings>;
+      scheduledAt?: string;
     };
 
     if (!name || !baseMessage || !contacts || contacts.length === 0) {
       return res.status(400).json({ error: 'Informe: name, baseMessage e contacts (array).' });
+    }
+
+    let isScheduled = false;
+    let validScheduledAt: string | undefined = undefined;
+    if (scheduledAt && typeof scheduledAt === 'string' && scheduledAt.trim().length > 0) {
+      const parsedDate = new Date(scheduledAt);
+      if (isNaN(parsedDate.getTime())) {
+        return res.status(400).json({ error: 'Data e hora de agendamento inválidas.' });
+      }
+      validScheduledAt = parsedDate.toISOString();
+      isScheduled = true;
     }
 
     const finalSettings: BlastSettings = {
@@ -1710,7 +1722,8 @@ apiRouter.post('/api/blast/campaigns', requireAuth, (req: Request, res: Response
       contacts,
       queue,
       settings: finalSettings,
-      status: 'idle',
+      status: isScheduled ? 'scheduled' : 'idle',
+      scheduledAt: validScheduledAt,
       createdAt: now
     };
 
@@ -1720,6 +1733,36 @@ apiRouter.post('/api/blast/campaigns', requireAuth, (req: Request, res: Response
     res.status(400).json({ error: err.message });
   }
 });
+
+/** Reagenda ou atualiza a data/hora programada de uma campanha */
+apiRouter.post('/api/blast/campaigns/:id/reschedule', requireAuth, (req: Request, res: Response) => {
+  try {
+    const campaign = blastStore.get(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
+    if (campaign.status === 'running') {
+      return res.status(400).json({ error: 'Não é possível reagendar uma campanha em andamento.' });
+    }
+
+    const { scheduledAt } = req.body as { scheduledAt?: string | null };
+    if (scheduledAt && typeof scheduledAt === 'string' && scheduledAt.trim().length > 0) {
+      const parsed = new Date(scheduledAt);
+      if (isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: 'Data e hora de agendamento inválidas.' });
+      }
+      campaign.status = 'scheduled';
+      campaign.scheduledAt = parsed.toISOString();
+    } else {
+      campaign.status = 'idle';
+      delete campaign.scheduledAt;
+    }
+
+    blastStore.save(campaign);
+    res.json({ success: true, campaign });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 
 /** Inicia ou retoma a execução de uma campanha */
 apiRouter.post('/api/blast/campaigns/:id/start', requireAuth, async (req: Request, res: Response) => {

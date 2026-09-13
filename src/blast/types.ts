@@ -1,10 +1,10 @@
-﻿/**
+/**
  * Tipos e interfaces para o módulo Disparador de Mensagem (Blast)
  */
 
 export type BlastQueueItemStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
 
-export type BlastCampaignStatus = 'idle' | 'running' | 'paused' | 'completed' | 'cancelled';
+export type BlastCampaignStatus = 'idle' | 'scheduled' | 'running' | 'paused' | 'completed' | 'cancelled';
 
 export interface BlastContact {
   name: string;
@@ -45,6 +45,8 @@ export interface BlastCampaign {
   settings: BlastSettings;
   status: BlastCampaignStatus;
   createdAt: string;
+  /** Data e hora ISO agendada para disparo automatico */
+  scheduledAt?: string;
   startedAt?: string;
   completedAt?: string;
 }

@@ -7476,9 +7476,21 @@ setupExamDropzone();
   let blastPollInterval = null;
 
   // ---- Utilitários ----
+  function formatLocalDateTime(date) {
+    const d = date ? new Date(date) : new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const year = d.getFullYear();
+    const month = pad(d.getMonth() + 1);
+    const day = pad(d.getDate());
+    const hours = pad(d.getHours());
+    const minutes = pad(d.getMinutes());
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  }
+
   function statusLabel(status) {
     const map = {
       idle: '⏸ Aguardando',
+      scheduled: '⏰ Agendada',
       running: '▶️ Enviando',
       paused: '⏸ Pausado',
       completed: '✅ Concluído',
@@ -7493,6 +7505,7 @@ setupExamDropzone();
   function statusColor(status) {
     const map = {
       idle: '#94a3b8',
+      scheduled: '#c084fc',
       running: '#60a5fa',
       paused: '#fbbf24',
       completed: '#34d399',
@@ -7542,8 +7555,11 @@ setupExamDropzone();
       const failed = c.queue.filter(q => q.status === 'failed').length;
       const total = c.queue.length;
       const color = statusColor(c.status);
+      const scheduleInfo = (c.status === 'scheduled' && c.scheduledAt)
+        ? `<div style="font-size:11px; color:#c084fc; margin-top:2px;">Previsto: ${new Date(c.scheduledAt).toLocaleString('pt-BR')}</div>`
+        : '';
       return `<tr style="cursor: pointer;" onclick="blastOpenCampaign('${c.id}')">
-        <td><strong>${escapeHtml(c.name)}</strong></td>
+        <td><strong>${escapeHtml(c.name)}</strong>${scheduleInfo}</td>
         <td>${c.contacts.length} contatos</td>
         <td><span style="color:${color}; font-weight:600;">${statusLabel(c.status)}</span></td>
         <td>${sent}/${total} enviados${failed ? ` · <span style="color:#f87171;">${failed} falha(s)</span>` : ''}</td>
@@ -7561,6 +7577,7 @@ setupExamDropzone();
       <tbody>${rows}</tbody>
     </table>`;
   }
+
 
   // ---- Abrir detalhe da campanha ----
   window.blastOpenCampaign = function (id) {
@@ -7584,7 +7601,10 @@ setupExamDropzone();
     }
   }
 
+  let blastCurrentCampaignData = null;
+
   function renderQueueDetail(campaign) {
+    blastCurrentCampaignData = campaign;
     const titleEl = document.getElementById('blast-queue-title');
     const badgeEl = document.getElementById('blast-status-badge');
     const progressEl = document.getElementById('blast-progress-text');
@@ -7605,14 +7625,32 @@ setupExamDropzone();
     const btnStart = document.getElementById('btn-blast-start');
     const btnPause = document.getElementById('btn-blast-pause');
     const btnCancel = document.getElementById('btn-blast-cancel');
-    if (btnStart) btnStart.disabled = campaign.status === 'running' || campaign.status === 'completed' || campaign.status === 'cancelled';
+    if (btnStart) {
+      btnStart.disabled = campaign.status === 'running' || campaign.status === 'completed' || campaign.status === 'cancelled';
+      btnStart.innerHTML = campaign.status === 'scheduled' ? '🚀 Disparar Agora' : '▶️ Iniciar';
+      btnStart.title = campaign.status === 'scheduled' ? 'Iniciar os envios imediatamente sem aguardar o horário agendado' : 'Iniciar envio da campanha';
+    }
     if (btnPause) btnPause.disabled = campaign.status !== 'running';
     if (btnCancel) btnCancel.disabled = campaign.status === 'completed' || campaign.status === 'cancelled';
+
+    // Banner de agendamento automático
+    const scheduledBanner = document.getElementById('blast-scheduled-banner');
+    const scheduledInfo = document.getElementById('blast-scheduled-info');
+    if (scheduledBanner && scheduledInfo) {
+      if (campaign.status === 'scheduled' && campaign.scheduledAt) {
+        scheduledBanner.style.display = 'flex';
+        const formattedDate = new Date(campaign.scheduledAt).toLocaleString('pt-BR');
+        scheduledInfo.textContent = `Disparo automático programado para: ${formattedDate}`;
+      } else {
+        scheduledBanner.style.display = 'none';
+      }
+    }
 
     // Parar polling se finalizado
     if (campaign.status === 'completed' || campaign.status === 'cancelled') {
       clearInterval(blastPollInterval);
     }
+
 
     if (!tbodyEl) return;
     if (!campaign.queue.length) {
@@ -7713,6 +7751,18 @@ setupExamDropzone();
     document.getElementById('blast-base-message').value = '';
     document.getElementById('blast-contacts-raw').value = '';
     document.getElementById('blast-contacts-preview').textContent = '';
+
+    // Reset agendamento
+    const radioNow = document.getElementById('blast-schedule-now');
+    const containerSchedule = document.getElementById('blast-schedule-datetime-container');
+    const inputSchedule = document.getElementById('blast-schedule-time');
+    if (radioNow) radioNow.checked = true;
+    if (containerSchedule) containerSchedule.style.display = 'none';
+    if (inputSchedule) {
+      inputSchedule.value = '';
+      inputSchedule.min = formatLocalDateTime(new Date());
+    }
+
     document.getElementById('modal-blast-overlay').style.display = 'flex';
   }
 
@@ -7723,6 +7773,21 @@ setupExamDropzone();
   document.getElementById('btn-blast-new')?.addEventListener('click', openBlastModal);
   document.getElementById('btn-close-blast-modal')?.addEventListener('click', closeBlastModal);
   document.getElementById('btn-blast-modal-cancel')?.addEventListener('click', closeBlastModal);
+
+  // Alternância entre disparo manual / imediato e agendamento
+  document.querySelectorAll('input[name="blast-schedule-type"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      const isLater = e.target.value === 'later';
+      const container = document.getElementById('blast-schedule-datetime-container');
+      const input = document.getElementById('blast-schedule-time');
+      if (container) container.style.display = isLater ? 'block' : 'none';
+      if (isLater && input && !input.value) {
+        // Sugere 15 minutos à frente como padrão
+        const in15Min = new Date(Date.now() + 15 * 60 * 1000);
+        input.value = formatLocalDateTime(in15Min);
+      }
+    });
+  });
 
   // Prevenir submit padrão do form se alguém apertar enter dentro dele
   document.getElementById('form-blast-create')?.addEventListener('submit', (e) => {
@@ -7754,6 +7819,23 @@ setupExamDropzone();
     if (!baseMessage) { showToast('Informe a mensagem base.', 'error'); return; }
     if (!contacts.length) { showToast('Nenhum contato válido encontrado. Verifique o formato: Nome,Telefone (um por linha)', 'error'); return; }
 
+    // Validação de agendamento se selecionado
+    let scheduledAt = null;
+    const isScheduleLater = document.getElementById('blast-schedule-later')?.checked;
+    if (isScheduleLater) {
+      const scheduleVal = document.getElementById('blast-schedule-time')?.value;
+      if (!scheduleVal) {
+        showToast('Por favor, informe a data e horário para o agendamento.', 'error');
+        return;
+      }
+      const schedDate = new Date(scheduleVal);
+      if (isNaN(schedDate.getTime())) {
+        showToast('Data ou hora de agendamento inválida.', 'error');
+        return;
+      }
+      scheduledAt = schedDate.toISOString();
+    }
+
     const settings = {
       minInterval: parseInt(document.getElementById('blast-min-interval')?.value) || 25,
       maxInterval: parseInt(document.getElementById('blast-max-interval')?.value) || 75,
@@ -7770,14 +7852,19 @@ setupExamDropzone();
       const res = await fetchWithAuth('/api/blast/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, agentId, baseMessage, contacts, settings })
+        body: JSON.stringify({ name, agentId, baseMessage, contacts, settings, scheduledAt })
       });
       const data = await res.json();
       if (!res.ok) { 
         showToast(data.error || 'Erro ao criar campanha', 'error'); 
         return; 
       }
-      showToast(`Campanha "${name}" criada com ${contacts.length} contatos!`, 'success');
+      if (scheduledAt) {
+        const schedFormatted = new Date(scheduledAt).toLocaleString('pt-BR');
+        showToast(`⏰ Campanha "${name}" agendada com sucesso para ${schedFormatted}!`, 'success');
+      } else {
+        showToast(`Campanha "${name}" criada com ${contacts.length} contatos!`, 'success');
+      }
       closeBlastModal();
       loadBlastCampaigns();
       // Abrir automaticamente o detalhe da fila
@@ -7792,6 +7879,102 @@ setupExamDropzone();
       }
     }
   });
+
+  // ---- Modal Reagendar Envio ----
+  function openRescheduleModal() {
+    if (!blastCurrentCampaignId) return;
+    const modal = document.getElementById('modal-blast-reschedule-overlay');
+    const input = document.getElementById('blast-reschedule-input');
+    if (input) {
+      input.min = formatLocalDateTime(new Date());
+      if (blastCurrentCampaignData && blastCurrentCampaignData.scheduledAt) {
+        input.value = formatLocalDateTime(new Date(blastCurrentCampaignData.scheduledAt));
+      } else {
+        // Sugere 15 minutos à frente como padrão
+        input.value = formatLocalDateTime(new Date(Date.now() + 15 * 60 * 1000));
+      }
+    }
+    if (modal) modal.style.display = 'flex';
+  }
+
+  function closeRescheduleModal() {
+    const modal = document.getElementById('modal-blast-reschedule-overlay');
+    if (modal) modal.style.display = 'none';
+  }
+
+  document.getElementById('btn-blast-open-reschedule')?.addEventListener('click', openRescheduleModal);
+  document.getElementById('btn-close-reschedule-modal')?.addEventListener('click', closeRescheduleModal);
+  document.getElementById('btn-close-reschedule-modal-cancel')?.addEventListener('click', closeRescheduleModal);
+
+  // Salvar novo horário reagendado
+  document.getElementById('btn-blast-save-reschedule')?.addEventListener('click', async () => {
+    if (!blastCurrentCampaignId) return;
+    const input = document.getElementById('blast-reschedule-input');
+    const val = input?.value;
+    if (!val) {
+      showToast('Selecione uma data e hora válidas.', 'error');
+      return;
+    }
+    const d = new Date(val);
+    if (isNaN(d.getTime())) {
+      showToast('Data ou hora inválida.', 'error');
+      return;
+    }
+
+    const btnSave = document.getElementById('btn-blast-save-reschedule');
+    if (btnSave) {
+      btnSave.disabled = true;
+      btnSave.textContent = 'Salvando...';
+    }
+
+    try {
+      const res = await fetchWithAuth(`/api/blast/campaigns/${blastCurrentCampaignId}/reschedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledAt: d.toISOString() })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Erro ao reagendar campanha', 'error');
+        return;
+      }
+      showToast(`⏰ Campanha reagendada para ${d.toLocaleString('pt-BR')}!`, 'success');
+      closeRescheduleModal();
+      loadBlastQueueDetail();
+    } catch (err) {
+      showToast('Erro ao reagendar: ' + (err.message || err), 'error');
+    } finally {
+      if (btnSave) {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Salvar Horário';
+      }
+    }
+  });
+
+  // Remover agendamento (voltar para início manual)
+  document.getElementById('btn-blast-remove-schedule')?.addEventListener('click', async () => {
+    if (!blastCurrentCampaignId) return;
+    if (!confirm('Deseja remover o agendamento automático? A campanha ficará aguardando início manual.')) return;
+
+    try {
+      const res = await fetchWithAuth(`/api/blast/campaigns/${blastCurrentCampaignId}/reschedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledAt: null })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Erro ao remover agendamento', 'error');
+        return;
+      }
+      showToast('Agendamento cancelado. A campanha agora pode ser iniciada manualmente.', 'info');
+      closeRescheduleModal();
+      loadBlastQueueDetail();
+    } catch (err) {
+      showToast('Erro ao remover agendamento: ' + (err.message || err), 'error');
+    }
+  });
+
 
   // ============================================================================
   // EXTRATOR DE CONTATOS & GRUPOS DA WAHA (UI)

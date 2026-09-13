@@ -8,6 +8,7 @@ import { apiRouter } from './web/routes.js';
 import { wahaClient } from './waha/client.js';
 import { geminiService } from './gemini/client.js';
 import { reminderScheduler } from './appointments/reminder-scheduler.js';
+import { blastScheduler } from './blast/blast-scheduler.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,6 +60,9 @@ app.listen(env.port, async () => {
 
   // Inicializa o agendador automático em segundo plano para lembretes D-1
   reminderScheduler.start();
+
+  // Inicializa o agendador automático para campanhas de disparo agendadas
+  blastScheduler.start();
 
   // Teste de conexão não-bloqueante com a WAHA
 
