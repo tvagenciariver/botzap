@@ -172,6 +172,8 @@ function setActiveCompany(companyId, reload = true) {
       loadExams();
     } else if (activeTab === 'chats' && typeof loadChats === 'function') {
       loadChats();
+    } else if (activeTab === 'blast') {
+      if (typeof window.loadBlastCampaigns === 'function') window.loadBlastCampaigns();
     } else if (activeTab === 'logs' && typeof loadLogs === 'function') {
       loadLogs();
     } else if (activeTab === 'agents' && typeof renderAgentsGrid === 'function') {
@@ -7535,11 +7537,35 @@ setupExamDropzone();
     try {
       const res = await fetchWithAuth('/api/blast/campaigns');
       const data = await res.json();
-      renderCampaignList(data.campaigns || []);
+      let campaigns = data.campaigns || [];
+
+      const effectiveCompany = typeof getEffectiveActiveCompanyId === 'function'
+        ? getEffectiveActiveCompanyId()
+        : (currentActiveCompanyId || 'all');
+      const isAdmin = currentUser?.role === 'admin' || currentUser?.username === 'admin';
+      const canSeeAll = isAdmin && effectiveCompany === 'all';
+
+      if (!canSeeAll && effectiveCompany !== 'all') {
+        const agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+          ? allAgents
+          : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+        const activeAg = agents.find(a => a.id === effectiveCompany);
+        const isDefaultAg = activeAg?.isDefault || effectiveCompany === 'default';
+
+        campaigns = campaigns.filter(c => {
+          if (c.agentId === effectiveCompany) return true;
+          if (isDefaultAg && (!c.agentId || c.agentId === 'default')) return true;
+          return false;
+        });
+      }
+
+      renderCampaignList(campaigns);
     } catch (err) {
       console.error('[Blast] Erro ao carregar campanhas:', err);
     }
   }
+  window.loadBlastCampaigns = loadBlastCampaigns;
+
 
   function renderCampaignList(campaigns) {
     const listEl = document.getElementById('blast-campaigns-list');
@@ -7735,18 +7761,87 @@ setupExamDropzone();
   // ---- Botão Refresh ----
   document.getElementById('btn-blast-refresh')?.addEventListener('click', loadBlastCampaigns);
 
-  // ---- Modal Nova Campanha ----
-  function openBlastModal() {
-    // Preencher select de agentes
+  // Preencher e restringir select de agentes conforme a empresa ativa
+  async function populateBlastAgentSelect() {
     const agentSel = document.getElementById('blast-agent-select');
-    if (agentSel) {
-      const agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
-        ? allAgents
-        : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
-      agentSel.innerHTML = agents.length
-        ? agents.map(a => `<option value="${a.id}">${escapeHtml(a.companyName || a.name)} — ${a.wahaSession || 'default'}</option>`).join('')
-        : '<option value="default">Agente Padrão (default)</option>';
+    if (!agentSel) return;
+
+    let agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+      ? allAgents
+      : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+
+    if (!agents.length) {
+      try {
+        const res = await fetchWithAuth('/api/agents');
+        if (res.ok) {
+          const data = await res.json();
+          allAgents = data.agents || [];
+          allAgentsCache = allAgents;
+          agents = allAgents;
+        }
+      } catch (err) {
+        console.warn('[Blast] Erro ao carregar agentes para seleção:', err);
+      }
     }
+
+    const effectiveCompany = typeof getEffectiveActiveCompanyId === 'function'
+      ? getEffectiveActiveCompanyId()
+      : (currentActiveCompanyId || 'all');
+
+    const isAdmin = currentUser?.role === 'admin' || currentUser?.username === 'admin';
+    const canSeeAll = isAdmin && effectiveCompany === 'all';
+
+    let eligibleAgents = agents;
+
+    if (!canSeeAll) {
+      if (effectiveCompany !== 'all') {
+        eligibleAgents = agents.filter(a => a.id === effectiveCompany || (a.companyId && a.companyId === effectiveCompany));
+      } else if (currentUser?.assignedAgentId && currentUser.assignedAgentId !== '*') {
+        eligibleAgents = agents.filter(a => a.id === currentUser.assignedAgentId);
+      }
+    }
+
+    const helpEl = document.getElementById('blast-agent-help');
+
+    if (eligibleAgents.length > 0) {
+      agentSel.innerHTML = eligibleAgents.map(a => {
+        const comp = a.companyName ? `${a.companyName} (${a.name})` : a.name;
+        return `<option value="${a.id}">🏢 ${escapeHtml(comp)} — Sessão: ${escapeHtml(a.wahaSession || 'default')}</option>`;
+      }).join('');
+      agentSel.value = eligibleAgents[0].id;
+
+      if (helpEl) {
+        if (!canSeeAll) {
+          const cName = eligibleAgents[0].companyName || eligibleAgents[0].name;
+          helpEl.innerHTML = `🏢 Vinculado à empresa ativa: <strong>${escapeHtml(cName)}</strong> (Sessão: <code>${escapeHtml(eligibleAgents[0].wahaSession || 'default')}</code>)`;
+        } else {
+          helpEl.innerHTML = `🌐 Visão Global (Admin): selecione qual agente/empresa realizará os disparos desta campanha.`;
+        }
+      }
+    } else {
+      if (effectiveCompany !== 'all') {
+        const found = agents.find(a => a.id === effectiveCompany);
+        const cName = found ? (found.companyName || found.name) : 'Empresa Selecionada';
+        agentSel.innerHTML = `<option value="${effectiveCompany}">🏢 ${escapeHtml(cName)}</option>`;
+        agentSel.value = effectiveCompany;
+        if (helpEl) {
+          helpEl.innerHTML = `🏢 Vinculado à empresa ativa: <strong>${escapeHtml(cName)}</strong>`;
+        }
+      } else {
+        agentSel.innerHTML = '<option value="default">Agente Padrão (default)</option>';
+        agentSel.value = 'default';
+        if (helpEl) {
+          helpEl.textContent = 'O disparo será feito pelo número WhatsApp vinculado a este agente.';
+        }
+      }
+    }
+  }
+  window.populateBlastAgentSelect = populateBlastAgentSelect;
+
+  // ---- Modal Nova Campanha ----
+  async function openBlastModal() {
+    await populateBlastAgentSelect();
+
     document.getElementById('blast-name').value = '';
     document.getElementById('blast-base-message').value = '';
     document.getElementById('blast-contacts-raw').value = '';
@@ -7765,6 +7860,7 @@ setupExamDropzone();
 
     document.getElementById('modal-blast-overlay').style.display = 'flex';
   }
+
 
   function closeBlastModal() {
     document.getElementById('modal-blast-overlay').style.display = 'none';
