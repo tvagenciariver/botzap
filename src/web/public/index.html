@@ -18,7 +18,7 @@
         <div class="brand-text">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h1>BotZap</h1>
-            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.7.5</span>
+            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.7.6</span>
           </div>
 
           <span>Orquestrador IA</span>
@@ -102,7 +102,7 @@
           <span class="nav-icon">🤖</span> Agentes & Clientes
         </button>
         <button class="nav-btn" data-tab="prompts" data-admin-only="true">
-          <span class="nav-icon">⚙️</span> Agente Padrão & Prompts
+          <span class="nav-icon">⚙️</span> <span id="nav-prompts-label">Agente Padrão & Prompts</span>
         </button>
         <button class="nav-btn" data-tab="schedule" data-admin-only="true">
           <span class="nav-icon">🕒</span> Horário Comercial
@@ -1008,8 +1008,15 @@
       <section class="tab-pane" id="pane-prompts">
         <div class="card">
           <div class="card-header">
-            <h3>⚙️ Configuração do Agente e Inteligência Artificial</h3>
-            <p>Altere o comportamento, tom de voz, regras da empresa e selecione entre Google Gemini ou OpenAI.</p>
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+              <div>
+                <h3 id="prompts-header-title" style="margin: 0;">⚙️ Configuração do Agente e Inteligência Artificial</h3>
+                <p id="prompts-header-desc" style="margin: 4px 0 0 0; font-size: 13px; color: var(--text-muted);">Altere o comportamento, tom de voz, regras da empresa e selecione entre Google Gemini ou OpenAI.</p>
+              </div>
+              <div id="prompts-company-badge" style="padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; border: 1px solid rgba(99, 102, 241, 0.3); background: rgba(99, 102, 241, 0.15); color: #818cf8; display: inline-flex; align-items: center; gap: 6px;">
+                🌐 Empresa: <strong>Todas as Empresas (Padrão Global)</strong>
+              </div>
+            </div>
           </div>
           <div class="card-body">
             <form id="config-form">

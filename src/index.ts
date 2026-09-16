@@ -48,7 +48,7 @@ app.get('*', (_req, res) => {
 app.listen(env.port, async () => {
   const config = loadBotConfig();
   console.log('\n======================================================');
-  console.log('🤖 BotZap v2.7.5 [Build 2026-09-16-R5-PHONE-ROUTING-CLEAN-NAME]');
+  console.log('🤖 BotZap v2.7.6 [Build 2026-09-16-R6-PROMPTS-MULTITENANT]');
   console.log('   Orquestrador de Agentes IA (WAHA + Gemini Flash)');
   console.log('======================================================');
   console.log(`🌐 Servidor rodando em: http://localhost:${env.port}`);

@@ -323,8 +323,8 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.7.5',
-    build: '2026-09-16-R5-PHONE-ROUTING-CLEAN-NAME',
+    version: '2.7.6',
+    build: '2026-09-16-R6-PROMPTS-MULTITENANT',
     buildDate: '2026.09.16',
     timestamp: new Date().toISOString(),
     agentsCount: {
@@ -641,23 +641,67 @@ apiRouter.post('/api/admin/command', requireAdmin, async (req: Request, res: Res
 /**
  * 4. Obter configurações do bot
  */
-apiRouter.get('/api/config', requireAuth, (_req: Request, res: Response) => {
-  const config = loadBotConfig();
-  const { adminPassword: _hiddenPass, ...safeConfig } = config;
+apiRouter.get('/api/config', requireAuth, (req: Request, res: Response) => {
+  const requestedAgentId = typeof req.query.agentId === 'string' ? req.query.agentId.trim() : '';
+  const globalConfig = loadBotConfig();
+  const { adminPassword: _hiddenPass, ...safeGlobalConfig } = globalConfig;
+
+  let targetConfig: any = { ...safeGlobalConfig };
+  let matchedAgent: AgentProfile | null | undefined;
+
+  if (requestedAgentId && requestedAgentId !== 'all' && requestedAgentId !== '*') {
+    matchedAgent = agentManager.getAgent(requestedAgentId);
+  }
+  if (!matchedAgent && (!requestedAgentId || requestedAgentId === 'all' || requestedAgentId === '*' || requestedAgentId === 'default')) {
+    matchedAgent = agentManager.getDefaultAgent();
+  }
+
+  if (matchedAgent) {
+    targetConfig = {
+      ...safeGlobalConfig,
+      botName: matchedAgent.name || safeGlobalConfig.botName,
+      companyName: matchedAgent.companyName || safeGlobalConfig.companyName,
+      systemInstruction: matchedAgent.systemInstruction !== undefined ? matchedAgent.systemInstruction : safeGlobalConfig.systemInstruction,
+      businessInfo: matchedAgent.businessInfo !== undefined ? matchedAgent.businessInfo : safeGlobalConfig.businessInfo,
+      handoffKeywords: matchedAgent.handoffKeywords || safeGlobalConfig.handoffKeywords || [],
+      handoffMessage: matchedAgent.handoffMessage !== undefined ? matchedAgent.handoffMessage : safeGlobalConfig.handoffMessage,
+      mediaHandoffMessage: matchedAgent.mediaHandoffMessage !== undefined ? matchedAgent.mediaHandoffMessage : safeGlobalConfig.mediaHandoffMessage,
+      debounceSeconds: matchedAgent.debounceSeconds ?? safeGlobalConfig.debounceSeconds,
+      pauseDurationHours: matchedAgent.pauseDurationHours ?? safeGlobalConfig.pauseDurationHours,
+      pauseDurationMinutes: matchedAgent.pauseDurationMinutes ?? safeGlobalConfig.pauseDurationMinutes,
+      enableTypingSimulation: matchedAgent.enableTypingSimulation ?? safeGlobalConfig.enableTypingSimulation,
+      enableSendSeen: matchedAgent.enableSendSeen ?? safeGlobalConfig.enableSendSeen,
+      enableAudioTranscription: matchedAgent.enableAudioTranscription ?? safeGlobalConfig.enableAudioTranscription,
+      llmProvider: matchedAgent.llmProvider || safeGlobalConfig.llmProvider || 'gemini',
+      model: matchedAgent.model || safeGlobalConfig.model || 'gemini-2.5-flash',
+      openaiModel: matchedAgent.openaiModel || safeGlobalConfig.openaiModel || 'gpt-4o-mini',
+      temperature: matchedAgent.temperature ?? safeGlobalConfig.temperature ?? 0.4,
+      phoneNumber: matchedAgent.phoneNumber || '',
+      wahaSession: matchedAgent.wahaSession || '*',
+      isDefault: !!matchedAgent.isDefault,
+      agentId: matchedAgent.id
+    };
+
+    const effectiveGeminiKey = matchedAgent.geminiApiKey || safeGlobalConfig.geminiApiKey || '';
+    const effectiveOpenAIKey = matchedAgent.openaiApiKey || safeGlobalConfig.openaiApiKey || '';
+
+    targetConfig.geminiApiKey = effectiveGeminiKey ? '••••••••' + effectiveGeminiKey.slice(-4) : '';
+    targetConfig.openaiApiKey = effectiveOpenAIKey ? '••••••••' + effectiveOpenAIKey.slice(-4) : '';
+  } else {
+    targetConfig.geminiApiKey = safeGlobalConfig.geminiApiKey ? '••••••••' + safeGlobalConfig.geminiApiKey.slice(-4) : '';
+    targetConfig.openaiApiKey = safeGlobalConfig.openaiApiKey ? '••••••••' + safeGlobalConfig.openaiApiKey.slice(-4) : '';
+  }
 
   res.json({
-    config: {
-      ...safeConfig,
-      geminiApiKey: safeConfig.geminiApiKey ? '••••••••' + safeConfig.geminiApiKey.slice(-4) : '',
-      openaiApiKey: safeConfig.openaiApiKey ? '••••••••' + safeConfig.openaiApiKey.slice(-4) : ''
-    },
+    config: targetConfig,
+    agent: matchedAgent ? sanitizeAgentProfile(matchedAgent) : null,
     env: {
       port: env.port,
       wahaBaseUrl: env.wahaBaseUrl,
       wahaSession: env.wahaSession,
       geminiConfigured: geminiService.isConfigured(),
       openaiConfigured: openAIService.isConfigured(),
-      llmProvider: env.llmProvider,
+      llmProvider: matchedAgent?.llmProvider || env.llmProvider,
       webhookPublicUrl: env.webhookPublicUrl
     }
   });
@@ -668,7 +712,15 @@ apiRouter.get('/api/config', requireAuth, (_req: Request, res: Response) => {
  */
 apiRouter.post('/api/config', requireAdmin, (req: Request, res: Response) => {
   try {
-    const { apiKey, openaiApiKey, adminPassword, ...botSettings } = req.body;
+    const requestedAgentId = (typeof req.query.agentId === 'string' && req.query.agentId.trim())
+      ? req.query.agentId.trim()
+      : (typeof req.body.agentId === 'string' ? req.body.agentId.trim() : '');
+
+    const targetAgentId = (requestedAgentId && requestedAgentId !== 'all' && requestedAgentId !== '*')
+      ? requestedAgentId
+      : 'default';
+
+    const { apiKey, openaiApiKey, adminPassword, agentId: _discardId, ...botSettings } = req.body;
 
     if (apiKey && typeof apiKey === 'string' && apiKey.trim() !== '') {
       const cleanKey = apiKey.trim();
@@ -692,33 +744,91 @@ apiRouter.post('/api/config', requireAdmin, (req: Request, res: Response) => {
       updateEnvFile('LLM_PROVIDER', botSettings.llmProvider);
     }
 
-    if (adminPassword && typeof adminPassword === 'string' && adminPassword.trim() !== '') {
-      botSettings.adminPassword = adminPassword.trim();
-      updateEnvFile('ADMIN_PASSWORD', adminPassword.trim());
+    // Atualiza o perfil específico do agente no AgentManager
+    const targetAgent = agentManager.getAgent(targetAgentId) || agentManager.getDefaultAgent();
+    let updatedAgent: AgentProfile | undefined;
+
+    if (targetAgent) {
+      const agentUpdates: Partial<AgentProfile> = {
+        name: botSettings.botName || targetAgent.name,
+        companyName: botSettings.companyName || targetAgent.companyName,
+        llmProvider: botSettings.llmProvider || targetAgent.llmProvider,
+        model: botSettings.model || targetAgent.model,
+        openaiModel: botSettings.openaiModel || targetAgent.openaiModel,
+        temperature: typeof botSettings.temperature === 'number' ? botSettings.temperature : targetAgent.temperature,
+        systemInstruction: botSettings.systemInstruction !== undefined ? botSettings.systemInstruction : targetAgent.systemInstruction,
+        businessInfo: botSettings.businessInfo !== undefined ? botSettings.businessInfo : targetAgent.businessInfo,
+        handoffKeywords: botSettings.handoffKeywords || targetAgent.handoffKeywords,
+        handoffMessage: botSettings.handoffMessage !== undefined ? botSettings.handoffMessage : targetAgent.handoffMessage,
+        debounceSeconds: typeof botSettings.debounceSeconds === 'number' ? botSettings.debounceSeconds : targetAgent.debounceSeconds,
+        pauseDurationHours: typeof botSettings.pauseDurationHours === 'number' ? botSettings.pauseDurationHours : targetAgent.pauseDurationHours,
+        pauseDurationMinutes: typeof botSettings.pauseDurationMinutes === 'number' ? botSettings.pauseDurationMinutes : targetAgent.pauseDurationMinutes,
+        enableTypingSimulation: botSettings.enableTypingSimulation !== undefined ? !!botSettings.enableTypingSimulation : targetAgent.enableTypingSimulation,
+        enableSendSeen: botSettings.enableSendSeen !== undefined ? !!botSettings.enableSendSeen : targetAgent.enableSendSeen,
+      };
+
+      if (botSettings.mediaHandoffMessage !== undefined) {
+        agentUpdates.mediaHandoffMessage = botSettings.mediaHandoffMessage;
+      }
+      if (botSettings.enableAudioTranscription !== undefined) {
+        agentUpdates.enableAudioTranscription = !!botSettings.enableAudioTranscription;
+      }
+      if (botSettings.geminiApiKey) {
+        agentUpdates.geminiApiKey = botSettings.geminiApiKey;
+      }
+      if (botSettings.openaiApiKey) {
+        agentUpdates.openaiApiKey = botSettings.openaiApiKey;
+      }
+
+      updatedAgent = agentManager.updateAgent(targetAgent.id, agentUpdates);
     }
 
-    if (botSettings.adminUser && typeof botSettings.adminUser === 'string') {
-      botSettings.adminUser = botSettings.adminUser.trim();
-      updateEnvFile('ADMIN_USER', botSettings.adminUser);
+    // Se o agente alvo for o default ou 'default', ou global, persiste também no bot_config.json
+    let safeUpdated: any;
+    if (!targetAgent || targetAgent.isDefault || targetAgent.id === 'default') {
+      if (adminPassword && typeof adminPassword === 'string' && adminPassword.trim() !== '') {
+        botSettings.adminPassword = adminPassword.trim();
+        updateEnvFile('ADMIN_PASSWORD', adminPassword.trim());
+      }
+
+      if (botSettings.adminUser && typeof botSettings.adminUser === 'string') {
+        botSettings.adminUser = botSettings.adminUser.trim();
+        updateEnvFile('ADMIN_USER', botSettings.adminUser);
+      }
+
+      if (botSettings.wahaBaseUrl) {
+        updateEnvFile('WAHA_BASE_URL', botSettings.wahaBaseUrl.trim());
+      }
+      if (botSettings.wahaApiKey !== undefined) {
+        updateEnvFile('WAHA_API_KEY', botSettings.wahaApiKey.trim());
+      }
+      if (botSettings.wahaSession) {
+        updateEnvFile('WAHA_SESSION', botSettings.wahaSession.trim());
+      }
+      if (botSettings.webhookPublicUrl) {
+        updateEnvFile('WEBHOOK_PUBLIC_URL', botSettings.webhookPublicUrl.trim());
+      }
+
+      const updated = saveBotConfig(botSettings);
+      wahaClient.reloadConfig();
+      const { adminPassword: _hiddenPass, ...cleanConfig } = updated;
+      safeUpdated = cleanConfig;
+    } else {
+      // Retorna a config atualizada do agente específico
+      safeUpdated = {
+        ...botSettings,
+        botName: updatedAgent?.name || botSettings.botName,
+        companyName: updatedAgent?.companyName || botSettings.companyName,
+        agentId: targetAgent.id,
+        isDefault: !!updatedAgent?.isDefault
+      };
     }
 
-    if (botSettings.wahaBaseUrl) {
-      updateEnvFile('WAHA_BASE_URL', botSettings.wahaBaseUrl.trim());
-    }
-    if (botSettings.wahaApiKey !== undefined) {
-      updateEnvFile('WAHA_API_KEY', botSettings.wahaApiKey.trim());
-    }
-    if (botSettings.wahaSession) {
-      updateEnvFile('WAHA_SESSION', botSettings.wahaSession.trim());
-    }
-    if (botSettings.webhookPublicUrl) {
-      updateEnvFile('WEBHOOK_PUBLIC_URL', botSettings.webhookPublicUrl.trim());
-    }
-
-    const updated = saveBotConfig(botSettings);
-    wahaClient.reloadConfig();
-    const { adminPassword: _hiddenPass, ...safeUpdated } = updated;
-    res.json({ success: true, config: safeUpdated });
+    res.json({
+      success: true,
+      config: safeUpdated,
+      agent: updatedAgent ? sanitizeAgentProfile(updatedAgent) : (targetAgent ? sanitizeAgentProfile(targetAgent) : null)
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

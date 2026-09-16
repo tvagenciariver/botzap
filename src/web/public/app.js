@@ -85,6 +85,42 @@ function updateScheduleCompanyDisplay(effectiveCompany, agentInfo = null) {
   }
 }
 
+function updatePromptsCompanyDisplay(effectiveCompany, agentInfo = null) {
+  const badgeEl = document.getElementById('prompts-company-badge');
+  const headerTitle = document.getElementById('prompts-header-title');
+  const headerDesc = document.getElementById('prompts-header-desc');
+  const navLabel = document.getElementById('nav-prompts-label');
+
+  const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+    ? allAgents
+    : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+  const agent = agentInfo || agentsList.find(a => a.id === effectiveCompany);
+
+  if (effectiveCompany === 'all' || !agent) {
+    if (badgeEl) {
+      badgeEl.innerHTML = '🌐 Empresa: <strong>Todas as Empresas (Padrão Global)</strong>';
+      badgeEl.style.background = 'rgba(99, 102, 241, 0.15)';
+      badgeEl.style.color = '#818cf8';
+      badgeEl.style.borderColor = 'rgba(99, 102, 241, 0.3)';
+    }
+    if (headerTitle) headerTitle.textContent = '⚙️ Configuração Geral & Agente Padrão';
+    if (headerDesc) headerDesc.textContent = 'Altere o comportamento, tom de voz, regras da empresa e selecione entre Google Gemini ou OpenAI.';
+    if (navLabel) navLabel.textContent = 'Agente Padrão & Prompts';
+  } else {
+    const compName = agent.companyName || agent.name;
+    const botName = agent.name;
+    if (badgeEl) {
+      badgeEl.innerHTML = `🏢 Empresa: <strong>${escapeHtml(compName)}</strong> (Bot: ${escapeHtml(botName)})`;
+      badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
+      badgeEl.style.color = '#34d399';
+      badgeEl.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+    }
+    if (headerTitle) headerTitle.textContent = `⚙️ Configuração do Agente: ${compName} (${botName})`;
+    if (headerDesc) headerDesc.textContent = `Você está visualizando e editando as diretrizes, tom de voz e IA exclusivos da empresa "${compName}".`;
+    if (navLabel) navLabel.textContent = `Prompts (${compName})`;
+  }
+}
+
 function setActiveCompany(companyId, reload = true) {
   // Se for atendente vinculado a uma empresa específica, nunca altera o ID
   if (currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*') {
@@ -152,8 +188,9 @@ function setActiveCompany(companyId, reload = true) {
     }
   }
 
-  // 6. Atualiza badge e banner do Horário Comercial
+  // 6. Atualiza badge e banner do Horário Comercial e da aba Prompts
   updateScheduleCompanyDisplay(effectiveCompany);
+  updatePromptsCompanyDisplay(effectiveCompany);
 
   // 7. Recarrega dados da view ativa se solicitado
   if (reload) {
@@ -164,7 +201,7 @@ function setActiveCompany(companyId, reload = true) {
       if (typeof loadSchedule === 'function') loadSchedule();
       if (typeof loadHolidays === 'function') loadHolidays();
     } else if (activeTab === 'prompts') {
-      if (typeof loadConfig === 'function') loadConfig();
+      if (typeof loadConfig === 'function') loadConfig(effectiveCompany);
       if (typeof loadHolidays === 'function') loadHolidays();
     } else if (activeTab === 'appointments' && typeof loadAppointments === 'function') {
       loadAppointments();
@@ -560,7 +597,9 @@ function switchToTab(targetTab) {
     if (targetTab === 'chats') loadChats();
     if (targetTab === 'logs' && currentUser?.role === 'admin') loadLogs();
     if (targetTab === 'prompts' && currentUser?.role === 'admin') {
-      loadConfig();
+      const effComp = getEffectiveActiveCompanyId();
+      updatePromptsCompanyDisplay(effComp);
+      loadConfig(effComp);
       loadHolidays();
     }
     if (targetTab === 'schedule' && currentUser?.role === 'admin') {
@@ -872,12 +911,19 @@ document.getElementById('btn-test-openai')?.addEventListener('click', async () =
   }
 });
 
-async function loadConfig() {
+async function loadConfig(targetAgentId) {
   if (!getAuthToken()) return;
   try {
-    const res = await fetchWithAuth('/api/config');
+    const effectiveCompany = targetAgentId || getEffectiveActiveCompanyId();
+    const url = (effectiveCompany && effectiveCompany !== 'all' && effectiveCompany !== '*')
+      ? `/api/config?agentId=${encodeURIComponent(effectiveCompany)}`
+      : '/api/config';
+
+    const res = await fetchWithAuth(url);
     const data = await res.json();
     const cfg = data.config;
+
+    updatePromptsCompanyDisplay(effectiveCompany, data.agent);
 
     document.getElementById('cfg-botName').value = cfg.botName || '';
     document.getElementById('cfg-companyName').value = cfg.companyName || '';
@@ -889,16 +935,14 @@ async function loadConfig() {
     // Gemini
     document.getElementById('cfg-model').value = cfg.model || 'gemini-flash-lite-latest';
     document.getElementById('cfg-temperature').value = cfg.temperature ?? 0.4;
-    if (cfg.geminiApiKey) {
-      document.getElementById('cfg-apiKey').placeholder = cfg.geminiApiKey;
-    }
+    document.getElementById('cfg-apiKey').value = '';
+    document.getElementById('cfg-apiKey').placeholder = cfg.geminiApiKey || 'Chave do Gemini (deixe em branco para manter)';
 
     // OpenAI
     document.getElementById('cfg-openaiModel').value = cfg.openaiModel || 'gpt-4o-mini';
     document.getElementById('cfg-openai-temperature').value = cfg.temperature ?? 0.4;
-    if (cfg.openaiApiKey) {
-      document.getElementById('cfg-openaiApiKey').placeholder = cfg.openaiApiKey;
-    }
+    document.getElementById('cfg-openaiApiKey').value = '';
+    document.getElementById('cfg-openaiApiKey').placeholder = cfg.openaiApiKey || 'Chave da OpenAI (deixe em branco para manter)';
 
     document.getElementById('cfg-systemInstruction').value = cfg.systemInstruction || '';
     document.getElementById('cfg-businessInfo').value = cfg.businessInfo || '';
@@ -916,7 +960,9 @@ async function loadConfig() {
       document.getElementById('cfg-transcribe-audio').checked = !!cfg.enableAudioTranscription;
     }
 
-    document.getElementById('sim-bot-name').textContent = cfg.botName || 'Assistente Virtual';
+    if (document.getElementById('sim-bot-name')) {
+      document.getElementById('sim-bot-name').textContent = cfg.botName || 'Assistente Virtual';
+    }
   } catch (err) {
     console.error('Erro ao carregar configurações:', err);
   }
@@ -937,7 +983,13 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
     ? parseFloat(document.getElementById('cfg-openai-temperature').value)
     : parseFloat(document.getElementById('cfg-temperature').value);
 
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const url = (effectiveCompany && effectiveCompany !== 'all' && effectiveCompany !== '*')
+    ? `/api/config?agentId=${encodeURIComponent(effectiveCompany)}`
+    : '/api/config';
+
   const payload = {
+    agentId: (effectiveCompany && effectiveCompany !== 'all' && effectiveCompany !== '*') ? effectiveCompany : 'default',
     botName: document.getElementById('cfg-botName').value,
     companyName: document.getElementById('cfg-companyName').value,
     llmProvider: selectedProvider,
@@ -960,7 +1012,7 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
   };
 
   try {
-    const res = await fetchWithAuth('/api/config', {
+    const res = await fetchWithAuth(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -972,13 +1024,17 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
       feedback.className = 'feedback-msg text-green';
       document.getElementById('cfg-apiKey').value = '';
       document.getElementById('cfg-openaiApiKey').value = '';
-      if (data.config.openaiApiKey) {
+      if (data.config?.openaiApiKey) {
         document.getElementById('cfg-openaiApiKey').placeholder = data.config.openaiApiKey;
       }
-      if (data.config.geminiApiKey) {
+      if (data.config?.geminiApiKey) {
         document.getElementById('cfg-apiKey').placeholder = data.config.geminiApiKey;
       }
       showToast('Configurações de IA salvas com sucesso!', 'success');
+      if (typeof loadAgents === 'function') {
+        loadAgents().catch(() => {});
+      }
+      updatePromptsCompanyDisplay(effectiveCompany, data.agent);
       checkStatus();
       setTimeout(() => { feedback.textContent = ''; }, 3500);
     } else {
