@@ -4,6 +4,8 @@ import { notificationService, matchPhoneOrChatId } from '../../appointments/noti
 import { partnerManager } from '../../appointments/partner-manager.js';
 import { Specialist, ServiceItem, Appointment, Partner } from '../../appointments/types.js';
 import { agentManager } from '../../config/agent-manager.js';
+import { lidMapper } from '../../appointments/phone-utils.js';
+import { pendingReminderTracker } from '../../appointments/pending-reminder-tracker.js';
 
 interface BookingSessionState {
   step: 'select_referral' | 'select_partner' | 'select_specialist' | 'select_service' | 'select_date' | 'select_slot' | 'confirm_name' | 'confirm_phone' | 'confirm_cancellation';
@@ -120,7 +122,48 @@ export class BookingAgent implements IAgent {
   /**
    * Localiza agendamento pendente de confirmação ou cancelamento por resposta a lembrete
    */
-  public findReminderAppointment(chatId: string, agentId?: string): Appointment | undefined {
+  public findReminderAppointment(
+    chatIdOrContext: string | AgentContext,
+    fallbackAgentId?: string
+  ): Appointment | undefined {
+    let chatId = '';
+    let agentId = fallbackAgentId;
+    let contactName: string | undefined;
+    let session: string | undefined;
+    let quotedMessageId: string | undefined;
+
+    if (typeof chatIdOrContext === 'string') {
+      chatId = chatIdOrContext;
+    } else if (chatIdOrContext) {
+      chatId = chatIdOrContext.chatId;
+      agentId = chatIdOrContext.agent?.id || fallbackAgentId;
+      contactName = chatIdOrContext.contactName;
+      session = chatIdOrContext.session;
+      quotedMessageId = chatIdOrContext.metadata?.payload?.replyTo?.id ||
+        chatIdOrContext.metadata?.payload?._data?.quotedStanzaID ||
+        chatIdOrContext.metadata?.payload?.quotedMsgId;
+    }
+
+    console.log(`[BookingAgent] 🔍 Buscando agendamento para resposta a lembrete: chatId=${chatId}, contactName=${contactName || 'N/A'}, agentId=${agentId || 'N/A'}, session=${session || 'N/A'}`);
+
+    // Prioridade 0: Buscar no PendingReminderTracker (inteligente com tolerância a LID, nomes e quotes)
+    const tracked = pendingReminderTracker.findPendingReminder({
+      chatId,
+      contactName,
+      session,
+      agentId,
+      quotedMessageId
+    });
+
+    if (tracked) {
+      const apt = appointmentManager.getAppointment(tracked.appointmentId);
+      if (apt && apt.status !== 'cancelled' && apt.status !== 'cancelled_by_patient') {
+        console.log(`[BookingAgent] ✅ Agendamento localizado com sucesso via PendingReminderTracker: ${apt.id} (${apt.clientName})`);
+        return apt;
+      }
+    }
+
+    // Prioridade 1+: Busca no appointmentManager
     const all = appointmentManager.listAppointments();
     const isMatch = (apt: Appointment) => {
       return matchPhoneOrChatId(apt.clientChatId, chatId) || matchPhoneOrChatId(apt.clientPhone, chatId);
@@ -136,20 +179,71 @@ export class BookingAgent implements IAgent {
     if (agentId && agentId !== 'all') {
       const companyApts = all.filter(a => a.agentId === agentId);
       const companyReminder = companyApts.find(isPendingReminder);
-      if (companyReminder) return companyReminder;
+      if (companyReminder) {
+        console.log(`[BookingAgent] ✅ Agendamento localizado por lembrete da empresa: ${companyReminder.id} (${companyReminder.clientName})`);
+        return companyReminder;
+      }
 
       const companyActive = companyApts.find(isActive);
-      if (companyActive) return companyActive;
+      if (companyActive) {
+        console.log(`[BookingAgent] ✅ Agendamento ativo localizado na empresa: ${companyActive.id} (${companyActive.clientName})`);
+        return companyActive;
+      }
     }
 
     // Prioridade 2: Agendamento com lembrete pendente em qualquer empresa cadastrada
     const globalReminder = all.find(isPendingReminder);
-    if (globalReminder) return globalReminder;
+    if (globalReminder) {
+      console.log(`[BookingAgent] ✅ Agendamento localizado por lembrete global: ${globalReminder.id} (${globalReminder.clientName})`);
+      return globalReminder;
+    }
 
     // Prioridade 3: Qualquer agendamento ativo correspondente a este contato
     const globalActive = all.find(isActive);
-    if (globalActive) return globalActive;
+    if (globalActive) {
+      console.log(`[BookingAgent] ✅ Agendamento ativo localizado globalmente: ${globalActive.id} (${globalActive.clientName})`);
+      return globalActive;
+    }
 
+    // Prioridade 4: Se o chatId for @lid ou sem match direto, correlaciona por contactName com agendamentos de amanhã/hoje
+    if (contactName && contactName.trim().length >= 3) {
+      const cleanContact = contactName.toLowerCase().trim().replace(/[^a-z0-9áéíóúãõç\s]/g, '');
+      const contactTokens = cleanContact.split(/\s+/).filter(t => t.length >= 3);
+
+      const candidateApts = all.filter(a => 
+        (a.status === 'confirmed' || a.status === 'scheduled' || a.status === 'presence_confirmed') &&
+        (Boolean(a.reminderSent) || a.date === appointmentManager.getTodayDateString() || a.date === appointmentManager.getTomorrowDateString())
+      );
+
+      for (const apt of candidateApts) {
+        const cleanClient = apt.clientName.toLowerCase().trim().replace(/[^a-z0-9áéíóúãõç\s]/g, '');
+        const clientTokens = cleanClient.split(/\s+/).filter(t => t.length >= 3);
+
+        const firstMatch = contactTokens.length > 0 && clientTokens.length > 0 && contactTokens[0] === clientTokens[0];
+        const sharedToken = contactTokens.some(ct => clientTokens.includes(ct));
+
+        if (firstMatch || sharedToken) {
+          console.log(`[BookingAgent] ✅ Agendamento correlacionado por nome do contato: ${apt.id} (${apt.clientName}) para contactName="${contactName}"`);
+          if (chatId.endsWith('@lid') && apt.clientChatId) {
+            lidMapper.register(chatId, apt.clientChatId);
+          }
+          return apt;
+        }
+      }
+    }
+
+    // Prioridade 5: Se há apenas UM agendamento ativo com reminderSent === true em todo o sistema
+    const singleReminderList = all.filter(a => Boolean(a.reminderSent) && (a.status === 'confirmed' || a.status === 'scheduled'));
+    if (singleReminderList.length === 1) {
+      const single = singleReminderList[0];
+      console.log(`[BookingAgent] ✅ Agendamento único com lembrete pendente no sistema: ${single.id} (${single.clientName})`);
+      if (chatId.endsWith('@lid') && single.clientChatId) {
+        lidMapper.register(chatId, single.clientChatId);
+      }
+      return single;
+    }
+
+    console.warn(`[BookingAgent] ⚠️ Nenhum agendamento encontrado para resposta a lembrete (chatId=${chatId})`);
     return undefined;
   }
 
@@ -159,7 +253,6 @@ export class BookingAgent implements IAgent {
   async canHandle(context: AgentContext): Promise<boolean> {
     const text = (context.userMessage || '').trim();
     const chatId = context.chatId;
-    const currentAgentId = context.agent?.id;
 
     // 1. Se o usuário já está no meio de um fluxo de agendamento ou cancelamento ativo
     if (this.getSession(chatId)) {
@@ -173,7 +266,7 @@ export class BookingAgent implements IAgent {
     const isCancel = this.isCancelChoice(text);
 
     if (isConfirm || isCancel) {
-      const apt = this.findReminderAppointment(chatId, currentAgentId);
+      const apt = this.findReminderAppointment(context);
       if (apt) {
         return true;
       }
@@ -246,7 +339,7 @@ export class BookingAgent implements IAgent {
     const isCancelChoice = this.isCancelChoice(text);
 
     if (isConfirmChoice || isCancelChoice) {
-      const apt = this.findReminderAppointment(chatId, agentId);
+      const apt = this.findReminderAppointment(context, agentId);
       if (apt) {
         // Encontra o agente da empresa dona da consulta
         const aptAgent = agentManager.getAgent(apt.agentId) || context.agent;
@@ -254,6 +347,8 @@ export class BookingAgent implements IAgent {
 
         if (isConfirmChoice) {
           appointmentManager.updateAppointment(apt.id, { status: 'presence_confirmed' });
+          pendingReminderTracker.markResolved(apt.id);
+
           return {
             handled: true,
             agentName: this.name,
@@ -264,6 +359,7 @@ export class BookingAgent implements IAgent {
         if (isCancelChoice) {
           appointmentManager.cancelAppointment(apt.id, true);
           notificationService.notifySpecialistCancellation(apt);
+          pendingReminderTracker.markResolved(apt.id);
 
           return {
             handled: true,

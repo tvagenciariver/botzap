@@ -2,6 +2,7 @@ import { IAgent, AgentContext, AgentResponse } from './base.js';
 import { llmProviderManager } from '../llm-provider.js';
 import { examService } from '../../appointments/exam-service.js';
 import { ExamDeliveryAgent } from './exam-delivery.js';
+import { BookingAgent } from './booking.js';
 
 export class AttendantAgent implements IAgent {
   name = 'SmartAttendantAgent';
@@ -12,6 +13,25 @@ export class AttendantAgent implements IAgent {
   }
 
   async execute(context: AgentContext): Promise<AgentResponse> {
+    // 🛡️ BLINDAGEM CRÍTICA DE LEMBRETE D-1:
+    // Se o cliente respondeu a um lembrete (1, 2, "sim", "não", "confirmar", "cancelar", "liberar vaga"),
+    // NUNCA deixar a IA (Gemini/OpenAI) responder com alucinações (como "material recebido...").
+    const bookingAgent = new BookingAgent();
+    if (bookingAgent.isReminderChoice(context.userMessage)) {
+      console.log(`[AttendantAgent] 🛡️ Interceptada escolha de lembrete ("${context.userMessage}"). Tentando resolver via BookingAgent...`);
+      const apt = bookingAgent.findReminderAppointment(context);
+      if (apt) {
+        return await bookingAgent.execute(context);
+      } else {
+        return {
+          handled: true,
+          replyText: `Olá! Recebemos sua resposta (*${context.userMessage}*).\n\nPara que possamos localizar seu agendamento e confirmar ou liberar sua vaga, por favor informe o seu *Nome Completo*, ou digite *humano* para falar diretamente com a nossa recepção! 😊`,
+          action: 'none',
+          agentName: this.name
+        };
+      }
+    }
+
     // PROTEÇÃO CRÍTICA: Se a mensagem do cliente for composta unicamente por dígitos ou formatação de CPF
     // (ex: "123", "582", "123.456.789-00"), NUNCA enviar para a IA (OpenAI / Gemini).
     // Evita respostas alucinadas como: "Olá, notei que continua enviando apenas números, vou te transferir..."

@@ -280,6 +280,17 @@ apiRouter.post('/webhook/chatwoot', async (req: Request, res: Response) => {
 });
 
 /**
+ * Endpoint público para checagem rápida de versão do BotZap
+ */
+apiRouter.get('/api/version', (_req: Request, res: Response) => {
+  res.json({
+    version: '2.7.2',
+    build: '2026-09-16-R2-D1-FIX',
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
  * 3. Status geral do sistema e serviços
  */
 apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) => {
@@ -311,8 +322,9 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.7.0',
-    buildDate: '2026.09.08',
+    version: '2.7.2',
+    build: '2026-09-16-R2-D1-FIX',
+    buildDate: '2026.09.16',
     timestamp: new Date().toISOString(),
     agentsCount: {
       total: allAgents.length,

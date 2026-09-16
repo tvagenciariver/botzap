@@ -539,12 +539,15 @@ export class AgentOrchestrator {
       // 1. Verificação de resposta estrita a lembrete D-1 de consulta (1 ou 2, sim/não, confirmar/cancelar/liberar vaga)
       // Pode despausar mesmo se a sessão atual for default, caso haja agendamento ativo com lembrete pendente
       const isReminderMsg = (bookingAgent as any)?.isReminderChoice?.(effectiveBody);
+      let testCtx: any = null;
       if (isReminderMsg && bookingAgent) {
-        const testCtx = {
+        testCtx = {
           chatId,
           userMessage: effectiveBody,
+          contactName,
           session: sessionName,
-          agent
+          agent,
+          metadata: { payload }
         };
         canHandleBooking = await bookingAgent.canHandle(testCtx);
       }
@@ -566,7 +569,7 @@ export class AgentOrchestrator {
       if (canHandleBooking || canHandleExam) {
         memoryStore.resumeChat(chatId, agent.id);
         if (canHandleBooking && (bookingAgent as any)?.findReminderAppointment) {
-          const matchedApt = (bookingAgent as any).findReminderAppointment(chatId, agent.id);
+          const matchedApt = (bookingAgent as any).findReminderAppointment(testCtx || chatId, agent.id);
           if (matchedApt?.agentId && matchedApt.agentId !== agent.id) {
             memoryStore.resumeChat(chatId, matchedApt.agentId);
           }
@@ -629,8 +632,10 @@ export class AgentOrchestrator {
                 : `[${agent.name}] ${effectiveBody}`))
     });
 
+    console.log(`[Orchestrator] 📩 Mensagem recebida [${sessionName}]: chatId=${chatId}, contato="${contactName || 'Desconhecido'}", texto="${effectiveBody}"`);
+
     // 6. Envia mensagem para o debouncer com escopo da sessão e agente
-    messageDebouncer.enqueue(chatId, effectiveBody, contactName, sessionName, agent.id, agent.debounceSeconds);
+    messageDebouncer.enqueue(chatId, effectiveBody, contactName, sessionName, agent.id, agent.debounceSeconds, { payload });
   }
 
   /**
@@ -641,7 +646,8 @@ export class AgentOrchestrator {
     messageText: string,
     contactName?: string,
     sessionName?: string,
-    agentId?: string
+    agentId?: string,
+    metadata?: any
   ): Promise<void> {
     const agent = (agentId ? agentManager.getAgent(agentId) : null)
       || (sessionName ? agentManager.getAgentBySession(sessionName) : null)
@@ -665,7 +671,8 @@ export class AgentOrchestrator {
       userMessage: messageText,
       contactName,
       session: activeSession,
-      agent
+      agent,
+      metadata
     };
 
     let response: AgentResponse | null = null;

@@ -5,7 +5,8 @@ type MessageHandler = (
   combinedText: string,
   contactName?: string,
   sessionName?: string,
-  agentId?: string
+  agentId?: string,
+  metadata?: any
 ) => Promise<void>;
 
 interface PendingBuffer {
@@ -14,6 +15,7 @@ interface PendingBuffer {
   contactName?: string;
   sessionName?: string;
   agentId?: string;
+  metadata?: any;
 }
 
 export class MessageDebouncer {
@@ -30,7 +32,8 @@ export class MessageDebouncer {
     contactName?: string,
     sessionName?: string,
     agentId?: string,
-    customDebounceSeconds?: number
+    customDebounceSeconds?: number,
+    metadata?: any
   ): void {
     if (!this.handler) {
       console.warn('[Debouncer] Nenhum handler registrado no debouncer.');
@@ -49,6 +52,7 @@ export class MessageDebouncer {
       clearTimeout(existing.timer);
       existing.messages.push(messageText);
       if (contactName) existing.contactName = contactName;
+      if (metadata) existing.metadata = { ...existing.metadata, ...metadata };
 
       existing.timer = setTimeout(() => {
         this.flush(bufferKey, chatId);
@@ -64,7 +68,8 @@ export class MessageDebouncer {
         messages: [messageText],
         contactName,
         sessionName,
-        agentId
+        agentId,
+        metadata
       });
     }
   }
@@ -78,7 +83,7 @@ export class MessageDebouncer {
     const combinedText = buffer.messages.join('\n');
     if (this.handler && combinedText.trim()) {
       try {
-        await this.handler(realChatId, combinedText, buffer.contactName, buffer.sessionName, buffer.agentId);
+        await this.handler(realChatId, combinedText, buffer.contactName, buffer.sessionName, buffer.agentId, buffer.metadata);
       } catch (err: any) {
         console.error(`[Debouncer] Erro ao processar mensagens para ${realChatId}:`, err.message);
       }

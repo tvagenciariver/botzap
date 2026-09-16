@@ -6,6 +6,7 @@ import { env } from '../config/index.js';
 import { botTracker } from '../orchestrator/bot-tracker.js';
 import { memoryStore } from '../gemini/memory.js';
 import { formatToWhatsAppChatId, matchPhoneOrChatId, getAlternateBrazilianChatId } from './phone-utils.js';
+import { pendingReminderTracker } from './pending-reminder-tracker.js';
 
 export { formatToWhatsAppChatId, matchPhoneOrChatId, getAlternateBrazilianChatId };
 
@@ -196,12 +197,26 @@ export class NotificationService {
       `*2.* ❌ Não poderei ir (liberar vaga)\n\n` +
       `_Digite o número *1* para confirmar ou *2* para cancelar._`;
 
+    // Registra preventivamente no rastreador inteligente de lembretes D-1
+    pendingReminderTracker.recordReminder({
+      appointmentId: appointment.id,
+      targetChatId,
+      clientPhone: appointment.clientPhone,
+      clientName: appointment.clientName,
+      agentId: appointment.agentId,
+      session
+    });
+
     try {
       const sendRes = await wahaClient.sendText(targetChatId, message, { session });
       // Rastreia mensagem para que o eco da WAHA não congele/pause o bot para este cliente
       botTracker.recordBotMessage(targetChatId, message, sendRes?.id);
       if (appointment.clientChatId && appointment.clientChatId !== targetChatId) {
         botTracker.recordBotMessage(appointment.clientChatId, message, sendRes?.id);
+      }
+
+      if (sendRes?.id) {
+        pendingReminderTracker.setMessageId(appointment.id, sendRes.id);
       }
 
       appointmentManager.updateAppointment(appointment.id, {
@@ -218,6 +233,9 @@ export class NotificationService {
           console.warn(`[NotificationService] Tentando reenvio de lembrete D-1 para telefone formatado: ${formattedPhone}...`);
           const sendRes2 = await wahaClient.sendText(formattedPhone, message, { session });
           botTracker.recordBotMessage(formattedPhone, message, sendRes2?.id);
+          if (sendRes2?.id) {
+            pendingReminderTracker.setMessageId(appointment.id, sendRes2.id);
+          }
           appointmentManager.updateAppointment(appointment.id, {
             reminderSent: true,
             reminderSentAt: new Date().toISOString()
