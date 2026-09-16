@@ -1172,13 +1172,31 @@ apiRouter.post('/api/appointments', requireModule('appointments'), async (req: R
     });
 
     // Notifica o especialista se solicitado
+    let notifiedSpecialistOk = false;
     if (notifySpecialist !== false) {
-      notificationService.notifySpecialistNewBooking(appointment).catch(err => {
+      try {
+        notifiedSpecialistOk = await notificationService.notifySpecialistNewBooking(appointment);
+      } catch (err: any) {
         console.error('[Routes] Erro ao notificar especialista sobre novo agendamento:', err.message);
-      });
+      }
     }
 
-    res.status(201).json({ success: true, appointment });
+    // Envia comprovante no WhatsApp do paciente se solicitado
+    let notifiedPatientOk = false;
+    if (req.body.notifyPatient === true) {
+      try {
+        notifiedPatientOk = await notificationService.notifyPatientNewBooking(appointment);
+      } catch (err: any) {
+        console.error('[Routes] Erro ao notificar paciente sobre novo agendamento:', err.message);
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      appointment,
+      notifiedSpecialist: notifiedSpecialistOk,
+      notifiedPatient: notifiedPatientOk
+    });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }

@@ -130,6 +130,37 @@ export class NotificationService {
   }
 
   /**
+   * Envia confirmação / comprovante ao WhatsApp do paciente quando agendado pela recepção
+   */
+  async notifyPatientNewBooking(appointment: Appointment): Promise<boolean> {
+    const targetChatId = this.formatToWhatsAppChatId(appointment.clientPhone || appointment.clientChatId);
+    if (!targetChatId) return false;
+
+    const agent = agentManager.getAgent(appointment.agentId) || agentManager.getDefaultAgent();
+    const companyName = agent.companyName || 'Nossa Clínica';
+    const rawSession = (agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession;
+    const session = (rawSession && rawSession !== '*') ? rawSession : 'default';
+
+    const message = `Olá, *${appointment.clientName}*! 👋\n\n` +
+      `Sua consulta na *${companyName}* foi agendada com sucesso!\n\n` +
+      `👨‍⚕️ *Profissional:* ${appointment.specialistName}\n` +
+      `🩺 *Procedimento:* ${appointment.serviceName}\n` +
+      `📅 *Data:* ${this.formatDateBR(appointment.date)}\n` +
+      `⏰ *Horário:* ${appointment.startTime} às ${appointment.endTime}\n\n` +
+      `_Agradecemos pela preferência e nos vemos em breve!_ 😊`;
+
+    try {
+      const sendRes = await wahaClient.sendText(targetChatId, message, { session });
+      botTracker.recordBotMessage(targetChatId, message, sendRes?.id);
+      console.log(`[NotificationService] Confirmação enviada ao paciente ${appointment.clientName} (${targetChatId}).`);
+      return true;
+    } catch (err: any) {
+      console.error(`[NotificationService] Falha ao enviar confirmação ao paciente ${appointment.clientName}:`, err.message);
+      return false;
+    }
+  }
+
+  /**
    * Envia lembrete D-1 (fim do dia anterior) para o paciente confirmar presença ou desistir
    */
   async sendDMinusOneReminder(appointment: Appointment): Promise<boolean> {

@@ -536,16 +536,22 @@ export class AgentOrchestrator {
       let canHandleBooking = false;
       let canHandleExam = false;
 
-      // 🔒 BLINDAGEM MÁXIMA DA PAUSA HUMANA:
-      // Empresas sem a opção de agenda ativada (enableBooking !== true) NUNCA despausam automaticamente!
-      // Visto que não possuem envio de exames nem lembretes de agenda, mesmo que digitem CPF e haja laudo,
-      // o bot JAMAIS despausa. A conversa permanece 100% com o atendente humano.
-      if (agent.enableBooking) {
-        const cleanMsg = (effectiveBody || '').trim().toLowerCase();
-        const cleanDigits = effectiveBody.replace(/\D/g, '');
+      // 1. Verificação de resposta estrita a lembrete D-1 de consulta (1 ou 2, sim/não, confirmar/cancelar/liberar vaga)
+      // Pode despausar mesmo se a sessão atual for default, caso haja agendamento ativo com lembrete pendente
+      const isReminderMsg = (bookingAgent as any)?.isReminderChoice?.(effectiveBody);
+      if (isReminderMsg && bookingAgent) {
+        const testCtx = {
+          chatId,
+          userMessage: effectiveBody,
+          session: sessionName,
+          agent
+        };
+        canHandleBooking = await bookingAgent.canHandle(testCtx);
+      }
 
-        // 1. Verificação estrita para CPF:
-        // Deve conter entre 3 e 11 dígitos numéricos e a mensagem deve ser puramente dígitos/pontos/hífen/espaços
+      // 2. Verificação de validação de exame LGPD (apenas se a empresa possuir agendamento/exames ativos)
+      if (agent.enableBooking && !canHandleBooking) {
+        const cleanDigits = effectiveBody.replace(/\D/g, '');
         const isStrictlyCpfFormat = cleanDigits.length >= 3 && cleanDigits.length <= 11 &&
           /^[0-9.\-\s]+$/.test(effectiveBody.trim());
 
@@ -555,25 +561,16 @@ export class AgentOrchestrator {
             canHandleExam = true;
           }
         }
-
-        // 2. Verificação estrita para lembrete de agendamento:
-        const isStrictReminderChoice = ['1', '2', 'sim', 'nao', 'não', 'confirmo', 'cancelo', 'desisto'].includes(cleanMsg) ||
-          /^1\s*[-.]?\s*sim$/i.test(cleanMsg) ||
-          /^2\s*[-.]?\s*(não|nao|desistir|cancelar)$/i.test(cleanMsg);
-
-        if (isStrictReminderChoice && bookingAgent) {
-          const testCtx = {
-            chatId,
-            userMessage: effectiveBody,
-            session: sessionName,
-            agent
-          };
-          canHandleBooking = await bookingAgent.canHandle(testCtx);
-        }
       }
 
       if (canHandleBooking || canHandleExam) {
         memoryStore.resumeChat(chatId, agent.id);
+        if (canHandleBooking && (bookingAgent as any)?.findReminderAppointment) {
+          const matchedApt = (bookingAgent as any).findReminderAppointment(chatId, agent.id);
+          if (matchedApt?.agentId && matchedApt.agentId !== agent.id) {
+            memoryStore.resumeChat(chatId, matchedApt.agentId);
+          }
+        }
 
         const reason = canHandleExam ? 'validação de exame (CPF)' : 'agenda/lembrete';
         console.log(`[Orchestrator] Contato ${chatId} enviou resposta estrita de ${reason} ("${effectiveBody}"). Pausa cancelada automaticamente.`);

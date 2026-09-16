@@ -3,6 +3,7 @@ import { appointmentManager } from '../../appointments/appointment-manager.js';
 import { notificationService, matchPhoneOrChatId } from '../../appointments/notification-service.js';
 import { partnerManager } from '../../appointments/partner-manager.js';
 import { Specialist, ServiceItem, Appointment, Partner } from '../../appointments/types.js';
+import { agentManager } from '../../config/agent-manager.js';
 
 interface BookingSessionState {
   step: 'select_referral' | 'select_partner' | 'select_specialist' | 'select_service' | 'select_date' | 'select_slot' | 'confirm_name' | 'confirm_phone' | 'confirm_cancellation';
@@ -58,34 +59,96 @@ export class BookingAgent implements IAgent {
   }
 
   /**
-   * Localiza agendamento pendente de confirmação ou cancelamento por resposta a lembrete (isolado por agentId)
+   * Identifica se a mensagem é uma opção de confirmação do lembrete D-1
    */
-  private findReminderAppointment(chatId: string, agentId?: string): Appointment | undefined {
-    const all = appointmentManager.listAppointments();
-    const active = all.filter(a => {
-      if (agentId && a.agentId !== agentId) return false;
-      return (
-        a.status === 'confirmed' ||
-        a.status === 'scheduled' ||
-        a.status === 'presence_confirmed'
-      );
-    });
+  public isConfirmChoice(text: string): boolean {
+    const clean = (text || '').toLowerCase().trim().replace(/[\*\_\#]/g, '');
+    if (!clean) return false;
 
+    // Opções numéricas exatas ou iniciadas por 1
+    if (clean === '1' || clean === '1.' || clean === '1)' || clean === '1️⃣' || clean === '✅') return true;
+    if (/^1\s*[-–.)/:]?\s*(sim|confirmo|confirmar|confirmado|presenca|presença)?$/i.test(clean)) return true;
+    if (/^(o\s+)?(numero|número|opcao|opção)\s+(um|1)$/i.test(clean)) return true;
+    if (clean === 'um') return true;
+
+    // Palavras-chave inequívocas de confirmação
+    const confirmKeywords = [
+      'sim', 'confirmo', 'confirmado', 'confirmar', 'vou', 'com certeza',
+      'confirmar presença', 'confirmar presenca', 'presença confirmada',
+      'sim, confirmo', 'sim confirmo', 'estarei lá', 'estarei la', 'pode confirmar'
+    ];
+    if (confirmKeywords.includes(clean)) return true;
+    if (clean.startsWith('sim ') || clean.startsWith('confirmo ')) return true;
+
+    return false;
+  }
+
+  /**
+   * Identifica se a mensagem é uma opção de cancelamento/desistência do lembrete D-1
+   */
+  public isCancelChoice(text: string): boolean {
+    const clean = (text || '').toLowerCase().trim().replace(/[\*\_\#]/g, '');
+    if (!clean) return false;
+
+    // Opções numéricas exatas ou iniciadas por 2
+    if (clean === '2' || clean === '2.' || clean === '2)' || clean === '2️⃣' || clean === '❌') return true;
+    if (/^2\s*[-–.)/:]?\s*(não|nao|cancelo|cancelar|desisto|desistir|liberar vaga|não poderei|nao poderei)?$/i.test(clean)) return true;
+    if (/^(o\s+)?(numero|número|opcao|opção)\s+(dois|2)$/i.test(clean)) return true;
+    if (clean === 'dois') return true;
+
+    // Expressões e palavras-chave de cancelamento / desistência
+    const cancelKeywords = [
+      'não', 'nao', 'cancelo', 'desisto', 'cancelar', 'desistir',
+      'não poderei', 'nao poderei', 'não poderei ir', 'nao poderei ir',
+      'não vou', 'nao vou', 'não vou poder', 'nao vou poder',
+      'liberar vaga', 'desmarcar', 'não posso', 'nao posso',
+      'não poderei ir (liberar vaga)', 'nao poderei ir (liberar vaga)',
+      'não tenho como ir', 'nao tenho como ir'
+    ];
+    if (cancelKeywords.includes(clean)) return true;
+    if (clean.startsWith('não poderei') || clean.startsWith('nao poderei') || clean.startsWith('não vou') || clean.startsWith('nao vou')) return true;
+    if (clean.includes('liberar vaga') || clean.includes('desmarcar')) return true;
+    if (clean.includes('desist') || clean.includes('cancel')) return true;
+
+    return false;
+  }
+
+  public isReminderChoice(text: string): boolean {
+    return this.isConfirmChoice(text) || this.isCancelChoice(text);
+  }
+
+  /**
+   * Localiza agendamento pendente de confirmação ou cancelamento por resposta a lembrete
+   */
+  public findReminderAppointment(chatId: string, agentId?: string): Appointment | undefined {
+    const all = appointmentManager.listAppointments();
     const isMatch = (apt: Appointment) => {
       return matchPhoneOrChatId(apt.clientChatId, chatId) || matchPhoneOrChatId(apt.clientPhone, chatId);
     };
 
-    // Prioridade 1: Agendamentos com lembrete D-1 já enviado e ainda pendentes de resposta
-    const withReminder = active.filter(a => a.reminderSent && (a.status === 'confirmed' || a.status === 'scheduled') && isMatch(a));
-    if (withReminder.length > 0) {
-      return withReminder[0];
+    const isPendingReminder = (a: Appointment) =>
+      Boolean(a.reminderSent) && (a.status === 'confirmed' || a.status === 'scheduled') && isMatch(a);
+
+    const isActive = (a: Appointment) =>
+      (a.status === 'confirmed' || a.status === 'scheduled' || a.status === 'presence_confirmed') && isMatch(a);
+
+    // Prioridade 1: Agendamento com lembrete pendente na empresa específica
+    if (agentId && agentId !== 'all') {
+      const companyApts = all.filter(a => a.agentId === agentId);
+      const companyReminder = companyApts.find(isPendingReminder);
+      if (companyReminder) return companyReminder;
+
+      const companyActive = companyApts.find(isActive);
+      if (companyActive) return companyActive;
     }
 
-    // Prioridade 2: Qualquer agendamento ativo correspondente ao contato
-    const anyActive = active.filter(a => isMatch(a));
-    if (anyActive.length > 0) {
-      return anyActive[0];
-    }
+    // Prioridade 2: Agendamento com lembrete pendente em qualquer empresa cadastrada
+    const globalReminder = all.find(isPendingReminder);
+    if (globalReminder) return globalReminder;
+
+    // Prioridade 3: Qualquer agendamento ativo correspondente a este contato
+    const globalActive = all.find(isActive);
+    if (globalActive) return globalActive;
 
     return undefined;
   }
@@ -94,15 +157,9 @@ export class BookingAgent implements IAgent {
    * Decide se este agente deve tratar a mensagem.
    */
   async canHandle(context: AgentContext): Promise<boolean> {
-    // 🔒 BLINDAGEM CRÍTICA: Se a empresa/agente NÃO possui a agenda habilitada,
-    // NUNCA interceptar a conversa! O bot deve responder estritamente conforme o prompt da IA.
-    if (!context.agent?.enableBooking) {
-      return false;
-    }
-
-    const text = (context.userMessage || '').trim().toLowerCase();
+    const text = (context.userMessage || '').trim();
     const chatId = context.chatId;
-    const agentId = context.agent.id;
+    const currentAgentId = context.agent?.id;
 
     // 1. Se o usuário já está no meio de um fluxo de agendamento ou cancelamento ativo
     if (this.getSession(chatId)) {
@@ -110,15 +167,26 @@ export class BookingAgent implements IAgent {
     }
 
     // 2. Se o usuário respondeu à mensagem de confirmação/desistência de lembrete (opção 1 ou 2)
-    const isConfirmChoice = ['1', 'sim', 'confirmo', 'confirmado', 'vou', 'com certeza', 'confirmar', '1 - sim', '1. sim'].some(c => text === c || text.startsWith('1'));
-    const isCancelChoice = ['2', 'não', 'nao', 'cancelo', 'desisto', 'não poderei', 'nao poderei', 'não vou', 'nao vou', 'cancelar', 'desistir', '2 - não', '2. não', '2 - desistir', '2 desistir'].some(c => text === c || text.startsWith('2') || text.includes('desist') || text.includes('cancel'));
+    // CRÍTICO: Avalia ANTES do check de enableBooking do agente da sessão, pois o lembrete
+    // pode ter sido disparado por outra empresa/agente do consultório para este mesmo contato!
+    const isConfirm = this.isConfirmChoice(text);
+    const isCancel = this.isCancelChoice(text);
 
-    if (isConfirmChoice || isCancelChoice) {
-      const apt = this.findReminderAppointment(chatId, agentId);
+    if (isConfirm || isCancel) {
+      const apt = this.findReminderAppointment(chatId, currentAgentId);
       if (apt) {
         return true;
       }
     }
+
+    // 🔒 BLINDAGEM CRÍTICA: Se a empresa/agente NÃO possui a agenda habilitada,
+    // NUNCA interceptar a conversa! O bot deve responder estritamente conforme o prompt da IA.
+    if (!context.agent?.enableBooking) {
+      return false;
+    }
+
+    const lowerText = text.toLowerCase();
+    const agentId = context.agent.id;
 
     // 3. Intenção de Agendar — verifica se esta empresa tem médicos cadastrados
     const bookingKeywords = [
@@ -127,7 +195,7 @@ export class BookingAgent implements IAgent {
       'horário disponível', 'vaga para consulta', 'marcar médico', 'marcar psicologo',
       'marcar dentista', 'fazer agendamento', 'consultas disponíveis'
     ];
-    if (bookingKeywords.some(kw => text.includes(kw))) {
+    if (bookingKeywords.some(kw => lowerText.includes(kw))) {
       // Garante que só ativa o fluxo interativo se a empresa possuir especialistas cadastrados
       const specialists = appointmentManager.listSpecialists(agentId).filter(s => s.active);
       if (specialists.length === 0) {
@@ -142,7 +210,7 @@ export class BookingAgent implements IAgent {
       'desmarcar agendamento', 'desmarcar horario', 'desmarcar horário',
       'meus agendamentos', 'minhas consultas'
     ];
-    if (cancelKeywords.some(kw => text.includes(kw))) {
+    if (cancelKeywords.some(kw => lowerText.includes(kw))) {
       return true;
     }
 
@@ -174,19 +242,22 @@ export class BookingAgent implements IAgent {
     }
 
     // 1. Verifica se é resposta ao Lembrete D-1 (Confirmar ou Desistir da consulta)
-    const isConfirmChoice = ['1', 'sim', 'confirmo', 'confirmado', 'vou', 'com certeza', 'confirmar', '1 - sim', '1. sim'].some(c => lowerText === c || lowerText.startsWith('1') || lowerText.includes('confirm'));
-    const isCancelChoice = ['2', 'não', 'nao', 'cancelo', 'desisto', 'não poderei', 'nao poderei', 'não vou', 'nao vou', 'cancelar', 'desistir', '2 - não', '2. não', '2 - desistir', '2 desistir'].some(c => lowerText === c || lowerText.startsWith('2') || lowerText.includes('desist') || lowerText.includes('cancel'));
+    const isConfirmChoice = this.isConfirmChoice(text);
+    const isCancelChoice = this.isCancelChoice(text);
 
     if (isConfirmChoice || isCancelChoice) {
       const apt = this.findReminderAppointment(chatId, agentId);
       if (apt) {
+        // Encontra o agente da empresa dona da consulta
+        const aptAgent = agentManager.getAgent(apt.agentId) || context.agent;
+        const effectiveCompanyName = aptAgent?.companyName || companyName;
 
         if (isConfirmChoice) {
           appointmentManager.updateAppointment(apt.id, { status: 'presence_confirmed' });
           return {
             handled: true,
             agentName: this.name,
-            replyText: `🎉 *Presença Confirmada!*\n\nMuito obrigado, *${apt.clientName}*! Seu horário com *${apt.specialistName}* para o dia ${notificationService.formatDateBR(apt.date)} às *${apt.startTime}* está 100% garantido.\n\nNos vemos na *${companyName}*! Tenha um excelente dia! 😊`
+            replyText: `🎉 *Presença Confirmada!*\n\nMuito obrigado, *${apt.clientName}*! Seu horário com *${apt.specialistName}* para o dia ${notificationService.formatDateBR(apt.date)} às *${apt.startTime}* está 100% garantido.\n\nNos vemos na *${effectiveCompanyName}*! Tenha um excelente dia! 😊`
           };
         }
 
@@ -197,7 +268,7 @@ export class BookingAgent implements IAgent {
           return {
             handled: true,
             agentName: this.name,
-            replyText: `Entendido, *${apt.clientName}*. A sua consulta com *${apt.specialistName}* para ${notificationService.formatDateBR(apt.date)} às ${apt.startTime} foi cancelada e o horário liberado para outros pacientes.\n\nAgradecemos imensamente por nos avisar com antecedência! Se quiser remarcar para outro dia ou horário, é só digitar *agendar*. 🙏`
+            replyText: `Entendido, *${apt.clientName}*. A sua consulta com *${apt.specialistName}* para ${notificationService.formatDateBR(apt.date)} às ${apt.startTime} na *${effectiveCompanyName}* foi cancelada e o horário liberado para outros pacientes.\n\nAgradecemos imensamente por nos avisar com antecedência! Se quiser remarcar para outro dia ou horário, é só digitar *agendar*. 🙏`
           };
         }
       }

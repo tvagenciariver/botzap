@@ -64,51 +64,8 @@ export function isSimulatorChatId(chatId?: string): boolean {
     chatId === 'simulator';
 }
 
-/**
- * Compara dois números de telefone ou chatIds do WhatsApp de forma inteligente,
- * lidando com sufixos (@c.us, @lid), DDI 55, DDD e a variação do 9º dígito móvel brasileiro.
- */
-export function matchPhoneOrChatId(a?: string, b?: string): boolean {
-  if (!a || !b) return false;
-  if (a === b) return true;
+// LidPhoneMapper declarado abaixo para suportar resolução de mapeamento de chatIds
 
-  let cleanA = a.split('@')[0].split(':')[0].replace(/\D/g, '');
-  let cleanB = b.split('@')[0].split(':')[0].replace(/\D/g, '');
-
-  if (!cleanA || !cleanB) return false;
-  if (cleanA === cleanB) return true;
-
-  // Remove zero à esquerda no DDD se houver (ex: 087988177877 -> 87988177877)
-  if (cleanA.startsWith('0') && cleanA.length >= 11) cleanA = cleanA.substring(1);
-  if (cleanB.startsWith('0') && cleanB.length >= 11) cleanB = cleanB.substring(1);
-
-  if (cleanA === cleanB) return true;
-
-  // Se um terminar com o outro (ex: 5587988177877 termina com 87988177877)
-  if (cleanA.endsWith(cleanB) || cleanB.endsWith(cleanA)) return true;
-
-  // Normalização do 9º dígito brasileiro:
-  // Se tiver 12 ou 13 dígitos começando com 55, remove o DDI 55
-  const numA = cleanA.startsWith('55') && (cleanA.length === 12 || cleanA.length === 13) ? cleanA.substring(2) : cleanA;
-  const numB = cleanB.startsWith('55') && (cleanB.length === 12 || cleanB.length === 13) ? cleanB.substring(2) : cleanB;
-
-  // Se ambos tiverem DDD + número (10 ou 11 dígitos)
-  if (numA.length >= 10 && numB.length >= 10) {
-    const dddA = numA.substring(0, 2);
-    const dddB = numB.substring(0, 2);
-    const last8A = numA.slice(-8);
-    const last8B = numB.slice(-8);
-    // Se ambos possuem DDD, os DDDs devem obrigatoriamente ser iguais
-    return dddA === dddB && last8A === last8B;
-  }
-
-  // Fallback: se um dos dois não possui DDD (ex: número local de 8 ou 9 dígitos)
-  if (cleanA.length >= 8 && cleanB.length >= 8 && cleanA.slice(-8) === cleanB.slice(-8)) {
-    return true;
-  }
-
-  return false;
-}
 
 class LidPhoneMapper {
   private lidToPhone: Map<string, string> = new Map();
@@ -303,3 +260,70 @@ export function getAllChatIdAliases(chatId: string): string[] {
   return Array.from(aliases);
 }
 
+/**
+ * Compara dois números de telefone ou chatIds do WhatsApp de forma inteligente,
+ * lidando com sufixos (@c.us, @lid), mapeamento LID, DDI 55, DDD e a variação do 9º dígito móvel brasileiro.
+ */
+export function matchPhoneOrChatId(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  // 1. Tenta resolver via mapeamento LID se algum for @lid
+  if (a.includes('@lid')) {
+    const phoneA = lidMapper.getPhone(a);
+    if (phoneA && (phoneA === b || matchPhoneOrChatId(phoneA, b))) return true;
+  }
+  if (b.includes('@lid')) {
+    const phoneB = lidMapper.getPhone(b);
+    if (phoneB && (phoneB === a || matchPhoneOrChatId(a, phoneB))) return true;
+  }
+
+  // 2. Compara aliases cruzados (inclui mapeamento LID prévio e variações de nono dígito)
+  const aliasesA = getAllChatIdAliases(a);
+  const aliasesB = getAllChatIdAliases(b);
+  for (const aliasA of aliasesA) {
+    for (const aliasB of aliasesB) {
+      if (aliasA === aliasB) return true;
+    }
+  }
+
+  // 3. Normalização de dígitos limpos
+  let cleanA = a.split('@')[0].split(':')[0].replace(/\D/g, '');
+  let cleanB = b.split('@')[0].split(':')[0].replace(/\D/g, '');
+
+  if (!cleanA || !cleanB) return false;
+  if (cleanA === cleanB) return true;
+
+  // Remove zero à esquerda no DDD se houver (ex: 087988177877 -> 87988177877)
+  if (cleanA.startsWith('0') && cleanA.length >= 11) cleanA = cleanA.substring(1);
+  if (cleanB.startsWith('0') && cleanB.length >= 11) cleanB = cleanB.substring(1);
+
+  if (cleanA === cleanB) return true;
+
+  // Se um terminar com o outro (comprimento mínimo seguro de 8 dígitos para evitar falsos positivos)
+  if (cleanA.length >= 8 && cleanB.length >= 8) {
+    if (cleanA.endsWith(cleanB) || cleanB.endsWith(cleanA)) return true;
+  }
+
+  // Normalização do 9º dígito brasileiro:
+  // Se tiver 12 ou 13 dígitos começando com 55, remove o DDI 55
+  const numA = cleanA.startsWith('55') && (cleanA.length === 12 || cleanA.length === 13) ? cleanA.substring(2) : cleanA;
+  const numB = cleanB.startsWith('55') && (cleanB.length === 12 || cleanB.length === 13) ? cleanB.substring(2) : cleanB;
+
+  // Se ambos tiverem DDD + número (10 ou 11 dígitos)
+  if (numA.length >= 10 && numB.length >= 10) {
+    const dddA = numA.substring(0, 2);
+    const dddB = numB.substring(0, 2);
+    const last8A = numA.slice(-8);
+    const last8B = numB.slice(-8);
+    // Se ambos possuem DDD, os DDDs devem obrigatoriamente ser iguais
+    return dddA === dddB && last8A === last8B;
+  }
+
+  // Fallback: se um dos dois não possui DDD (ex: número local de 8 ou 9 dígitos)
+  if (cleanA.length >= 8 && cleanB.length >= 8 && cleanA.slice(-8) === cleanB.slice(-8)) {
+    return true;
+  }
+
+  return false;
+}

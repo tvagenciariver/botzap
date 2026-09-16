@@ -168,6 +168,7 @@ function setActiveCompany(companyId, reload = true) {
       if (typeof loadHolidays === 'function') loadHolidays();
     } else if (activeTab === 'appointments' && typeof loadAppointments === 'function') {
       loadAppointments();
+      if (typeof startAppointmentsRealtimeSync === 'function') startAppointmentsRealtimeSync();
     } else if (activeTab === 'exams' && typeof loadExams === 'function') {
       loadExams();
     } else if (activeTab === 'chats' && typeof loadChats === 'function') {
@@ -550,7 +551,10 @@ function switchToTab(targetTab) {
 
   if (getAuthToken()) {
     if (targetTab === 'simulator') loadAgentsForSimulator();
-    if (targetTab === 'appointments') loadAppointments();
+    if (targetTab === 'appointments') {
+      loadAppointments();
+      startAppointmentsRealtimeSync();
+    }
     if (targetTab === 'exams') loadExams();
     if (targetTab === 'agents' && currentUser?.role === 'admin') loadAgents();
     if (targetTab === 'chats') loadChats();
@@ -3303,13 +3307,7 @@ let appointmentsRealtimeTimer = null;
 let lastAppointmentsSignature = '';
 
 function isAnyModalOpen() {
-  const modals = [
-    document.getElementById('modal-appointment-overlay'),
-    document.getElementById('modal-specs-overlay'),
-    document.getElementById('modal-print-overlay'),
-    document.getElementById('modal-user-overlay')
-  ];
-  return modals.some(m => m && m.style.display && m.style.display !== 'none');
+  return Array.from(document.querySelectorAll('.modal-overlay')).some(m => m && m.style.display && m.style.display !== 'none');
 }
 
 async function syncAppointmentsRealtime() {
@@ -3346,6 +3344,27 @@ async function syncAppointmentsRealtime() {
 
       // Se houver qualquer alteração na agenda (novo agendamento, cancelamento pelo WhatsApp, confirmação D-1)
       if (newSignature !== lastAppointmentsSignature) {
+        // Notifica o atendente se houver mudança específica de status relevante
+        if (lastAppointmentsSignature && appointmentsState.length > 0) {
+          const statusChangedApt = newApts.find(na => {
+            const old = appointmentsState.find(oa => oa.id === na.id);
+            return old && old.status !== na.status;
+          });
+
+          if (statusChangedApt) {
+            if (statusChangedApt.status === 'cancelled_by_patient') {
+              showToast(`⚠️ Paciente ${statusChangedApt.clientName} cancelou a consulta de ${formatDateBR(statusChangedApt.date)} às ${statusChangedApt.startTime} pelo WhatsApp. Horário liberado!`, 'warning', 5000);
+            } else if (statusChangedApt.status === 'presence_confirmed') {
+              showToast(`✅ Paciente ${statusChangedApt.clientName} confirmou presença para amanhã às ${statusChangedApt.startTime}!`, 'success', 4500);
+            }
+          } else {
+            const addedApt = newApts.find(na => !appointmentsState.some(oa => oa.id === na.id));
+            if (addedApt) {
+              showToast(`📅 Novo agendamento: ${addedApt.clientName} (${addedApt.startTime} - ${addedApt.specialistName})`, 'info', 4000);
+            }
+          }
+        }
+
         lastAppointmentsSignature = newSignature;
         appointmentsState = newApts;
         renderAppointments();
@@ -3381,8 +3400,25 @@ function startAppointmentsRealtimeSync() {
     if (pane && pane.classList.contains('active')) {
       syncAppointmentsRealtime();
     }
-  }, 4000); // Polling em tempo real a cada 4 segundos
+  }, 3500); // Polling contínuo a cada 3.5 segundos
 }
+
+// Sincronização imediata ao alternar foco da janela ou aba do navegador
+window.addEventListener('focus', () => {
+  const pane = document.getElementById('pane-appointments');
+  if (pane && pane.classList.contains('active')) {
+    syncAppointmentsRealtime();
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    const pane = document.getElementById('pane-appointments');
+    if (pane && pane.classList.contains('active')) {
+      syncAppointmentsRealtime();
+    }
+  }
+});
+
 
 /**
  * Atualiza cards de KPIs
@@ -4185,6 +4221,16 @@ async function openNewAppointmentModal(prefill = {}) {
   const specSelect = document.getElementById('modal-apt-specialist');
   const agentSelect = document.getElementById('modal-apt-agent');
   const serviceSelect = document.getElementById('modal-apt-service');
+  const notifySpecCheck = document.getElementById('modal-apt-notify');
+  if (notifySpecCheck) notifySpecCheck.checked = true;
+  const notifyPatCheck = document.getElementById('modal-apt-notify-patient');
+  if (notifyPatCheck) notifyPatCheck.checked = true;
+
+  const badgeEl = document.getElementById('modal-slot-selected-badge');
+  if (badgeEl) {
+    badgeEl.style.display = 'none';
+    badgeEl.textContent = 'Horário: --:--';
+  }
 
   // Seleciona o cliente/agente apropriado
   const targetAgentId = prefill.agentId || (currentAppointmentsAgentFilter !== 'all' ? currentAppointmentsAgentFilter : '');
@@ -4205,7 +4251,7 @@ async function openNewAppointmentModal(prefill = {}) {
     specSelect.selectedIndex = 1;
   }
 
-  // Preenche data
+  // Preenche data (hoje como padrão)
   const targetDate = prefill.date || currentAppointmentsDateValue || getTodayString();
   if (dateInput) {
     dateInput.value = targetDate;
@@ -4218,7 +4264,7 @@ async function openNewAppointmentModal(prefill = {}) {
 
   overlay.style.display = 'flex';
 
-  // Carrega horários livres dinamicamente
+  // Carrega horários livres dinamicamente com grade interativa
   await loadAvailableSlotsForModal(prefill.startTime);
 }
 
@@ -4228,46 +4274,116 @@ function closeAppointmentModal() {
 }
 
 /**
- * Atualiza horários livres no modal ao mudar Especialista ou Data
+ * Atualiza horários livres no modal ao mudar Especialista ou Data (com grade visual clicável)
  */
 async function loadAvailableSlotsForModal(preferredSlot = '') {
   const specId = document.getElementById('modal-apt-specialist')?.value;
   const dateStr = document.getElementById('modal-apt-date')?.value;
   const timeSelect = document.getElementById('modal-apt-time');
+  const gridEl = document.getElementById('modal-slots-grid');
+  const badgeEl = document.getElementById('modal-slot-selected-badge');
   const hintEl = document.getElementById('modal-slot-hint');
 
   if (!timeSelect) return;
 
+  if (badgeEl) {
+    if (preferredSlot) {
+      badgeEl.textContent = `Horário: ${preferredSlot}`;
+      badgeEl.style.display = 'inline-block';
+    } else {
+      badgeEl.style.display = 'none';
+    }
+  }
+
   if (!specId || !dateStr) {
     timeSelect.innerHTML = '<option value="">Selecione especialista e data...</option>';
+    if (gridEl) gridEl.innerHTML = '<span class="text-muted" style="font-size: 12px;">Selecione especialista e data para carregar os horários livres...</span>';
     return;
   }
 
+  if (gridEl) gridEl.innerHTML = '<span class="text-muted" style="font-size: 12px;">⌛ Buscando horários disponíveis em tempo real...</span>';
   timeSelect.innerHTML = '<option value="">Buscando horários disponíveis...</option>';
 
   try {
-    const res = await fetchWithAuth(`/api/appointments/slots?specialistId=${specId}&date=${dateStr}`);
+    const res = await fetchWithAuth(`/api/appointments/slots?specialistId=${encodeURIComponent(specId)}&date=${encodeURIComponent(dateStr)}`);
     const data = await res.json();
     const slots = data.slots || [];
 
     if (slots.length === 0) {
       timeSelect.innerHTML = '<option value="">Nenhum horário livre nesta data</option>';
+      timeSelect.value = '';
+      if (gridEl) gridEl.innerHTML = '<span class="text-danger" style="font-size: 12.5px;">⚠️ Todos os horários estão ocupados ou o profissional não atende nesta data.</span>';
       if (hintEl) hintEl.textContent = 'Todos os horários estão ocupados ou o especialista não atende neste dia.';
+      if (badgeEl) badgeEl.style.display = 'none';
       return;
     }
 
     let optionsHtml = '<option value="">Selecione um horário disponível...</option>';
+    let chipsHtml = '';
+
+    let chosenSlot = preferredSlot || '';
+    if (!chosenSlot && slots.length > 0) {
+      chosenSlot = slots[0];
+    }
+
     slots.forEach(s => {
-      const isPref = s === preferredSlot ? 'selected' : '';
-      optionsHtml += `<option value="${s}" ${isPref}>🕒 ${s}</option>`;
+      const isSelected = s === chosenSlot;
+      optionsHtml += `<option value="${s}" ${isSelected ? 'selected' : ''}>🕒 ${s}</option>`;
+      chipsHtml += `<button type="button" class="slot-chip ${isSelected ? 'selected' : ''}" data-slot="${s}">🕒 ${s}</button>`;
     });
 
     timeSelect.innerHTML = optionsHtml;
-    if (hintEl) hintEl.textContent = `${slots.length} horário(s) livre(s) encontrado(s) sem conflitos.`;
+    timeSelect.value = chosenSlot;
+
+    if (gridEl) {
+      gridEl.innerHTML = chipsHtml;
+      gridEl.querySelectorAll('.slot-chip').forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          const selSlot = btn.getAttribute('data-slot');
+          gridEl.querySelectorAll('.slot-chip').forEach(b => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          timeSelect.value = selSlot;
+          if (badgeEl) {
+            badgeEl.textContent = `Horário: ${selSlot}`;
+            badgeEl.style.display = 'inline-block';
+          }
+        });
+      });
+    }
+
+    if (badgeEl && chosenSlot) {
+      badgeEl.textContent = `Horário: ${chosenSlot}`;
+      badgeEl.style.display = 'inline-block';
+    }
+
+    if (hintEl) hintEl.textContent = `✅ ${slots.length} horário(s) livre(s) sem conflito. Clique no horário desejado para agendar.`;
   } catch (err) {
     timeSelect.innerHTML = '<option value="">Erro ao buscar horários</option>';
+    if (gridEl) gridEl.innerHTML = '<span class="text-danger" style="font-size: 12px;">Erro ao consultar horários livres.</span>';
   }
 }
+
+// Botões de atalho rápido de data no modal ("Hoje" e "Amanhã")
+document.getElementById('btn-quick-date-today')?.addEventListener('click', () => {
+  const dateInput = document.getElementById('modal-apt-date');
+  if (dateInput) {
+    dateInput.value = getTodayString();
+    loadAvailableSlotsForModal();
+  }
+});
+document.getElementById('btn-quick-date-tomorrow')?.addEventListener('click', () => {
+  const dateInput = document.getElementById('modal-apt-date');
+  if (dateInput) {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    dateInput.value = `${yyyy}-${mm}-${dd}`;
+    loadAvailableSlotsForModal();
+  }
+});
 
 // Event Listeners para recarregar slots livres no modal
 document.getElementById('modal-apt-specialist')?.addEventListener('change', () => loadAvailableSlotsForModal());
@@ -4289,7 +4405,7 @@ document.querySelectorAll('input[name="modal-apt-referral-type"]').forEach(r => 
   });
 });
 
-// Submissão do Formulário de Agendamento Manual
+// Submissão do Formulário de Agendamento Manual no Consultório
 document.getElementById('modal-appointment-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
 
@@ -4307,11 +4423,12 @@ document.getElementById('modal-appointment-form')?.addEventListener('submit', as
     referralType,
     partnerId,
     notes: document.getElementById('modal-apt-notes')?.value.trim(),
-    notifySpecialist: document.getElementById('modal-apt-notify')?.checked
+    notifySpecialist: document.getElementById('modal-apt-notify')?.checked,
+    notifyPatient: document.getElementById('modal-apt-notify-patient')?.checked
   };
 
   if (!payload.startTime) {
-    showToast('Por favor, selecione um horário disponível.', 'warning');
+    showToast('Por favor, selecione um horário disponível na grade de horários.', 'warning');
     return;
   }
 
@@ -4330,7 +4447,15 @@ document.getElementById('modal-appointment-form')?.addEventListener('submit', as
       throw new Error(data.error || 'Erro ao criar agendamento.');
     }
 
-    showToast(`Agendamento confirmado para ${data.appointment.clientName}!`, 'success');
+    let successMsg = `✅ Agendamento confirmado para ${data.appointment.clientName}!`;
+    if (data.notifiedSpecialist) {
+      successMsg += ` Notificação enviada ao especialista no WhatsApp.`;
+    }
+    if (data.notifiedPatient) {
+      successMsg += ` Comprovante enviado ao paciente no WhatsApp.`;
+    }
+
+    showToast(successMsg, 'success', 5000);
     closeAppointmentModal();
     await loadAppointments();
   } catch (err) {
@@ -4344,6 +4469,7 @@ document.getElementById('modal-appointment-form')?.addEventListener('submit', as
 // Botões de fechar modal de agendamento
 document.getElementById('btn-close-apt-modal')?.addEventListener('click', closeAppointmentModal);
 document.getElementById('btn-cancel-apt')?.addEventListener('click', closeAppointmentModal);
+
 
 // ============================================================================
 // MODAL DE GERENCIAMENTO DE ESPECIALISTAS & SERVIÇOS (ISOLAMENTO ESTRITO POR EMPRESA)
