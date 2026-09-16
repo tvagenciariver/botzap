@@ -323,8 +323,8 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.7.7',
-    build: '2026-09-16-R7-GROUNDED-CLINIC-PROMPT',
+    version: '2.7.8',
+    build: '2026-09-16-R8-NATURAL-BOOKING-FLOW',
     buildDate: '2026.09.16',
     timestamp: new Date().toISOString(),
     agentsCount: {

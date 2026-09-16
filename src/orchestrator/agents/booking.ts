@@ -179,6 +179,196 @@ export class BookingAgent implements IAgent {
   }
 
   /**
+   * Identifica e resolve a escolha de data de forma natural (ex: "hoje", "amanhã", "sexta", "18/09", "18")
+   */
+  public parseDateChoice(rawText: string, dates: { label: string; date: string }[]): string | undefined {
+    if (!rawText || !dates || dates.length === 0) return undefined;
+
+    const norm = rawText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+    // 1. Termos relativos diretos
+    if (norm.includes('hoje')) {
+      const match = dates.find(d => d.label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes('hoje'));
+      if (match) return match.date;
+    }
+    if (norm.includes('amanha')) {
+      const match = dates.find(d => d.label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes('amanha'));
+      if (match) return match.date;
+    }
+
+    // 2. Dias da semana
+    const weekdays = [
+      { name: 'domingo', aliases: ['domingo', 'dom'] },
+      { name: 'segunda', aliases: ['segunda', 'segunda-feira', 'seg'] },
+      { name: 'terca', aliases: ['terca', 'terça', 'terca-feira', 'terça-feira', 'ter'] },
+      { name: 'quarta', aliases: ['quarta', 'quarta-feira', 'qua'] },
+      { name: 'quinta', aliases: ['quinta', 'quinta-feira', 'qui'] },
+      { name: 'sexta', aliases: ['sexta', 'sexta-feira', 'sex'] },
+      { name: 'sabado', aliases: ['sabado', 'sábado', 'sab'] },
+    ];
+
+    for (const wd of weekdays) {
+      if (wd.aliases.some(a => norm.includes(a))) {
+        const match = dates.find(d => {
+          const lNorm = d.label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          return wd.aliases.some(a => lNorm.includes(a));
+        });
+        if (match) return match.date;
+      }
+    }
+
+    // 3. Formato de data DD/MM ou DD/MM/AAAA
+    const slashMatch = norm.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+    if (slashMatch) {
+      const day = slashMatch[1].padStart(2, '0');
+      const month = slashMatch[2].padStart(2, '0');
+      const year = slashMatch[3] ? (slashMatch[3].length === 2 ? `20${slashMatch[3]}` : slashMatch[3]) : undefined;
+      const match = dates.find(d => {
+        const [y, m, dt] = d.date.split('-');
+        if (year && y !== year) return false;
+        return m === month && dt === day;
+      });
+      if (match) return match.date;
+    }
+
+    // 4. Menção ao dia do mês (ex: "dia 18", "18", "18 de setembro")
+    const dayMatch = norm.match(/(?:dia\s+)?(\d{1,2})/);
+    if (dayMatch) {
+      const dayNum = parseInt(dayMatch[1], 10);
+      const matchDay = dates.find(d => {
+        const [, , dt] = d.date.split('-').map(Number);
+        return dt === dayNum;
+      });
+      if (matchDay) return matchDay.date;
+    }
+
+    // 5. Fallback por índice numérico (ex: "1" ou "2") quando não coincidiu com dia do mês
+    const num = parseInt(rawText.replace(/\D/g, ''), 10);
+    if (!isNaN(num) && num >= 1 && num <= dates.length) {
+      return dates[num - 1].date;
+    }
+
+    // 6. Match por label parcial
+    const matchLabel = dates.find(d => {
+      const lNorm = d.label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return lNorm.includes(norm);
+    });
+    if (matchLabel) return matchLabel.date;
+
+    return undefined;
+  }
+
+  /**
+   * Identifica e resolve a escolha de horário de forma natural e sem colisão de horas com índices
+   * (ex: "às 9", "10", "10h30", "11", "14:00", "2 da tarde", "mais cedo", "último")
+   */
+  public parseSlotChoice(rawText: string, slots: string[]): string | undefined {
+    if (!rawText || !slots || slots.length === 0) return undefined;
+
+    const trimmed = rawText.trim();
+    if (slots.includes(trimmed)) return trimmed;
+
+    const norm = trimmed.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // 0. Se o usuário explicitamente digitou "opcao X", "item X" ou "numero X"
+    const explicitIndexMatch = norm.match(/^(?:opcao|item|numero|num|nº|n)\s*(\d+)$/);
+    if (explicitIndexMatch) {
+      const idx = parseInt(explicitIndexMatch[1], 10);
+      if (idx >= 1 && idx <= slots.length) {
+        return slots[idx - 1];
+      }
+    }
+
+    // 1. Termos relativos
+    if (norm.includes('primeiro') || norm.includes('mais cedo') || norm === 'cedo') {
+      return slots[0];
+    }
+    if (norm.includes('ultimo') || norm.includes('mais tarde')) {
+      return slots[slots.length - 1];
+    }
+
+    // 2. Períodos gerais do dia
+    if (norm === 'manha' || norm === 'de manha' || norm === 'pela manha') {
+      const morning = slots.find(s => parseInt(s.split(':')[0], 10) < 12);
+      if (morning) return morning;
+    }
+    if (norm === 'tarde' || norm === 'de tarde' || norm === 'a tarde' || norm === 'pela tarde') {
+      const afternoon = slots.find(s => parseInt(s.split(':')[0], 10) >= 12);
+      if (afternoon) return afternoon;
+    }
+
+    // 3. Normalização de números por extenso para dígitos
+    let textToParse = norm
+      .replace(/\s*e\s+meia\b/g, ':30')
+      .replace(/\b(um|uma)\b/g, '1')
+      .replace(/\b(dois|duas)\b/g, '2')
+      .replace(/\b(tres|três)\b/g, '3')
+      .replace(/\bquatro\b/g, '4')
+      .replace(/\bcinco\b/g, '5')
+      .replace(/\bseis\b/g, '6')
+      .replace(/\bsete\b/g, '7')
+      .replace(/\boito\b/g, '8')
+      .replace(/\bnove\b/g, '9')
+      .replace(/\bdez\b/g, '10')
+      .replace(/\bonze\b/g, '11')
+      .replace(/\bdoze\b/g, '12');
+
+    // 4. Detecção de hora e minuto de relógio
+    const isAfternoon = textToParse.includes('tarde') || textToParse.includes('pm');
+    const timeMatch = textToParse.match(/(?:as\s+|às\s+|pras\s+)?(\d{1,2})(?:\s*[:h\.]\s*(\d{2}))?/);
+
+    if (timeMatch) {
+      let hour = parseInt(timeMatch[1], 10);
+      const minStr = timeMatch[2];
+
+      // Ajuste para horário vespertino se digitou "2 da tarde", etc.
+      if (isAfternoon && hour >= 1 && hour <= 11) {
+        hour += 12;
+      }
+
+      let hourPadded = hour.toString().padStart(2, '0');
+
+      // Se a hora for de 1 a 7 e não houver horário na madrugada, mas houver à tarde (ex: "2" -> "14:00")
+      if (hour >= 1 && hour <= 7 && !slots.some(s => s.startsWith(`${hourPadded}:`))) {
+        const pmHour = hour + 12;
+        const pmPadded = pmHour.toString().padStart(2, '0');
+        if (slots.some(s => s.startsWith(`${pmPadded}:`))) {
+          hour = pmHour;
+          hourPadded = pmPadded;
+        }
+      }
+
+      if (minStr !== undefined) {
+        const target = `${hourPadded}:${minStr}`;
+        if (slots.includes(target)) return target;
+      } else {
+        const target00 = `${hourPadded}:00`;
+        if (slots.includes(target00)) {
+          return target00;
+        }
+        // Se não tiver :00, mas houver horários nesta mesma hora (ex: 09:30)
+        const matchingSlots = slots.filter(s => s.startsWith(`${hourPadded}:`));
+        if (matchingSlots.length > 0) {
+          return matchingSlots[0];
+        }
+      }
+    }
+
+    // 5. Fallback por índice numérico (ex: usuário digitou 1 para o 1º horário)
+    // CRÍTICO: Não tratar como índice se o número puder ser uma hora comercial existente nos slots
+    const num = parseInt(norm.replace(/\D/g, ''), 10);
+    if (!isNaN(num) && num >= 1 && num <= slots.length) {
+      const numPadded = num.toString().padStart(2, '0');
+      const hasSlotWithThatHour = slots.some(s => s.startsWith(`${numPadded}:`));
+      if (!hasSlotWithThatHour && num <= 6) {
+        return slots[num - 1];
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
    * Localiza agendamento pendente de confirmação ou cancelamento por resposta a lembrete
    */
   public findReminderAppointment(
@@ -481,9 +671,9 @@ export class BookingAgent implements IAgent {
             `🩺 *Serviço:* ${apt.serviceName}\n` +
             `📅 *Data:* ${notificationService.formatDateBR(apt.date)}\n` +
             `⏰ *Horário:* ${apt.startTime}\n\n` +
-            `Deseja realmente cancelar este agendamento?\n` +
-            `*1.* ❌ Sim, confirmar cancelamento\n` +
-            `*2.* ↩️ Não, manter agendamento`
+            `Deseja realmente cancelar este agendamento?\n\n` +
+            `• Responda *Sim* para confirmar o cancelamento\n` +
+            `• Responda *Não* para manter seu agendamento`
         };
       }
 
@@ -632,10 +822,10 @@ export class BookingAgent implements IAgent {
           `O seu atendimento será com *${mentionedSpec.name}* (${mentionedSpec.role}).\n` +
           `Qual procedimento você deseja agendar?\n\n`;
 
-        services.forEach((srv, i) => {
-          msg += `*${i + 1}.* ${srv.name} (${srv.durationMinutes} min) - ${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Consulte valor'}\n`;
+        services.forEach((srv) => {
+          msg += `• *${srv.name}* (${srv.durationMinutes} min) - ${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Consulte valor'}\n`;
         });
-        msg += `\n_Digite o número do serviço desejado:_`;
+        msg += `\n_Qual procedimento você deseja agendar?_`;
 
         return {
           handled: true,
@@ -667,12 +857,18 @@ export class BookingAgent implements IAgent {
       )
     );
     const isSharedSession = (!session || session === '*' || session === 'default' || session === 'simulator') && !isDedicatedAgent;
-    const textHasCompany = allBookingAgents.some(a => {
+    const matchedCompany = allBookingAgents.find(a => {
       const cNorm = a.companyName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      return normText.includes(cNorm);
+      const tokens = cNorm.split(/\s+/).filter(t => t.length >= 4);
+      return normText.includes(cNorm) || tokens.some(t => normText.includes(t));
     });
 
-    if (!companySelected && allBookingAgents.length > 1 && isSharedSession && !textHasCompany) {
+    if (matchedCompany) {
+      agentId = matchedCompany.id;
+      companyName = matchedCompany.companyName;
+    }
+
+    if (!companySelected && allBookingAgents.length > 1 && isSharedSession && !matchedCompany) {
       this.setSession(chatId, {
         step: 'select_company',
         offeredCompanies: allBookingAgents.map(a => ({ id: a.id, name: a.companyName }))
@@ -685,7 +881,7 @@ export class BookingAgent implements IAgent {
         msg += `*${idx + 1}.* 🏢 ${ag.companyName}\n`;
       });
 
-      msg += `\n_Digite o número correspondente à empresa desejada:_`;
+      msg += `\n_Digite o nome ou número da empresa desejada:_`;
 
       return {
         handled: true,
@@ -706,10 +902,8 @@ export class BookingAgent implements IAgent {
       }, agentId, companyName);
 
       const welcomeMsg = `Olá! Que alegria atender você na *${companyName}*! 🗓️✨\n\n` +
-        `Para organizarmos o seu atendimento, por favor informe:\n\n` +
-        `*1.* 👤 Particular\n` +
-        `*2.* 🏢 Encaminhamento / Convênio de Empresa Parceira\n\n` +
-        `_Digite *1* para Particular ou *2* para Convênio/Parceiro:_`;
+        `Para organizarmos o seu atendimento, por favor me informe:\n\n` +
+        `O seu atendimento será *Particular* ou por *Convênio*?`;
 
       return {
         handled: true,
@@ -733,15 +927,36 @@ export class BookingAgent implements IAgent {
     agentId: string,
     companyName: string
   ): AgentResponse {
-    const lower = text.toLowerCase().trim();
-    const isParticular = lower === '1' || lower.includes('part') || lower === 'particular';
-    const isPartner = lower === '2' || lower.includes('parc') || lower.includes('conv') || lower.includes('enca') || lower === 'encaminhamento';
+    const { unaccented } = this.sanitizeChoiceText(text);
+    const lower = unaccented.toLowerCase();
+
+    const partners = session.offeredPartners && session.offeredPartners.length > 0
+      ? session.offeredPartners
+      : partnerManager.listPartners(agentId).filter(p => p.active);
+
+    // 1. Checa se o paciente mencionou diretamente o nome de um dos parceiros/convênios cadastrados
+    const directPartner = partners.find(p => {
+      const pNorm = p.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return lower.includes(pNorm) || (pNorm.length >= 3 && lower.split(/\s+/).includes(pNorm));
+    });
+
+    if (directPartner) {
+      this.setSession(chatId, {
+        referralType: 'partner',
+        partnerId: directPartner.id,
+        partnerName: directPartner.name
+      });
+      return this.presentSpecialistsOrServices(chatId, agentId, companyName, `Convênio vinculado com sucesso: *${directPartner.name}*! ✅`);
+    }
+
+    const isParticular = lower === '1' || lower === 'particular' || lower.includes('part') || lower.includes('privad') || lower.includes('sem conv') || lower.includes('sem plano');
+    const isPartner = lower === '2' || lower === 'convenio' || lower.includes('conv') || lower.includes('plano') || lower.includes('enca') || lower.includes('parc');
 
     if (!isParticular && !isPartner) {
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Por favor, digite apenas *1* para Particular ou *2* para Encaminhamento / Convênio de Empresa Parceira:`
+        replyText: `Por favor, me informe se o seu atendimento será *Particular* ou por *Convênio* (ou informe o nome do seu plano):`
       };
     }
 
@@ -755,10 +970,6 @@ export class BookingAgent implements IAgent {
     }
 
     // Se escolheu parceiro/convênio
-    const partners = session.offeredPartners && session.offeredPartners.length > 0
-      ? session.offeredPartners
-      : partnerManager.listPartners(agentId).filter(p => p.active);
-
     if (partners.length === 0) {
       this.setSession(chatId, { referralType: 'particular' });
       return this.presentSpecialistsOrServices(chatId, agentId, companyName, 'No momento não identificamos convênios ativos. Prosseguiremos como atendimento particular.');
@@ -780,14 +991,14 @@ export class BookingAgent implements IAgent {
       offeredPartners: partners
     });
 
-    let msg = `🏢 *Empresas & Convênios Parceiros*\n\n` +
-      `Selecione abaixo a empresa parceira ou clínica que realizou seu encaminhamento:\n\n`;
+    let msg = `🏢 *Convênios & Parceiros Aceitos*\n\n` +
+      `Qual é o seu convênio ou empresa parceira?\n\n`;
 
-    partners.forEach((p, idx) => {
-      msg += `*${idx + 1}.* ${p.name}\n`;
+    partners.forEach((p) => {
+      msg += `• *${p.name}*\n`;
     });
 
-    msg += `\n_Digite o número correspondente à empresa parceira:_`;
+    msg += `\n_Basta digitar o nome do seu convênio (ou responda *Particular* se preferir):_`;
 
     return {
       handled: true,
@@ -807,21 +1018,40 @@ export class BookingAgent implements IAgent {
     companyName: string
   ): AgentResponse {
     const partners = session.offeredPartners || partnerManager.listPartners(agentId).filter(p => p.active);
-    const chosenIndex = parseInt(text.replace(/\D/g, ''), 10) - 1;
+    const { unaccented } = this.sanitizeChoiceText(text);
+    const lower = unaccented.toLowerCase();
 
-    let chosenPartner: Partner | undefined;
-    if (!isNaN(chosenIndex) && chosenIndex >= 0 && chosenIndex < partners.length) {
-      chosenPartner = partners[chosenIndex];
-    } else {
-      const lower = text.toLowerCase();
-      chosenPartner = partners.find(p => p.name.toLowerCase().includes(lower));
+    if (lower.includes('part') || lower.includes('privad')) {
+      this.setSession(chatId, {
+        referralType: 'particular',
+        partnerId: undefined,
+        partnerName: undefined
+      });
+      return this.presentSpecialistsOrServices(chatId, agentId, companyName, 'Perfeito! Atendimento atualizado para *Particular*.');
+    }
+
+    let chosenPartner = partners.find(p => {
+      const pNorm = p.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return lower.includes(pNorm) || pNorm.includes(lower);
+    });
+
+    if (!chosenPartner) {
+      const chosenIndex = parseInt(text.replace(/\D/g, ''), 10) - 1;
+      if (!isNaN(chosenIndex) && chosenIndex >= 0 && chosenIndex < partners.length) {
+        chosenPartner = partners[chosenIndex];
+      }
     }
 
     if (!chosenPartner) {
+      let msg = `Não localizamos esse convênio. Por favor, digite o nome de um dos convênios aceitos:\n\n`;
+      partners.forEach(p => {
+        msg += `• *${p.name}*\n`;
+      });
+      msg += `\n_(ou responda *Particular* se preferir):_`;
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Opção inválida. Por favor, digite o número de 1 a ${partners.length} correspondente à sua empresa parceira:`
+        replyText: msg
       };
     }
 
@@ -868,10 +1098,10 @@ export class BookingAgent implements IAgent {
         let msg = `${prefixMsg ? prefixMsg + '\n\n' : ''}O atendimento será com *${spec.name}* (${spec.role}).\n` +
           `Qual procedimento você deseja agendar?\n\n`;
 
-        services.forEach((srv, i) => {
-          msg += `*${i + 1}.* ${srv.name} (${srv.durationMinutes} min) - ${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Consulte valor'}\n`;
+        services.forEach((srv) => {
+          msg += `• *${srv.name}* (${srv.durationMinutes} min) - ${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Consulte valor'}\n`;
         });
-        msg += `\n_Digite o número do serviço desejado:_`;
+        msg += `\n_Qual procedimento você gostaria de realizar?_`;
 
         return {
           handled: true,
@@ -891,7 +1121,7 @@ export class BookingAgent implements IAgent {
       return this.presentNextDates(chatId, spec, prefixMsg);
     }
 
-    // Caso tenha múltiplos especialistas, apresenta o menu numerado
+    // Caso tenha múltiplos especialistas, apresenta com marcadores
     this.setSession(chatId, {
       step: 'select_specialist',
       offeredSpecialists: specialists
@@ -899,11 +1129,11 @@ export class BookingAgent implements IAgent {
 
     let msg = `${prefixMsg ? prefixMsg + '\n\n' : ''}Por favor, escolha com qual de nossos profissionais você gostaria de marcar:\n\n`;
 
-    specialists.forEach((spec, idx) => {
-      msg += `*${idx + 1}.* 👨‍⚕️ *${spec.name}* - ${spec.role}\n`;
+    specialists.forEach((spec) => {
+      msg += `• 👨‍⚕️ *${spec.name}* (${spec.role})\n`;
     });
 
-    msg += `\n_Digite o número correspondente ao especialista desejado (ou "sair" para cancelar):_`;
+    msg += `\n_Você pode responder com o nome do profissional (ou "sair" para cancelar):_`;
 
     return {
       handled: true,
@@ -922,23 +1152,34 @@ export class BookingAgent implements IAgent {
     agentId: string
   ): AgentResponse {
     const specialists = session.offeredSpecialists || appointmentManager.listSpecialists(agentId).filter(s => s.active !== false);
-    const num = parseInt(text.replace(/\D/g, ''), 10);
+    const norm = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
-    let selected: Specialist | undefined;
+    // 1. Tenta buscar por nome parcial ou especialidade
+    let selected = specialists.find(s => {
+      const sNorm = s.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/^(dra?\.?|doutor(a)?|dr\.?)\s+/i, '').trim();
+      const rNorm = s.role.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const firstName = sNorm.split(' ')[0];
+      return (firstName.length >= 3 && norm.includes(firstName)) || norm.includes(sNorm) || norm.includes(rNorm);
+    });
 
-    if (!isNaN(num) && num >= 1 && num <= specialists.length) {
-      selected = specialists[num - 1];
-    } else {
-      // Tenta buscar por nome parcial
-      const match = specialists.find(s => s.name.toLowerCase().includes(text.toLowerCase()));
-      if (match) selected = match;
+    // 2. Fallback por índice numérico
+    if (!selected) {
+      const num = parseInt(text.replace(/\D/g, ''), 10);
+      if (!isNaN(num) && num >= 1 && num <= specialists.length) {
+        selected = specialists[num - 1];
+      }
     }
 
     if (!selected) {
+      let promptMsg = `Não identifiquei o profissional informado. Por favor, escolha um dos profissionais disponíveis:\n\n`;
+      specialists.forEach(s => {
+        promptMsg += `• 👨‍⚕️ *${s.name}* (${s.role})\n`;
+      });
+      promptMsg += `\n_Você pode responder com o nome do profissional (ou digite "sair"):_`;
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Opção inválida. Por favor, digite o *número* de 1 a ${specialists.length} do especialista escolhido (ou digite "sair" para cancelar).`
+        replyText: promptMsg
       };
     }
 
@@ -954,10 +1195,10 @@ export class BookingAgent implements IAgent {
       let msg = `Ótimo! Você escolheu *${selected.name}* (${selected.role}). 👍\n\n` +
         `Qual procedimento você gostaria de realizar?\n\n`;
 
-      services.forEach((srv, i) => {
-        msg += `*${i + 1}.* ${srv.name} (${srv.durationMinutes} min) - ${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Consulte valor'}\n`;
+      services.forEach((srv) => {
+        msg += `• *${srv.name}* (${srv.durationMinutes} min) - ${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Consulte valor'}\n`;
       });
-      msg += `\n_Digite o número do serviço desejado:_`;
+      msg += `\n_Qual procedimento você deseja agendar?_`;
 
       return {
         handled: true,
@@ -984,21 +1225,32 @@ export class BookingAgent implements IAgent {
     text: string
   ): AgentResponse {
     const services = session.offeredServices || [];
-    const num = parseInt(text.replace(/\D/g, ''), 10);
+    const norm = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
-    let selectedService: ServiceItem | undefined;
-    if (!isNaN(num) && num >= 1 && num <= services.length) {
-      selectedService = services[num - 1];
-    } else {
-      const match = services.find(s => s.name.toLowerCase().includes(text.toLowerCase()));
-      if (match) selectedService = match;
+    // 1. Busca por nome do procedimento
+    let selectedService = services.find(s => {
+      const sNorm = s.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      return norm.includes(sNorm) || sNorm.includes(norm);
+    });
+
+    // 2. Fallback por índice numérico
+    if (!selectedService) {
+      const num = parseInt(text.replace(/\D/g, ''), 10);
+      if (!isNaN(num) && num >= 1 && num <= services.length) {
+        selectedService = services[num - 1];
+      }
     }
 
     if (!selectedService) {
+      let promptMsg = `Por favor, informe qual procedimento deseja agendar:\n\n`;
+      services.forEach(s => {
+        promptMsg += `• *${s.name}*\n`;
+      });
+      promptMsg += `\n_Qual procedimento você gostaria de realizar?_`;
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Por favor, digite o número correspondente ao serviço desejado (1 a ${services.length}).`
+        replyText: promptMsg
       };
     }
 
@@ -1067,11 +1319,11 @@ export class BookingAgent implements IAgent {
       offeredDates: dates
     });
 
-    let msg = `${prefixMsg ? prefixMsg + '\n\n' : ''}📅 *Escolha a data desejada* para o atendimento com *${specialist.name}*:\n\n`;
-    dates.forEach((item, idx) => {
-      msg += `*${idx + 1}.* ${item.label}\n`;
+    let msg = `${prefixMsg ? prefixMsg + '\n\n' : ''}📅 *Qual dia você prefere* para a consulta com *${specialist.name}*?\n\n`;
+    dates.forEach((item) => {
+      msg += `• *${item.label}*\n`;
     });
-    msg += `\n_Digite o número do dia escolhido (ou digite "sair"):_`;
+    msg += `\n_Você pode responder com *hoje*, *amanhã*, o dia da semana (ex: *sexta*) ou a data desejada (ou "sair"):_`;
 
     return {
       handled: true,
@@ -1089,32 +1341,18 @@ export class BookingAgent implements IAgent {
     text: string
   ): AgentResponse {
     const dates = session.offeredDates || [];
-    const num = parseInt(text.replace(/\D/g, ''), 10);
-
-    let chosenDate: string | undefined;
-
-    if (!isNaN(num) && num >= 1 && num <= dates.length) {
-      chosenDate = dates[num - 1].date;
-    } else {
-      // Se digitou data no formato DD/MM ou DD/MM/AAAA
-      if (text.includes('/')) {
-        const parts = text.trim().split('/');
-        if (parts.length >= 2) {
-          const day = parts[0].padStart(2, '0');
-          const month = parts[1].padStart(2, '0');
-          const year = parts[2] || new Date().getFullYear().toString();
-          const candidate = `${year}-${month}-${day}`;
-          const match = dates.find(d => d.date === candidate);
-          if (match) chosenDate = match.date;
-        }
-      }
-    }
+    const chosenDate = this.parseDateChoice(text, dates);
 
     if (!chosenDate) {
+      let promptMsg = `Por favor, informe a data desejada para o atendimento:\n\n`;
+      dates.forEach(d => {
+        promptMsg += `• *${d.label}*\n`;
+      });
+      promptMsg += `\n_Você pode responder com *hoje*, *amanhã*, o dia da semana (ex: *sexta*) ou a data desejada (ou "sair"):_`;
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Por favor, digite o número da data desejada (1 a ${dates.length}).`
+        replyText: promptMsg
       };
     }
 
@@ -1132,7 +1370,7 @@ export class BookingAgent implements IAgent {
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Desculpe, todos os horários para esta data acabaram de ser preenchidos. Por favor, escolha outra data digitando o número correspondente.`
+        replyText: `Desculpe, todos os horários para esta data acabaram de ser preenchidos. Por favor, escolha outra data:`
       };
     }
 
@@ -1142,11 +1380,10 @@ export class BookingAgent implements IAgent {
       offeredSlots: slots
     });
 
-    let msg = `⏰ *Horários disponíveis* para *${notificationService.formatDateBR(chosenDate)}* com *${specialist.name}*:\n\n`;
-    slots.forEach((s, idx) => {
-      msg += `*${idx + 1}.* 🕒 ${s}\n`;
-    });
-    msg += `\n_Digite o número do horário desejado (ou "sair" para cancelar):_`;
+    const formattedSlots = slots.map(s => `*${s}*`).join('  •  ');
+    let msg = `⏰ *Horários disponíveis* para *${notificationService.formatDateBR(chosenDate)}* com *${specialist.name}*:\n\n` +
+      `🕒 ${formattedSlots}\n\n` +
+      `_Qual destes horários fica melhor para você? (ex: *9h*, *10:00*, *às 11*):_`;
 
     return {
       handled: true,
@@ -1165,25 +1402,14 @@ export class BookingAgent implements IAgent {
     contactName?: string
   ): AgentResponse {
     const slots = session.offeredSlots || [];
-    const num = parseInt(text.replace(/\D/g, ''), 10);
-
-    let chosenSlot: string | undefined;
-
-    if (!isNaN(num) && num >= 1 && num <= slots.length) {
-      chosenSlot = slots[num - 1];
-    } else {
-      // Se digitou o horário direto (ex: "14:00")
-      const direct = text.trim();
-      if (slots.includes(direct)) {
-        chosenSlot = direct;
-      }
-    }
+    const chosenSlot = this.parseSlotChoice(text, slots);
 
     if (!chosenSlot) {
+      const formattedSlots = slots.map(s => `*${s}*`).join('  •  ');
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Opção inválida. Por favor, digite o número correspondente ao horário desejado (1 a ${slots.length}).`
+        replyText: `Não identifiquei o horário informado.\n\nHorários disponíveis:\n🕒 ${formattedSlots}\n\n_Qual destes horários fica melhor para você? (ex: *9h*, *10:00*, *às 11*):_`
       };
     }
 
@@ -1395,7 +1621,7 @@ export class BookingAgent implements IAgent {
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Opção inválida. Digite *1* para confirmar o cancelamento ou *2* para manter seu agendamento.`
+        replyText: `Opção inválida. Responda *Sim* para confirmar o cancelamento ou *Não* para manter seu agendamento.`
       };
     }
 
