@@ -34,15 +34,24 @@ export class BookingAgent implements IAgent {
   name = 'BookingAgent';
   description = 'Gerencia agendamentos interativos, anti-conflitos, cancelamentos e confirmações de presença D-1 via WhatsApp.';
 
-  // Sessões em memória por chatId (expiram após 10 minutos)
-  private sessions: Map<string, BookingSessionState> = new Map();
+  // Sessões em memória por chatId compartilhadas globalmente (expiram após 10 minutos)
+  private static sessions: Map<string, BookingSessionState> = new Map();
   private readonly SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 
+  public static clearAllSessions(): void {
+    BookingAgent.sessions.clear();
+    console.log('[BookingAgent] 🧹 Todas as sessões em andamento de agendamento foram limpas.');
+  }
+
+  public clearAllSessions(): void {
+    BookingAgent.clearAllSessions();
+  }
+
   private getSession(chatId: string, expectedAgentId?: string): BookingSessionState | undefined {
-    const s = this.sessions.get(chatId);
+    const s = BookingAgent.sessions.get(chatId);
     if (!s) return undefined;
     if (Date.now() - s.updatedAt > this.SESSION_TIMEOUT_MS) {
-      this.sessions.delete(chatId);
+      BookingAgent.sessions.delete(chatId);
       return undefined;
     }
     // Se um expectedAgentId for especificado e a sessão pertencer a outro agente, descarta para evitar contaminação
@@ -71,12 +80,12 @@ export class BookingAgent implements IAgent {
       companyName: state.companyName || current.companyName || defaultCompanyName,
       updatedAt: Date.now()
     };
-    this.sessions.set(chatId, updated);
+    BookingAgent.sessions.set(chatId, updated);
     return updated;
   }
 
   private clearSession(chatId: string): void {
-    this.sessions.delete(chatId);
+    BookingAgent.sessions.delete(chatId);
   }
 
   private sanitizeChoiceText(text: string): { clean: string; digits: string; unaccented: string } {
@@ -336,7 +345,9 @@ export class BookingAgent implements IAgent {
       'agendar', 'agendamento', 'marcar consulta', 'marcar horario', 'marcar horário',
       'quero agendar', 'preciso de consulta', 'disponibilidade de horario', 'horario disponivel',
       'horário disponível', 'vaga para consulta', 'marcar médico', 'marcar psicologo',
-      'marcar dentista', 'fazer agendamento', 'consultas disponíveis'
+      'marcar dentista', 'fazer agendamento', 'consultas disponíveis',
+      'marcar exame', 'agendar exame', 'fazer exame', 'marcar procedimento', 'agendar procedimento',
+      'fazer procedimento', 'marcar atendimento', 'agendar atendimento', 'exames disponíveis'
     ];
     const hasBookingKw = bookingKeywords.some(kw => lowerText.includes(kw));
 
@@ -362,6 +373,7 @@ export class BookingAgent implements IAgent {
     const cancelKeywords = [
       'cancelar agendamento', 'cancelar consulta', 'desmarcar consulta',
       'desmarcar agendamento', 'desmarcar horario', 'desmarcar horário',
+      'cancelar exame', 'desmarcar exame', 'cancelar procedimento', 'desmarcar procedimento',
       'meus agendamentos', 'minhas consultas'
     ];
     if (cancelKeywords.some(kw => lowerText.includes(kw))) {
@@ -395,11 +407,15 @@ export class BookingAgent implements IAgent {
       }
     }
 
+    // Se o paciente JÁ ESTÁ no meio de um fluxo de agendamento (escolhendo dia, horário, etc),
+    // a resposta (como 1, 2, 3...) pertence ao fluxo atual e NÃO deve ser interceptada como lembrete!
+    const activeSession = this.getSession(chatId, agentId);
+
     // 1. Verifica se é resposta ao Lembrete D-1 (Confirmar ou Desistir da consulta)
     const isConfirmChoice = this.isConfirmChoice(text);
     const isCancelChoice = this.isCancelChoice(text);
 
-    if (isConfirmChoice || isCancelChoice) {
+    if (!activeSession && (isConfirmChoice || isCancelChoice)) {
       const apt = this.findReminderAppointment(context, agentId);
       if (apt) {
         // Encontra o agente da empresa dona da consulta
@@ -432,7 +448,11 @@ export class BookingAgent implements IAgent {
     }
 
     // 2. Intenção de Cancelamento manual ou Ver Meus Agendamentos
-    const cancelKeywords = ['cancelar agendamento', 'cancelar consulta', 'desmarcar consulta', 'desmarcar agendamento', 'desmarcar horario', 'meus agendamentos', 'minhas consultas'];
+    const cancelKeywords = [
+      'cancelar agendamento', 'cancelar consulta', 'desmarcar consulta', 'desmarcar agendamento',
+      'desmarcar horario', 'cancelar exame', 'desmarcar exame', 'cancelar procedimento',
+      'desmarcar procedimento', 'meus agendamentos', 'minhas consultas'
+    ];
     if (cancelKeywords.some(kw => lowerText.includes(kw)) && !this.getSession(chatId, agentId)) {
       const activeApts = appointmentManager.getAppointmentsByChatId(chatId);
 
@@ -639,7 +659,14 @@ export class BookingAgent implements IAgent {
     // e o usuário não tiver especificado a empresa nem especialista no texto:
     const allBookingAgents = agentManager.listAgents().filter(a => a.active && a.enableBooking);
     const session = context?.session;
-    const isSharedSession = !session || session === '*' || session === 'default' || session === 'simulator';
+    const isDedicatedAgent = Boolean(
+      context?.agent && (
+        (context.agent.wahaSession && context.agent.wahaSession !== '*' && context.agent.wahaSession !== 'default') ||
+        Boolean(context.agent.phoneNumber) ||
+        context.agent.id !== 'default'
+      )
+    );
+    const isSharedSession = (!session || session === '*' || session === 'default' || session === 'simulator') && !isDedicatedAgent;
     const textHasCompany = allBookingAgents.some(a => {
       const cNorm = a.companyName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       return normText.includes(cNorm);
@@ -1160,27 +1187,13 @@ export class BookingAgent implements IAgent {
       };
     }
 
-    // Se já tivermos o nome do contato do WhatsApp e o usuário puder confirmar
     this.setSession(chatId, {
       step: 'confirm_name',
       slot: chosenSlot
     });
 
-    const isValidPatientName = !!(
-      contactName &&
-      contactName.length > 2 &&
-      !contactName.includes('@') &&
-      !/^[\d\s\-()+]+$/.test(contactName) &&
-      !['cliente', 'cliente teste', 'desconhecido'].includes(contactName.toLowerCase().trim())
-    );
-
-    let promptName = `Perfeito! Horário escolhido: *${chosenSlot}* em *${notificationService.formatDateBR(session.dateStr!)}*.\n\n`;
-
-    if (isValidPatientName) {
-      promptName += `Por favor, digite o *Nome Completo do Paciente* para registro na ficha médica (ou responda *1* para confirmar no nome de *${contactName}*):`;
-    } else {
-      promptName += `Por favor, digite o *Nome Completo do Paciente* para finalizarmos o agendamento:`;
-    }
+    const promptName = `Perfeito! Horário escolhido: *${chosenSlot}* em *${notificationService.formatDateBR(session.dateStr!)}*.\n\n` +
+      `Por favor, digite o *Nome Completo do Paciente* para finalizarmos o agendamento:`;
 
     return {
       handled: true,
@@ -1197,19 +1210,18 @@ export class BookingAgent implements IAgent {
     session: BookingSessionState,
     text: string
   ): AgentResponse {
-    let clientName = text.trim();
+    const clean = text.trim();
+    const isSingleDigitOrConfirm = /^([0-9]|sim|confirmo|ok|nao|não|quero)$/i.test(clean);
 
-    if (clientName === '1' || clientName.toLowerCase() === 'sim') {
-      clientName = 'Paciente WhatsApp';
-    }
-
-    if (!clientName || clientName.length < 2) {
+    if (!clean || clean.length < 3 || isSingleDigitOrConfirm || /^[\d\s\-()+]+$/.test(clean)) {
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Por favor, informe o *Nome Completo do Paciente* para continuarmos:`
+        replyText: `Por favor, digite o *Nome Completo do Paciente* (nome e sobrenome) para registro na ficha médica:`
       };
     }
+
+    const clientName = clean;
 
     // Salva o nome e avança para solicitar o WhatsApp de contato do paciente
     this.setSession(chatId, {
@@ -1411,3 +1423,5 @@ export class BookingAgent implements IAgent {
     }
   }
 }
+
+export const bookingAgent = new BookingAgent();

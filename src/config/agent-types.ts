@@ -10,7 +10,7 @@ export interface AgentProfile {
   pausedGloballyUntil?: number; // timestamp até quando o agente está pausado globalmente
   isDefault?: boolean; // se é o agente padrão de contingência
   wahaSession?: string; // sessão da WAHA vinculada (ex: "unimagem" ou "*")
-
+  phoneNumber?: string; // Número de WhatsApp/chip exclusivo desta empresa (ex: "5587991252580")
   
   // Provedor de IA e Parâmetros
   llmProvider: 'gemini' | 'openai';

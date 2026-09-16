@@ -7,6 +7,9 @@ export { getAlternateBrazilianChatId, getAllChatIdAliases, lidMapper };
 export class WahaClient {
   private client!: AxiosInstance;
   private defaultSession!: string;
+  private sessionPhoneMap: Map<string, string> = new Map();
+  private sessionPushNameMap: Map<string, string> = new Map();
+  private lastSessionSyncAt: number = 0;
 
   constructor() {
     this.reloadConfig();
@@ -276,15 +279,69 @@ export class WahaClient {
   }
 
   /**
-   * Lista todas as sessões ativas na WAHA
+   * Lista todas as sessões ativas na WAHA e atualiza o mapa de telefones conectados
    */
   async listSessions(): Promise<WahaSessionStatus[]> {
     try {
       const response = await this.client.get('/api/sessions');
-      return response.data;
+      const sessions = Array.isArray(response.data) ? response.data : [];
+      
+      // Atualiza o mapa de telefones conectados por sessão
+      for (const s of sessions) {
+        if (!s || !s.name) continue;
+        if (s.me?.pushName) {
+          this.sessionPushNameMap.set(s.name, s.me.pushName);
+        }
+        if (s.me?.id) {
+          const rawId = String(s.me.id);
+          const clean = rawId.replace(/:\d+@/, '@').replace(/\D/g, '');
+          if (clean.length >= 8) {
+            this.sessionPhoneMap.set(clean, s.name);
+          }
+        }
+      }
+      this.lastSessionSyncAt = Date.now();
+      return sessions;
     } catch (error: any) {
       return [];
     }
+  }
+
+  /**
+   * Sincroniza ativamente o cache de sessões e telefones conectados
+   */
+  async syncSessionsCache(): Promise<void> {
+    await this.listSessions();
+  }
+
+  /**
+   * Encontra o nome da sessão da WAHA a partir do número de telefone de destino (payload.to)
+   */
+  getSessionByPhoneNumber(rawPhone: string): string | undefined {
+    if (!rawPhone) return undefined;
+    const clean = rawPhone.replace(/:\d+@/, '@').replace(/\D/g, '');
+    if (clean.length < 8) return undefined;
+
+    // 1. Match exato nos dígitos
+    if (this.sessionPhoneMap.has(clean)) {
+      return this.sessionPhoneMap.get(clean);
+    }
+
+    // 2. Match com/sem 9º dígito ou DDI (55)
+    for (const [phoneDigits, session] of this.sessionPhoneMap.entries()) {
+      if (clean === phoneDigits) return session;
+      if (clean.length >= 10 && phoneDigits.length >= 10) {
+        if (clean.endsWith(phoneDigits) || phoneDigits.endsWith(clean)) {
+          return session;
+        }
+        const cWithout9 = clean.length === 13 ? clean.slice(0, 4) + clean.slice(5) : clean;
+        const pWithout9 = phoneDigits.length === 13 ? phoneDigits.slice(0, 4) + phoneDigits.slice(5) : phoneDigits;
+        if (cWithout9 === pWithout9 || cWithout9.endsWith(pWithout9) || pWithout9.endsWith(cWithout9)) {
+          return session;
+        }
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -595,8 +652,12 @@ export class WahaClient {
    */
   async configureWebhook(webhookUrl: string, session?: string): Promise<{ success: boolean; message: string }> {
     const sessionName = session || this.defaultSession;
+    let targetUrl = webhookUrl;
+    if (sessionName && sessionName !== '*' && !targetUrl.endsWith('/' + sessionName)) {
+      targetUrl = `${targetUrl.replace(/\/$/, '')}/${encodeURIComponent(sessionName)}`;
+    }
     const webhookConfig = {
-      url: webhookUrl,
+      url: targetUrl,
       events: ['message']
     };
 

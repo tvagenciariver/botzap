@@ -1733,6 +1733,24 @@ async function loadChats() {
 
 document.getElementById('btn-refresh-chats')?.addEventListener('click', loadChats);
 
+document.getElementById('btn-clear-all-memory')?.addEventListener('click', async () => {
+  if (!confirm('⚠️ Tem certeza que deseja limpar toda a memória de conversas e sessões de atendimentos?\n\nIsso resetará todos os históricos de chat do bot e sessões de agendamento em andamento para recomeçar o atendimento do zero.')) {
+    return;
+  }
+  try {
+    const res = await fetchWithAuth('/api/admin/clear-memory', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('🧹 Memória de atendimentos limpa com sucesso!', 'success');
+      loadChats();
+    } else {
+      showToast(`Erro ao limpar memória: ${data.error || 'Falha na operação'}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Erro ao limpar memória: ${err.message}`, 'error');
+  }
+});
+
 window.pauseChat = async function(chatId) {
   await fetchWithAuth(`/api/chats/${encodeURIComponent(chatId)}/pause`, {
     method: 'POST',
@@ -2292,6 +2310,7 @@ function renderAgentsGrid(agents) {
 
           <div class="agent-card-badges">
             <span class="agent-badge-item">📱 Sessão: <strong>${escapeHtml(sessionLabel)}</strong></span>
+            ${agent.phoneNumber ? `<span class="agent-badge-item" style="border-color: rgba(6, 182, 212, 0.4); color: #06b6d4;">📞 <strong>${escapeHtml(agent.phoneNumber)}</strong></span>` : ''}
             <span class="agent-badge-item ${provider === 'openai' ? 'agent-badge-provider-openai' : 'agent-badge-provider-gemini'}">
               🧠 ${provider === 'openai' ? 'OpenAI ' : 'Gemini '} ${escapeHtml(model)}
             </span>
@@ -2763,6 +2782,9 @@ function openNewAgentModal() {
   document.getElementById('modal-agent-name').value = '';
   document.getElementById('modal-agent-company').value = '';
   document.getElementById('modal-agent-session').value = '';
+  if (document.getElementById('modal-agent-phoneNumber')) {
+    document.getElementById('modal-agent-phoneNumber').value = '';
+  }
   document.getElementById('modal-agent-description').value = '';
   document.getElementById('modal-agent-active').checked = true;
   document.getElementById('modal-agent-isDefault').checked = false;
@@ -2824,6 +2846,9 @@ async function openEditAgentModal(agentId) {
     document.getElementById('modal-agent-name').value = agent.name || '';
     document.getElementById('modal-agent-company').value = agent.companyName || '';
     document.getElementById('modal-agent-session').value = agent.wahaSession || '';
+    if (document.getElementById('modal-agent-phoneNumber')) {
+      document.getElementById('modal-agent-phoneNumber').value = agent.phoneNumber || '';
+    }
     document.getElementById('modal-agent-description').value = agent.description || '';
     document.getElementById('modal-agent-active').checked = agent.active !== false;
     document.getElementById('modal-agent-isDefault').checked = !!agent.isDefault;
@@ -2919,6 +2944,7 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
       name: document.getElementById('modal-agent-name').value.trim(),
       companyName: document.getElementById('modal-agent-company').value.trim(),
       wahaSession: document.getElementById('modal-agent-session').value.trim(),
+      phoneNumber: (document.getElementById('modal-agent-phoneNumber')?.value || '').trim() || undefined,
       description: document.getElementById('modal-agent-description').value.trim(),
       active: document.getElementById('modal-agent-active').checked,
       isDefault: document.getElementById('modal-agent-isDefault').checked,

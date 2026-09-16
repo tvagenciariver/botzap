@@ -18,7 +18,7 @@
         <div class="brand-text">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h1>BotZap</h1>
-            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.7.0</span>
+            <span class="app-version-badge" id="app-version-badge" title="Versão do BotZap">v2.7.5</span>
           </div>
 
           <span>Orquestrador IA</span>
@@ -697,15 +697,22 @@
                     </div>
 
                     <div class="form-row" style="margin-top: 15px;">
-                      <div class="form-group col-8">
+                      <div class="form-group col-6">
                         <label for="modal-agent-session">Sessão da WAHA Vinculada *</label>
                         <input type="text" id="modal-agent-session" class="form-control" list="modal-agent-session-list" placeholder="Ex: vale_studio, unimagem ou default">
                         <datalist id="modal-agent-session-list"></datalist>
                         <small class="form-hint">
-                          Identificador da sessão da WAHA correspondente a este número/empresa. Dica: selecione da lista ou digite o nome exato da sessão para garantir isolamento total de agendas e profissionais.
+                          Identificador da sessão da WAHA correspondente a este número/empresa.
                         </small>
                       </div>
-                      <div class="form-group col-4">
+                      <div class="form-group col-6">
+                        <label for="modal-agent-phoneNumber">📱 Número WhatsApp do Chip (Opcional)</label>
+                        <input type="text" id="modal-agent-phoneNumber" class="form-control" placeholder="Ex: 5587999991111 ou 87999991111">
+                        <small class="form-hint">Número conectado. Garante que 100% das mensagens enviadas a este WhatsApp caiam direto neste agente, com isolamento total de agendas e médicos!</small>
+                      </div>
+                    </div>
+                    <div class="form-row" style="margin-top: 15px;">
+                      <div class="form-group col-12">
                         <label for="modal-agent-description">Observações Internas (Opcional)</label>
                         <input type="text" id="modal-agent-description" class="form-control" placeholder="Ex: Plano Anual - Unidade Centro">
                         <small class="form-hint">Identificação interna para organização da sua equipe.</small>
@@ -1370,7 +1377,10 @@
               <h3>👥 Conversas Ativas e Controle do Bot por Contato</h3>
               <p>Monitore quais números conversaram recentemente e pause/reative o bot individualmente.</p>
             </div>
-            <button class="btn btn-secondary btn-sm" id="btn-refresh-chats">Atualizar Lista</button>
+            <div class="d-flex align-center gap-2">
+              <button class="btn btn-danger btn-sm" id="btn-clear-all-memory" title="Limpar todo o histórico de conversas e sessões de agendamento em andamento">🧹 Limpar Memória dos Atendimentos</button>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-chats">Atualizar Lista</button>
+            </div>
           </div>
           <div class="card-body">
             <div class="table-responsive">

@@ -19,6 +19,7 @@ import { partnerManager } from '../appointments/partner-manager.js';
 
 import { examService } from '../appointments/exam-service.js';
 import { formatToWhatsAppChatId, lidMapper } from '../appointments/phone-utils.js';
+import { BookingAgent } from '../orchestrator/agents/booking.js';
 import { userManager } from '../auth/user-manager.js';
 import { blastStore } from '../blast/blast-store.js';
 import { blastEngine } from '../blast/blast-engine.js';
@@ -322,8 +323,8 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.7.4',
-    build: '2026-09-16-R4-MULTITENANT-ISOLATION',
+    version: '2.7.5',
+    build: '2026-09-16-R5-PHONE-ROUTING-CLEAN-NAME',
     buildDate: '2026.09.16',
     timestamp: new Date().toISOString(),
     agentsCount: {
@@ -884,6 +885,25 @@ apiRouter.delete('/api/logs', requireAdmin, (req: Request, res: Response) => {
   const agentId = req.query.agentId as string | undefined;
   orchestrator.clearLogs(agentId);
   res.json({ success: true });
+});
+
+/**
+ * 13.1 Limpar toda a memória de conversas, agendamentos em andamento e mapeamentos (Exclusivo Administrador)
+ */
+apiRouter.post('/api/admin/clear-memory', requireAdmin, (_req: Request, res: Response) => {
+  try {
+    memoryStore.clearAll();
+    BookingAgent.clearAllSessions();
+    lidMapper.clear();
+    orchestrator.addLog({
+      type: 'info',
+      chatId: 'system',
+      message: '🧹 Toda a memória de atendimentos e sessões de chat foi limpa pelo administrador.'
+    });
+    res.json({ success: true, message: 'Memória de atendimentos limpa com sucesso!' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /**

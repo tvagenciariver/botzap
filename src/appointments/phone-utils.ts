@@ -202,6 +202,22 @@ class LidPhoneMapper {
     }
     return undefined;
   }
+
+  clear(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    this.lidToPhone.clear();
+    this.phoneToLid.clear();
+    try {
+      if (fs.existsSync(this.filePath)) {
+        fs.writeFileSync(this.filePath, '{}', 'utf-8');
+      }
+    } catch (err: any) {
+      console.error('[LidPhoneMapper] Erro ao limpar lid_mappings.json:', err.message);
+    }
+  }
 }
 
 export const lidMapper = new LidPhoneMapper();

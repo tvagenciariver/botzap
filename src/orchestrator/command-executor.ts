@@ -4,7 +4,8 @@ import { memoryStore } from '../gemini/memory.js';
 import { wahaClient } from '../waha/client.js';
 import { examService } from '../appointments/exam-service.js';
 import { appointmentManager } from '../appointments/appointment-manager.js';
-import { formatToWhatsAppChatId, getAlternateBrazilianChatId } from '../appointments/phone-utils.js';
+import { formatToWhatsAppChatId, getAlternateBrazilianChatId, lidMapper } from '../appointments/phone-utils.js';
+import { BookingAgent } from './agents/booking.js';
 import { checkBusinessHoursStatus } from './schedule-helper.js';
 import { llmProviderManager } from './llm-provider.js';
 
@@ -304,7 +305,29 @@ export class CommandExecutor {
       };
     }
 
-    // C. Limpar memória do contato: limpar memoria <telefone>
+    // C. Limpar TODA a memória de atendimentos do sistema: limpar memoria / resetar atendimentos / clear memory
+    if (
+      lower === 'limpar memoria' ||
+      lower === 'limpar memoria geral' ||
+      lower === 'resetar atendimentos' ||
+      lower === 'limpar atendimentos' ||
+      lower === 'resetar memoria' ||
+      lower === 'clear memory'
+    ) {
+      memoryStore.clearAll();
+      BookingAgent.clearAllSessions();
+      lidMapper.clear();
+
+      return {
+        success: true,
+        command: cmd,
+        action: 'all_memory_cleared',
+        message: `🧹 **Memória Geral Limpa:** Todas as conversas ativas, históricos do robô e sessões de agendamento em andamento foram completamente resetados!`,
+        timestamp
+      };
+    }
+
+    // D. Limpar memória de contato específico: limpar memoria <telefone>
     const clearMemoryMatch = cmd.match(/^(?:limpar\s+memoria|resetar\s+contato|esquecer)\s+([0-9+\-()\s]+)$/i);
     if (clearMemoryMatch) {
       const rawPhone = clearMemoryMatch[1].trim();

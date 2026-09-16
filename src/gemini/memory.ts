@@ -34,7 +34,9 @@ export class MemoryStore {
     try {
       if (fs.existsSync(memoryPath)) {
         const raw = fs.readFileSync(memoryPath, 'utf-8');
-        const data = JSON.parse(raw);
+        const cleanRaw = raw.replace(/^\uFEFF/, '').trim();
+        if (!cleanRaw) return;
+        const data = JSON.parse(cleanRaw);
         if (Array.isArray(data)) {
           for (const item of data) {
             if (item && item.chatId) {
@@ -305,6 +307,27 @@ export class MemoryStore {
     if (session) {
       session.messages = [];
       this.scheduleSave();
+    }
+  }
+
+  /**
+   * Limpa completamente todas as sessões de memória do robô e salva '[]' no disco
+   */
+  clearAll(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    this.sessions.clear();
+    try {
+      const dir = path.dirname(memoryPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(memoryPath, '[]', 'utf-8');
+      console.log('[MemoryStore] 🧹 Todas as sessões de chat e memórias foram limpas com sucesso.');
+    } catch (err: any) {
+      console.error('[MemoryStore] Erro ao limpar chat_sessions.json:', err.message);
     }
   }
 

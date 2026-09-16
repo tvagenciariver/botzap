@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { AgentProfile } from './agent-types.js';
 import { loadBotConfig, defaultBusinessHours } from './index.js';
+import { wahaClient } from '../waha/client.js';
 
 const agentsFilePath = path.resolve(process.cwd(), 'data', 'agents.json');
 
@@ -186,10 +187,35 @@ export class AgentManager {
     recipientPhone?: string;
     contactName?: string;
   }): { agent: AgentProfile; reason: string } {
-    const { sessionName, messageText, chatId } = params;
+    const { sessionName, messageText, chatId, recipientPhone } = params;
     const cleanSession = (sessionName || '').trim().toLowerCase();
 
-    // 1. Se a sessão da WAHA é específica (diferente de '*' e 'default'), tenta correspondência direta
+    // 1. PRIORIDADE ABSOLUTA: Match por número de telefone de destino (recipientPhone / payload.to)
+    if (recipientPhone) {
+      const recDigits = recipientPhone.replace(/:\d+@/, '@').replace(/\D/g, '');
+      if (recDigits.length >= 8) {
+        // A. Match direto com phoneNumber cadastrado no perfil do agente
+        for (const a of this.agents.values()) {
+          if (a.active && a.phoneNumber) {
+            const agentDigits = a.phoneNumber.replace(/\D/g, '');
+            if (agentDigits.length >= 8 && (recDigits.endsWith(agentDigits) || agentDigits.endsWith(recDigits))) {
+              return { agent: a, reason: `recipient_phone (${a.phoneNumber} -> ${a.companyName})` };
+            }
+          }
+        }
+
+        // B. Match com o telefone conectado da sessão da WAHA
+        const mappedSession = wahaClient.getSessionByPhoneNumber(recDigits);
+        if (mappedSession) {
+          const matchedAgent = this.getAgentBySession(mappedSession);
+          if (matchedAgent && matchedAgent.active) {
+            return { agent: matchedAgent, reason: `waha_connected_phone (${recDigits} -> sessão ${mappedSession} -> ${matchedAgent.companyName})` };
+          }
+        }
+      }
+    }
+
+    // 2. Se a sessão da WAHA é específica (diferente de '*' e 'default'), tenta correspondência direta
     if (cleanSession && cleanSession !== '*' && cleanSession !== 'default') {
       for (const a of this.agents.values()) {
         if (a.active && a.wahaSession && a.wahaSession.trim().toLowerCase() === cleanSession) {
@@ -309,7 +335,11 @@ export class AgentManager {
     // 5. Se houver apenas UMA empresa com agendamento ativo e a mensagem tiver intenção clara de agendamento
     if (messageText) {
       const lower = messageText.toLowerCase();
-      const isBookingIntent = ['agendar', 'marcar consulta', 'marcar horario', 'marcar horário', 'quero agendar'].some(kw => lower.includes(kw));
+      const isBookingIntent = [
+        'agendar', 'agendamento', 'marcar consulta', 'marcar horario', 'marcar horário', 'quero agendar',
+        'marcar exame', 'agendar exame', 'fazer exame', 'marcar procedimento', 'agendar procedimento',
+        'fazer procedimento', 'fazer agendamento', 'consultas disponíveis', 'exames disponíveis'
+      ].some(kw => lower.includes(kw));
       if (isBookingIntent) {
         const bookingAgents = Array.from(this.agents.values()).filter(a => a.active && a.enableBooking);
         if (bookingAgents.length === 1) {
@@ -342,6 +372,7 @@ export class AgentManager {
       name: rawName,
       companyName: data.companyName || 'Empresa Cliente',
       description: data.description || '',
+      phoneNumber: data.phoneNumber ? data.phoneNumber.trim() : undefined,
       active: data.active !== false,
       isDefault: !!data.isDefault,
       wahaSession: assignedSession,
@@ -370,8 +401,6 @@ export class AgentManager {
       updatedAt: Date.now()
     };
 
-
-
     if (newAgent.isDefault) {
       // Remove isDefault dos demais
       for (const a of this.agents.values()) {
@@ -394,6 +423,10 @@ export class AgentManager {
       for (const a of this.agents.values()) {
         if (a.id !== id) a.isDefault = false;
       }
+    }
+
+    if (updates.phoneNumber !== undefined) {
+      updates.phoneNumber = updates.phoneNumber ? updates.phoneNumber.trim() : undefined;
     }
 
     if (updates.pauseDurationHours !== undefined) {
