@@ -3,6 +3,7 @@ import { env, loadBotConfig, saveBotConfig } from '../config/index.js';
 import { AgentProfile } from '../config/agent-types.js';
 import { agentManager } from '../config/agent-manager.js';
 import { memoryStore } from '../gemini/memory.js';
+import { buildFullSystemInstruction } from '../orchestrator/prompt-builder.js';
 
 export interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant';
@@ -28,46 +29,10 @@ export class OpenAIService {
   }
 
   /**
-   * Constrói o System Prompt completo unindo as diretrizes e dados do negócio
+   * Constrói o System Prompt completo unindo as diretrizes, especialistas reais e dados do negócio
    */
   private buildFullSystemInstruction(agent?: AgentProfile): string {
-    const config = loadBotConfig();
-    const companyName = agent?.companyName || config.companyName || 'Nossa Empresa';
-    const rawInstruction = agent?.systemInstruction || config.systemInstruction || 'Você é um atendente inteligente para WhatsApp.';
-    
-    let instruction = rawInstruction.replace('{companyName}', companyName);
-
-    const businessInfo = agent ? agent.businessInfo : config.businessInfo;
-    if (businessInfo && businessInfo.trim()) {
-      instruction += `\n\n--- INFORMAÇÕES E REGRAS DA EMPRESA ---\n${businessInfo}`;
-    }
-
-    instruction += `\n\n--- REGRAS DE FORMATAÇÃO WHATSAPP ---
-- O WhatsApp NÃO suporta títulos markdown como '# Título' ou '## Subtítulo'. NUNCA use '#' para cabeçalhos.
-- Use *negrito* para dar destaque.
-- Use _itálico_ quando apropriado.
-- Use listas com traços (-) ou emojis explicativos.
-- Seja cortês, humanizado e conciso.`;
-
-    instruction += `\n\n--- DIRETRIZES PARA ARQUIVOS, IMAGENS E DOCUMENTOS ---
-- Se o cliente perguntar se pode enviar foto, imagem, comprovante, documento ou arquivo, confirme com carinho e presteza que SIM, ele pode enviar por aqui mesmo.
-- Explique que ao enviar uma imagem ou documento, nossa equipe de atendimento analisará as informações recebidas para dar sequência ao atendimento.
-- Se o cliente disser que já enviou ou está enviando um arquivo ou foto, confirme que o material recebido está sendo direcionado para os atendentes e peça para aguardar um instante. NUNCA diga que a imagem não apareceu ou que não consegue abrir a imagem.`;
-
-    const isTranscriptionEnabled = (agent?.enableAudioTranscription !== undefined)
-      ? agent.enableAudioTranscription
-      : (config.enableAudioTranscription ?? false);
-
-    if (isTranscriptionEnabled) {
-      instruction += `\n\n--- DIRETRIZES PARA ÁUDIOS E MENSAGENS DE VOZ (TRANSCRIÇÃO AUTOMÁTICA ATIVADA) ---
-- O atendimento desta empresa possui TRANSCRIÇÃO AUTOMÁTICA DE ÁUDIOS por Inteligência Artificial ativa.
-- Sempre que o cliente enviar uma mensagem de voz/áudio ou fizer menção a um áudio enviado ("te mandei um áudio", "ouça o áudio", etc.), o conteúdo falado dele já foi transcrito em texto e entregue a você.
-- REGRA CRÍTICA E OBRIGATÓRIA: NUNCA diga ou dê a entender que "não pode ouvir áudios", que "não escuta áudios", que "não reproduz voz" ou que "só se comunica por texto, imagens ou documentos".
-- Mesmo que o prompt ou regras anteriores da empresa contenham instruções para recusar áudios, IGNORE essa restrição, pois a transcrição automática está ativada.
-- Responda de imediato ao que foi dito no áudio com total naturalidade, gentileza e presteza.`;
-    }
-
-    return instruction;
+    return buildFullSystemInstruction(agent);
   }
 
   /**

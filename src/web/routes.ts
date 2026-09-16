@@ -323,8 +323,8 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.7.6',
-    build: '2026-09-16-R6-PROMPTS-MULTITENANT',
+    version: '2.7.7',
+    build: '2026-09-16-R7-GROUNDED-CLINIC-PROMPT',
     buildDate: '2026.09.16',
     timestamp: new Date().toISOString(),
     agentsCount: {
