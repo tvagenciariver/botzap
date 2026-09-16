@@ -425,12 +425,31 @@ export class AgentOrchestrator {
       return;
     }
 
-    // Resolve o perfil do agente correspondente a esta sessão da WAHA
-    const agent = agentManager.getAgentBySession(sessionName);
+    // Sanitização inteligente do nome do contato: só usa se for um nome real de perfil, nunca o número de telefone
+    const rawNotifyName = (payload._data?.notifyName || '').trim();
+    const isNumericName = /^[\d\s\-()+]+$/.test(rawNotifyName);
+    const contactName = (rawNotifyName && !isNumericName && !rawNotifyName.includes('@'))
+      ? rawNotifyName
+      : undefined;
+
+    // Sanitiza caracteres invisíveis Unicode (LTR, RTL, zero-width, BOM, non-breaking space, etc.)
+    let effectiveBody = (body || '').replace(/[\u2000-\u200F\u2028-\u202F\u205F-\u206F\uFEFF\u00A0]/g, '');
+
+    // Resolve o perfil do agente correspondente com isolamento inteligente multi-empresa
+    const { agent, reason: agentReason } = agentManager.resolveAgentForMessage({
+      sessionName,
+      messageText: effectiveBody,
+      chatId,
+      recipientPhone: to,
+      contactName
+    });
+
     if (!agent || !agent.active) {
       console.log(`[Orchestrator] Sessão "${sessionName}" sem agente ativo associado. Ignorando.`);
       return;
     }
+
+    console.log(`[Orchestrator] 🏢 Agente selecionado: "${agent.name}" (${agent.companyName} | ID: ${agent.id}) via [${agentReason}] para ${chatId}`);
 
     // BLINDAGEM DE SEGURANÇA: Verificar se o agente está globalmente pausado (botão de pânico)
     if (agent.isPausedGlobally) {
@@ -442,12 +461,6 @@ export class AgentOrchestrator {
       } else {
         // Se for mensagem de áudio recebida, transcreve e entrega para o atendente ler mesmo com o agente em pausa global!
         if (this.isAudioMessage(payload) && !fromMe) {
-          const rawNotifyName = (payload._data?.notifyName || '').trim();
-          const isNumericName = /^[\d\s\-()+]+$/.test(rawNotifyName);
-          const contactName = (rawNotifyName && !isNumericName && !rawNotifyName.includes('@'))
-            ? rawNotifyName
-            : undefined;
-
           console.log(`[SEGURANÇA][${agent.id}] Agente em pausa global, mas transcrevendo áudio recebido para leitura do atendente humano...`);
           await this.handleAudioTranscription(payload, chatId, contactName, sessionName, agent);
         }
@@ -488,15 +501,6 @@ export class AgentOrchestrator {
       return;
     }
 
-    // Sanitização inteligente do nome do contato: só usa se for um nome real de perfil, nunca o número de telefone
-    const rawNotifyName = (payload._data?.notifyName || '').trim();
-    const isNumericName = /^[\d\s\-()+]+$/.test(rawNotifyName);
-    const contactName = (rawNotifyName && !isNumericName && !rawNotifyName.includes('@'))
-      ? rawNotifyName
-      : undefined;
-
-    // Sanitiza caracteres invisíveis Unicode (LTR, RTL, zero-width, BOM, non-breaking space, etc.)
-    let effectiveBody = (body || '').replace(/[\u2000-\u200F\u2028-\u202F\u205F-\u206F\uFEFF\u00A0]/g, '');
     let transcribedAudioText = '';
     const isAudio = this.isAudioMessage(payload);
     const isImage = this.isImageMessage(payload);
@@ -650,9 +654,11 @@ export class AgentOrchestrator {
     agentId?: string,
     metadata?: any
   ): Promise<void> {
-    const agent = (agentId ? agentManager.getAgent(agentId) : null)
-      || (sessionName ? agentManager.getAgentBySession(sessionName) : null)
-      || agentManager.getDefaultAgent();
+    const resolved = agentId
+      ? { agent: agentManager.getAgent(agentId) || agentManager.getDefaultAgent(), reason: 'debounced_agentId' }
+      : agentManager.resolveAgentForMessage({ sessionName, messageText, chatId, contactName });
+
+    const agent = resolved.agent;
 
     const activeSession = (sessionName && sessionName !== '*')
       ? sessionName
@@ -741,7 +747,14 @@ export class AgentOrchestrator {
    * Permite executar uma simulação direta (para teste no painel web)
    */
   async simulateMessage(chatId: string, messageText: string, agentId?: string): Promise<AgentResponse> {
-    const agent = (agentId ? agentManager.getAgent(agentId) : null) || agentManager.getDefaultAgent();
+    let agent = agentId ? agentManager.getAgent(agentId) : null;
+    if (!agent) {
+      const resolved = agentManager.resolveAgentForMessage({
+        messageText,
+        chatId
+      });
+      agent = resolved.agent;
+    }
 
     const isImageSim = messageText.startsWith('[Imagem') || messageText.startsWith('[Foto');
     const isDocSim = messageText.startsWith('[Documento');

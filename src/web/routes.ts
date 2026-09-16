@@ -322,8 +322,8 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.7.3',
-    build: '2026-09-16-R3-D1-UNICODE-FIX',
+    version: '2.7.4',
+    build: '2026-09-16-R4-MULTITENANT-ISOLATION',
     buildDate: '2026.09.16',
     timestamp: new Date().toISOString(),
     agentsCount: {
@@ -906,6 +906,15 @@ apiRouter.post('/api/agents', requireAdmin, (req: Request, res: Response) => {
   try {
     const data = req.body;
     const created = agentManager.createAgent(data);
+
+    // Auto-configura webhook na WAHA se foi informada uma sessão específica
+    if (created.wahaSession && created.wahaSession !== '*') {
+      const webhookTarget = `${env.webhookPublicUrl}/webhook/waha`;
+      wahaClient.configureWebhook(webhookTarget, created.wahaSession).catch(err => {
+        console.warn(`[WAHA] Aviso ao auto-configurar webhook para sessão "${created.wahaSession}":`, err.message);
+      });
+    }
+
     res.status(201).json({ success: true, agent: sanitizeAgentProfile(created) });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -940,6 +949,14 @@ apiRouter.put('/api/agents/:id', requireAdmin, (req: Request, res: Response) => 
     const updated = agentManager.updateAgent(id, updates);
     if (id === 'default' && updates.businessHours) {
       saveBotConfig({ businessHours: updated.businessHours });
+    }
+
+    // Auto-configura webhook na WAHA se a sessão foi atualizada para uma sessão específica
+    if (updated.wahaSession && updated.wahaSession !== '*') {
+      const webhookTarget = `${env.webhookPublicUrl}/webhook/waha`;
+      wahaClient.configureWebhook(webhookTarget, updated.wahaSession).catch(err => {
+        console.warn(`[WAHA] Aviso ao auto-configurar webhook para sessão "${updated.wahaSession}":`, err.message);
+      });
     }
 
     res.json({ success: true, agent: sanitizeAgentProfile(updated) });

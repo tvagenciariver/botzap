@@ -2737,10 +2737,27 @@ function closeAgentModal() {
   if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+async function populateAgentSessionDatalist() {
+  const datalist = document.getElementById('modal-agent-session-list');
+  if (!datalist) return;
+  try {
+    const res = await fetchWithAuth('/api/waha/sessions');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.sessions)) {
+        datalist.innerHTML = data.sessions.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)} (${s.status || 'Ativa'})</option>`).join('');
+      }
+    }
+  } catch (e) {
+    // silencia erro de rede
+  }
+}
+
 function openNewAgentModal() {
   document.getElementById('modal-agent-id').value = '';
   document.getElementById('agent-modal-title').textContent = '➕ Criar Novo Agente / Cliente';
   document.getElementById('agent-modal-subtitle').textContent = 'Defina os dados, IA, prompts e horários exclusivos deste cliente com amplo conforto.';
+  populateAgentSessionDatalist();
 
   // Default values
   document.getElementById('modal-agent-name').value = '';
@@ -2794,6 +2811,7 @@ function openNewAgentModal() {
 
 async function openEditAgentModal(agentId) {
   try {
+    populateAgentSessionDatalist();
     const res = await fetchWithAuth(`/api/agents/${agentId}`);
     const data = await res.json();
     const agent = data.agent;
@@ -2900,7 +2918,7 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
     const payload = {
       name: document.getElementById('modal-agent-name').value.trim(),
       companyName: document.getElementById('modal-agent-company').value.trim(),
-      wahaSession: document.getElementById('modal-agent-session').value.trim() || '*',
+      wahaSession: document.getElementById('modal-agent-session').value.trim(),
       description: document.getElementById('modal-agent-description').value.trim(),
       active: document.getElementById('modal-agent-active').checked,
       isDefault: document.getElementById('modal-agent-isDefault').checked,

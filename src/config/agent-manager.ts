@@ -123,23 +123,204 @@ export class AgentManager {
   getAgentBySession(session: string): AgentProfile {
     if (session) {
       const cleanSession = session.trim().toLowerCase();
+
       // 1. Busca correspondência exata de sessão
       for (const a of this.agents.values()) {
         if (a.active && a.wahaSession && a.wahaSession.trim().toLowerCase() === cleanSession) {
           return a;
         }
       }
+
+      // 2. Busca por id / slug exato
+      for (const a of this.agents.values()) {
+        if (a.active && a.id.toLowerCase() === cleanSession) {
+          return a;
+        }
+      }
+
+      // 3. Busca por nome da empresa normalizado (ex: "vale_studio" bate com "Vale Studio")
+      const cleanAlpha = cleanSession.replace(/[^a-z0-9]/g, '');
+      if (cleanAlpha && cleanAlpha.length >= 3) {
+        for (const a of this.agents.values()) {
+          if (a.active) {
+            const compAlpha = (a.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const nameAlpha = (a.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (compAlpha === cleanAlpha || nameAlpha === cleanAlpha) {
+              return a;
+            }
+          }
+        }
+      }
     }
 
-    // 2. Busca agente curinga (*)
+    // 4. Busca agente curinga (*) - prioriza o padrão se houver
+    const defaultAgent = this.getDefaultAgent();
+    if (defaultAgent && defaultAgent.active && defaultAgent.wahaSession === '*') {
+      return defaultAgent;
+    }
+
     for (const a of this.agents.values()) {
       if (a.active && a.wahaSession === '*') {
         return a;
       }
     }
 
-    // 3. Fallback para agente padrão
-    return this.getDefaultAgent();
+    // 5. Fallback para agente padrão
+    return defaultAgent;
+  }
+
+  /**
+   * Resolução contextual inteligente do agente para uma mensagem recebida.
+   * Ordem de prioridade estrita:
+   * 1. Sessão exata e não-curinga da WAHA
+   * 2. Menção direta a especialista ativo no corpo do texto (ex: "Dra. Valéria")
+   * 3. Menção direta ao nome da empresa no corpo do texto (ex: "Vale Studio")
+   * 4. Agendamento ativo ou lembrete pendente para este contato (chatId)
+   * 5. Se houver intenção de agendamento e apenas uma empresa ativa com agenda ativada
+   * 6. Fallback padrão por sessão WAHA
+   */
+  resolveAgentForMessage(params: {
+    sessionName?: string;
+    messageText?: string;
+    chatId?: string;
+    recipientPhone?: string;
+    contactName?: string;
+  }): { agent: AgentProfile; reason: string } {
+    const { sessionName, messageText, chatId } = params;
+    const cleanSession = (sessionName || '').trim().toLowerCase();
+
+    // 1. Se a sessão da WAHA é específica (diferente de '*' e 'default'), tenta correspondência direta
+    if (cleanSession && cleanSession !== '*' && cleanSession !== 'default') {
+      for (const a of this.agents.values()) {
+        if (a.active && a.wahaSession && a.wahaSession.trim().toLowerCase() === cleanSession) {
+          return { agent: a, reason: `exact_session (${a.wahaSession})` };
+        }
+      }
+      for (const a of this.agents.values()) {
+        if (a.active && a.id.toLowerCase() === cleanSession) {
+          return { agent: a, reason: `id_session (${a.id})` };
+        }
+      }
+      const cleanAlpha = cleanSession.replace(/[^a-z0-9]/g, '');
+      if (cleanAlpha && cleanAlpha.length >= 3) {
+        for (const a of this.agents.values()) {
+          if (a.active) {
+            const compAlpha = (a.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (compAlpha === cleanAlpha) {
+              return { agent: a, reason: `company_name_session (${a.companyName})` };
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Detecção por menção a especialista ativo no texto
+    if (messageText && messageText.length >= 3) {
+      const normText = messageText
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+
+      try {
+        const specFile = path.resolve(process.cwd(), 'data', 'specialists.json');
+        if (fs.existsSync(specFile)) {
+          const raw = fs.readFileSync(specFile, 'utf-8');
+          const specialists: any[] = JSON.parse(raw);
+          if (Array.isArray(specialists)) {
+            for (const spec of specialists) {
+              if (!spec || !spec.name || !spec.agentId) continue;
+              const specNorm = spec.name
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/^(dra?\.?|doutor(a)?|dr\.?)\s+/i, '')
+                .trim();
+
+              const firstName = specNorm.split(' ')[0];
+              if (firstName.length >= 4 && normText.includes(firstName)) {
+                const targetAgent = this.getAgent(spec.agentId);
+                if (targetAgent && targetAgent.active) {
+                  return { agent: targetAgent, reason: `specialist_in_text (${spec.name} -> ${targetAgent.companyName})` };
+                }
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('[AgentManager] Aviso ao verificar specialists.json para roteamento:', err.message);
+      }
+    }
+
+    // 3. Detecção por menção direta ao nome da empresa no texto
+    if (messageText && messageText.length >= 3) {
+      const normText = messageText
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+
+      for (const a of this.agents.values()) {
+        if (!a.active || !a.companyName) continue;
+        const compNorm = a.companyName
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim();
+
+        if (compNorm.length >= 3 && normText.includes(compNorm)) {
+          return { agent: a, reason: `company_in_text (${a.companyName})` };
+        }
+
+        // Se o nome da empresa tiver partes com 4+ caracteres (ex: "Vale Studio" -> ["vale", "studio"])
+        const words = compNorm.split(/\s+/).filter(w => w.length >= 4);
+        if (words.length > 0 && words.every(w => normText.includes(w))) {
+          return { agent: a, reason: `company_words_in_text (${a.companyName})` };
+        }
+      }
+    }
+
+    // 4. Detecção por agendamento ativo ou lembrete pendente para este paciente (chatId)
+    if (chatId) {
+      try {
+        const aptFile = path.resolve(process.cwd(), 'data', 'appointments.json');
+        if (fs.existsSync(aptFile)) {
+          const raw = fs.readFileSync(aptFile, 'utf-8');
+          const appointments: any[] = JSON.parse(raw);
+          if (Array.isArray(appointments)) {
+            const cleanPhone = chatId.replace(/\D/g, '');
+            const activeApt = appointments.find(a =>
+              (a.status === 'scheduled' || a.status === 'confirmed' || a.status === 'presence_confirmed') &&
+              a.agentId &&
+              ((a.clientChatId && a.clientChatId.replace(/\D/g, '') === cleanPhone) ||
+               (a.clientPhone && a.clientPhone.replace(/\D/g, '') === cleanPhone))
+            );
+            if (activeApt) {
+              const targetAgent = this.getAgent(activeApt.agentId);
+              if (targetAgent && targetAgent.active) {
+                return { agent: targetAgent, reason: `active_appointment (${targetAgent.companyName})` };
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('[AgentManager] Aviso ao verificar appointments.json para roteamento:', err.message);
+      }
+    }
+
+    // 5. Se houver apenas UMA empresa com agendamento ativo e a mensagem tiver intenção clara de agendamento
+    if (messageText) {
+      const lower = messageText.toLowerCase();
+      const isBookingIntent = ['agendar', 'marcar consulta', 'marcar horario', 'marcar horário', 'quero agendar'].some(kw => lower.includes(kw));
+      if (isBookingIntent) {
+        const bookingAgents = Array.from(this.agents.values()).filter(a => a.active && a.enableBooking);
+        if (bookingAgents.length === 1) {
+          return { agent: bookingAgents[0], reason: `single_booking_agent (${bookingAgents[0].companyName})` };
+        }
+      }
+    }
+
+    // 6. Fallback padrão por sessão WAHA
+    const fallbackAgent = this.getAgentBySession(sessionName || 'default');
+    return { agent: fallbackAgent, reason: `session_fallback (${sessionName || 'default'})` };
   }
 
   createAgent(data: Partial<AgentProfile>): AgentProfile {
@@ -149,6 +330,13 @@ export class AgentManager {
 
     const defaultHours = defaultBusinessHours;
 
+    // Se não foi informada uma sessão, só usa '*' se ainda não houver nenhum agente com '*'
+    let assignedSession = (data.wahaSession || '').trim();
+    if (!assignedSession) {
+      const hasWildcard = Array.from(this.agents.values()).some(a => a.wahaSession === '*');
+      assignedSession = hasWildcard ? slug : '*';
+    }
+
     const newAgent: AgentProfile = {
       id: slug,
       name: rawName,
@@ -156,7 +344,7 @@ export class AgentManager {
       description: data.description || '',
       active: data.active !== false,
       isDefault: !!data.isDefault,
-      wahaSession: data.wahaSession || '*',
+      wahaSession: assignedSession,
       llmProvider: data.llmProvider || 'openai',
       model: data.model || 'gemini-flash-lite-latest',
       openaiModel: data.openaiModel || 'gpt-4o-mini',

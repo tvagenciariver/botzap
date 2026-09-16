@@ -9,6 +9,7 @@ import { wahaClient } from './waha/client.js';
 import { geminiService } from './gemini/client.js';
 import { reminderScheduler } from './appointments/reminder-scheduler.js';
 import { blastScheduler } from './blast/blast-scheduler.js';
+import { agentManager } from './config/agent-manager.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,7 +48,7 @@ app.get('*', (_req, res) => {
 app.listen(env.port, async () => {
   const config = loadBotConfig();
   console.log('\n======================================================');
-  console.log('🤖 BotZap v2.7.3 [Build 2026-09-16-R3-D1-UNICODE-FIX]');
+  console.log('🤖 BotZap v2.7.4 [Build 2026-09-16-R4-MULTITENANT-ISOLATION]');
   console.log('   Orquestrador de Agentes IA (WAHA + Gemini Flash)');
   console.log('======================================================');
   console.log(`🌐 Servidor rodando em: http://localhost:${env.port}`);
@@ -71,9 +72,17 @@ app.listen(env.port, async () => {
     const status = await wahaClient.getSessionStatus(env.wahaSession);
     if (status) {
       console.log(`[WAHA] Conectado com sucesso! Sessão "${status.name}" está: ${status.status}`);
-      // Tenta auto-registrar o webhook
+      // Tenta auto-registrar o webhook para a sessão padrão
       const webhookTarget = `${env.webhookPublicUrl}/webhook/waha`;
       await wahaClient.configureWebhook(webhookTarget, env.wahaSession);
+
+      // Auto-registra webhooks para todas as sessões específicas cadastradas nos agentes
+      const allAgents = agentManager.listAgents();
+      for (const ag of allAgents) {
+        if (ag.active && ag.wahaSession && ag.wahaSession !== '*' && ag.wahaSession !== env.wahaSession) {
+          wahaClient.configureWebhook(webhookTarget, ag.wahaSession).catch(() => {});
+        }
+      }
     } else {
       console.log(`[WAHA] Aviso: Sessão "${env.wahaSession}" não encontrada ou WAHA inicializando em ${env.wahaBaseUrl}.`);
     }

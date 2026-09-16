@@ -699,9 +699,10 @@
                     <div class="form-row" style="margin-top: 15px;">
                       <div class="form-group col-8">
                         <label for="modal-agent-session">Sessão da WAHA Vinculada *</label>
-                        <input type="text" id="modal-agent-session" class="form-control" placeholder="Ex: unimagem ou clinica_odonto (Use * para capturar qualquer sessão)">
+                        <input type="text" id="modal-agent-session" class="form-control" list="modal-agent-session-list" placeholder="Ex: vale_studio, unimagem ou default">
+                        <datalist id="modal-agent-session-list"></datalist>
                         <small class="form-hint">
-                          O webhook da WAHA enviará mensagens identificando a sessão conectada. Este agente responderá apenas pelas mensagens desta sessão. Se tiver apenas 1 cliente ou for padrão, utilize <code>*</code>.
+                          Identificador da sessão da WAHA correspondente a este número/empresa. Dica: selecione da lista ou digite o nome exato da sessão para garantir isolamento total de agendas e profissionais.
                         </small>
                       </div>
                       <div class="form-group col-4">

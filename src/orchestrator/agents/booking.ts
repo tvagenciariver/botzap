@@ -8,7 +8,9 @@ import { lidMapper } from '../../appointments/phone-utils.js';
 import { pendingReminderTracker } from '../../appointments/pending-reminder-tracker.js';
 
 interface BookingSessionState {
-  step: 'select_referral' | 'select_partner' | 'select_specialist' | 'select_service' | 'select_date' | 'select_slot' | 'confirm_name' | 'confirm_phone' | 'confirm_cancellation';
+  step: 'select_company' | 'select_referral' | 'select_partner' | 'select_specialist' | 'select_service' | 'select_date' | 'select_slot' | 'confirm_name' | 'confirm_phone' | 'confirm_cancellation';
+  agentId?: string;
+  companyName?: string;
   referralType?: 'particular' | 'partner';
   partnerId?: string;
   partnerName?: string;
@@ -19,6 +21,7 @@ interface BookingSessionState {
   clientName?: string;
   clientPhone?: string;
   cancellationAptId?: string;
+  offeredCompanies?: { id: string; name: string }[];
   offeredPartners?: Partner[];
   offeredDates?: { label: string; date: string }[];
   offeredSlots?: string[];
@@ -35,21 +38,37 @@ export class BookingAgent implements IAgent {
   private sessions: Map<string, BookingSessionState> = new Map();
   private readonly SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 
-  private getSession(chatId: string): BookingSessionState | undefined {
+  private getSession(chatId: string, expectedAgentId?: string): BookingSessionState | undefined {
     const s = this.sessions.get(chatId);
     if (!s) return undefined;
     if (Date.now() - s.updatedAt > this.SESSION_TIMEOUT_MS) {
       this.sessions.delete(chatId);
       return undefined;
     }
+    // Se um expectedAgentId for especificado e a sessão pertencer a outro agente, descarta para evitar contaminação
+    if (expectedAgentId && s.agentId && s.agentId !== expectedAgentId && s.step !== 'select_company') {
+      return undefined;
+    }
     return s;
   }
 
-  private setSession(chatId: string, state: Partial<BookingSessionState>): BookingSessionState {
-    const current = this.getSession(chatId) || { step: 'select_specialist', updatedAt: Date.now() };
+  private setSession(
+    chatId: string,
+    state: Partial<BookingSessionState>,
+    defaultAgentId?: string,
+    defaultCompanyName?: string
+  ): BookingSessionState {
+    const current = this.getSession(chatId, state.agentId || defaultAgentId) || {
+      step: 'select_specialist',
+      agentId: state.agentId || defaultAgentId,
+      companyName: state.companyName || defaultCompanyName,
+      updatedAt: Date.now()
+    };
     const updated: BookingSessionState = {
       ...current,
       ...state,
+      agentId: state.agentId || current.agentId || defaultAgentId,
+      companyName: state.companyName || current.companyName || defaultCompanyName,
       updatedAt: Date.now()
     };
     this.sessions.set(chatId, updated);
@@ -286,7 +305,7 @@ export class BookingAgent implements IAgent {
     const chatId = context.chatId;
 
     // 1. Se o usuário já está no meio de um fluxo de agendamento ou cancelamento ativo
-    if (this.getSession(chatId)) {
+    if (this.getSession(chatId, context.agent?.id)) {
       return true;
     }
 
@@ -312,17 +331,28 @@ export class BookingAgent implements IAgent {
     const lowerText = text.toLowerCase();
     const agentId = context.agent.id;
 
-    // 3. Intenção de Agendar — verifica se esta empresa tem médicos cadastrados
+    // 3. Intenção de Agendar — verifica se esta empresa tem médicos cadastrados ou se mencionou especialista
     const bookingKeywords = [
       'agendar', 'agendamento', 'marcar consulta', 'marcar horario', 'marcar horário',
       'quero agendar', 'preciso de consulta', 'disponibilidade de horario', 'horario disponivel',
       'horário disponível', 'vaga para consulta', 'marcar médico', 'marcar psicologo',
       'marcar dentista', 'fazer agendamento', 'consultas disponíveis'
     ];
-    if (bookingKeywords.some(kw => lowerText.includes(kw))) {
-      // Garante que só ativa o fluxo interativo se a empresa possuir especialistas cadastrados
-      const specialists = appointmentManager.listSpecialists(agentId).filter(s => s.active);
+    const hasBookingKw = bookingKeywords.some(kw => lowerText.includes(kw));
+
+    const specialists = appointmentManager.listSpecialists(agentId).filter(s => s.active !== false);
+    const mentionsSpecialist = specialists.some(s => {
+      const sNorm = s.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/^(dra?\.?|doutor(a)?|dr\.?)\s+/i, '').trim();
+      const firstName = sNorm.split(' ')[0];
+      return (firstName.length >= 4 && lowerText.includes(firstName)) || lowerText.includes(sNorm);
+    });
+
+    if (hasBookingKw || mentionsSpecialist) {
       if (specialists.length === 0) {
+        const otherAgentsWithBooking = agentManager.listAgents().filter(a => a.active && a.enableBooking);
+        if (otherAgentsWithBooking.length > 1) {
+          return true;
+        }
         return false;
       }
       return true;
@@ -354,7 +384,7 @@ export class BookingAgent implements IAgent {
 
     // 0. Se o usuário quiser sair ou cancelar a qualquer momento
     if (['cancelar', 'sair', 'parar', 'abortar', 'voltar ao início', 'desistir'].includes(lowerText)) {
-      const hadSession = !!this.getSession(chatId);
+      const hadSession = !!this.getSession(chatId, agentId);
       this.clearSession(chatId);
       if (hadSession) {
         return {
@@ -403,7 +433,7 @@ export class BookingAgent implements IAgent {
 
     // 2. Intenção de Cancelamento manual ou Ver Meus Agendamentos
     const cancelKeywords = ['cancelar agendamento', 'cancelar consulta', 'desmarcar consulta', 'desmarcar agendamento', 'desmarcar horario', 'meus agendamentos', 'minhas consultas'];
-    if (cancelKeywords.some(kw => lowerText.includes(kw)) && !this.getSession(chatId)) {
+    if (cancelKeywords.some(kw => lowerText.includes(kw)) && !this.getSession(chatId, agentId)) {
       const activeApts = appointmentManager.getAppointmentsByChatId(chatId);
 
       if (activeApts.length === 0) {
@@ -418,8 +448,10 @@ export class BookingAgent implements IAgent {
         const apt = activeApts[0];
         this.setSession(chatId, {
           step: 'confirm_cancellation',
-          cancellationAptId: apt.id
-        });
+          cancellationAptId: apt.id,
+          agentId,
+          companyName
+        }, agentId, companyName);
 
         return {
           handled: true,
@@ -444,8 +476,10 @@ export class BookingAgent implements IAgent {
 
       this.setSession(chatId, {
         step: 'confirm_cancellation',
-        offeredSlots: activeApts.map(a => a.id)
-      });
+        offeredSlots: activeApts.map(a => a.id),
+        agentId,
+        companyName
+      }, agentId, companyName);
 
       return {
         handled: true,
@@ -455,26 +489,32 @@ export class BookingAgent implements IAgent {
     }
 
     // 3. Máquina de Estados da Sessão
-    let session = this.getSession(chatId);
+    let session = this.getSession(chatId, agentId);
 
     // Se ainda não tem sessão, inicia nova sessão de agendamento
     if (!session) {
-      return this.startBookingFlow(chatId, agentId, companyName);
+      return this.startBookingFlow(chatId, agentId, companyName, text, context);
     }
+
+    const currentAgentId = session.agentId || agentId;
+    const currentCompanyName = session.companyName || companyName;
 
     // Processa o passo atual da sessão
     switch (session.step) {
+      case 'select_company':
+        return this.handleSelectCompanyStep(chatId, session, text);
+
       case 'confirm_cancellation':
         return this.handleCancellationStep(chatId, session, text);
 
       case 'select_referral':
-        return this.handleSelectReferralStep(chatId, session, text, agentId, companyName);
+        return this.handleSelectReferralStep(chatId, session, text, currentAgentId, currentCompanyName);
 
       case 'select_partner':
-        return this.handleSelectPartnerStep(chatId, session, text, agentId, companyName);
+        return this.handleSelectPartnerStep(chatId, session, text, currentAgentId, currentCompanyName);
 
       case 'select_specialist':
-        return this.handleSelectSpecialistStep(chatId, session, text, agentId);
+        return this.handleSelectSpecialistStep(chatId, session, text, currentAgentId);
 
       case 'select_service':
         return this.handleSelectServiceStep(chatId, session, text);
@@ -489,7 +529,7 @@ export class BookingAgent implements IAgent {
         return this.handleConfirmNameStep(chatId, session, text);
 
       case 'confirm_phone':
-        return this.handleConfirmPhoneStep(chatId, session, text, agentId, companyName);
+        return this.handleConfirmPhoneStep(chatId, session, text, currentAgentId, currentCompanyName);
 
       default:
         this.clearSession(chatId);
@@ -502,16 +542,141 @@ export class BookingAgent implements IAgent {
   }
 
   /**
-   * Inicia o fluxo de agendamento perguntando sobre convênio/particular se houver parceiros
+   * Tratamento da seleção de empresa quando há múltiplas empresas ativas
    */
-  private startBookingFlow(chatId: string, agentId: string, companyName: string): AgentResponse {
+  private handleSelectCompanyStep(
+    chatId: string,
+    session: BookingSessionState,
+    text: string
+  ): AgentResponse {
+    const companies = session.offeredCompanies || [];
+    const choiceNum = parseInt(text.replace(/\D/g, ''), 10);
+    let chosen: { id: string; name: string } | undefined;
+
+    if (!isNaN(choiceNum) && choiceNum >= 1 && choiceNum <= companies.length) {
+      chosen = companies[choiceNum - 1];
+    } else {
+      const lower = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      chosen = companies.find(c => c.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(lower));
+    }
+
+    if (!chosen) {
+      return {
+        handled: true,
+        agentName: this.name,
+        replyText: `Opção inválida. Por favor, digite o número de 1 a ${companies.length} correspondente à empresa que deseja:`
+      };
+    }
+
+    this.setSession(chatId, {
+      agentId: chosen.id,
+      companyName: chosen.name
+    }, chosen.id, chosen.name);
+
+    return this.startBookingFlow(chatId, chosen.id, chosen.name, undefined, undefined, true);
+  }
+
+  /**
+   * Inicia o fluxo de agendamento com isolamento estrito da empresa e suporte a menção de especialista
+   */
+  private startBookingFlow(
+    chatId: string,
+    agentId: string,
+    companyName: string,
+    userText?: string,
+    context?: AgentContext,
+    companySelected: boolean = false
+  ): AgentResponse {
+    const specialists = appointmentManager.listSpecialists(agentId).filter(s => s.active !== false);
+    const normText = (userText || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // 1. Se o paciente mencionou diretamente um especialista ativo desta empresa pelo nome
+    const mentionedSpec = specialists.find(s => {
+      const sNorm = s.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/^(dra?\.?|doutor(a)?|dr\.?)\s+/i, '').trim();
+      const firstName = sNorm.split(' ')[0];
+      return (firstName.length >= 4 && normText.includes(firstName)) || normText.includes(sNorm);
+    });
+
+    if (mentionedSpec) {
+      const services = appointmentManager.listServices(agentId).filter(s => s.active !== false);
+      if (services.length > 1) {
+        this.setSession(chatId, {
+          step: 'select_service',
+          agentId,
+          companyName,
+          specialistId: mentionedSpec.id,
+          offeredServices: services
+        }, agentId, companyName);
+
+        let msg = `Olá! Que alegria atender você na *${companyName}*! 🗓️✨\n\n` +
+          `O seu atendimento será com *${mentionedSpec.name}* (${mentionedSpec.role}).\n` +
+          `Qual procedimento você deseja agendar?\n\n`;
+
+        services.forEach((srv, i) => {
+          msg += `*${i + 1}.* ${srv.name} (${srv.durationMinutes} min) - ${srv.price ? `R$ ${srv.price.toFixed(2)}` : 'Consulte valor'}\n`;
+        });
+        msg += `\n_Digite o número do serviço desejado:_`;
+
+        return {
+          handled: true,
+          agentName: this.name,
+          replyText: msg
+        };
+      }
+
+      this.setSession(chatId, {
+        step: 'select_date',
+        agentId,
+        companyName,
+        specialistId: mentionedSpec.id,
+        serviceId: services[0]?.id
+      }, agentId, companyName);
+
+      return this.presentNextDates(chatId, mentionedSpec, `Olá! Que alegria atender você na *${companyName}*! 🗓️✨\n\nO seu atendimento será com *${mentionedSpec.name}* (${mentionedSpec.role}).`);
+    }
+
+    // 2. Se houver múltiplas empresas com agendamento ativo e a sessão for compartilhada/genérica,
+    // e o usuário não tiver especificado a empresa nem especialista no texto:
+    const allBookingAgents = agentManager.listAgents().filter(a => a.active && a.enableBooking);
+    const session = context?.session;
+    const isSharedSession = !session || session === '*' || session === 'default' || session === 'simulator';
+    const textHasCompany = allBookingAgents.some(a => {
+      const cNorm = a.companyName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return normText.includes(cNorm);
+    });
+
+    if (!companySelected && allBookingAgents.length > 1 && isSharedSession && !textHasCompany) {
+      this.setSession(chatId, {
+        step: 'select_company',
+        offeredCompanies: allBookingAgents.map(a => ({ id: a.id, name: a.companyName }))
+      });
+
+      let msg = `Olá! Que alegria atender você! 🗓️✨\n\n` +
+        `Em qual de nossas empresas ou clínicas você deseja agendar seu horário?\n\n`;
+
+      allBookingAgents.forEach((ag, idx) => {
+        msg += `*${idx + 1}.* 🏢 ${ag.companyName}\n`;
+      });
+
+      msg += `\n_Digite o número correspondente à empresa desejada:_`;
+
+      return {
+        handled: true,
+        agentName: this.name,
+        replyText: msg
+      };
+    }
+
+    // 3. Inicia normalmente na empresa definida
     const activePartners = partnerManager.listPartners(agentId).filter(p => p.active);
 
     if (activePartners.length > 0) {
       this.setSession(chatId, {
         step: 'select_referral',
+        agentId,
+        companyName,
         offeredPartners: activePartners
-      });
+      }, agentId, companyName);
 
       const welcomeMsg = `Olá! Que alegria atender você na *${companyName}*! 🗓️✨\n\n` +
         `Para organizarmos o seu atendimento, por favor informe:\n\n` +
@@ -527,8 +692,8 @@ export class BookingAgent implements IAgent {
     }
 
     // Se não houver parceiros, inicia direto na seleção de especialistas
-    this.setSession(chatId, { referralType: 'particular' });
-    return this.presentSpecialistsOrServices(chatId, agentId, companyName);
+    this.setSession(chatId, { referralType: 'particular', agentId, companyName }, agentId, companyName);
+    return this.presentSpecialistsOrServices(chatId, agentId, companyName, `Olá! Que alegria atender você na *${companyName}*! 🗓️✨`);
   }
 
   /**
@@ -651,7 +816,7 @@ export class BookingAgent implements IAgent {
     companyName: string,
     prefixMsg?: string
   ): AgentResponse {
-    const specialists = appointmentManager.listSpecialists(agentId).filter(s => s.active);
+    const specialists = appointmentManager.listSpecialists(agentId).filter(s => s.active !== false);
 
     if (specialists.length === 0) {
       return {
@@ -664,7 +829,7 @@ export class BookingAgent implements IAgent {
     // Se tiver apenas 1 especialista, pula direto para a escolha do serviço ou data
     if (specialists.length === 1) {
       const spec = specialists[0];
-      const services = appointmentManager.listServices(agentId).filter(s => s.active);
+      const services = appointmentManager.listServices(agentId).filter(s => s.active !== false);
 
       if (services.length > 1) {
         this.setSession(chatId, {
@@ -691,10 +856,12 @@ export class BookingAgent implements IAgent {
       // Se só tem 1 especialista e 1 ou 0 serviços
       this.setSession(chatId, {
         step: 'select_date',
+        agentId,
+        companyName,
         specialistId: spec.id,
         serviceId: services[0]?.id
-      });
-      return this.presentNextDates(chatId, spec);
+      }, agentId, companyName);
+      return this.presentNextDates(chatId, spec, prefixMsg);
     }
 
     // Caso tenha múltiplos especialistas, apresenta o menu numerado
@@ -727,7 +894,7 @@ export class BookingAgent implements IAgent {
     text: string,
     agentId: string
   ): AgentResponse {
-    const specialists = session.offeredSpecialists || appointmentManager.listSpecialists(agentId).filter(s => s.active);
+    const specialists = session.offeredSpecialists || appointmentManager.listSpecialists(agentId).filter(s => s.active !== false);
     const num = parseInt(text.replace(/\D/g, ''), 10);
 
     let selected: Specialist | undefined;
@@ -749,7 +916,7 @@ export class BookingAgent implements IAgent {
     }
 
     // Especialista selecionado! Checa serviços disponíveis
-    const services = appointmentManager.listServices(agentId).filter(s => s.active);
+    const services = appointmentManager.listServices(agentId).filter(s => s.active !== false);
     if (services.length > 1) {
       this.setSession(chatId, {
         step: 'select_service',
@@ -825,7 +992,7 @@ export class BookingAgent implements IAgent {
   /**
    * Apresenta os próximos 5 dias úteis que o especialista atende e tem horários
    */
-  private presentNextDates(chatId: string, specialist: Specialist): AgentResponse {
+  private presentNextDates(chatId: string, specialist: Specialist, prefixMsg?: string): AgentResponse {
     const dates: { label: string; date: string }[] = [];
     const dayNames = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
@@ -864,7 +1031,7 @@ export class BookingAgent implements IAgent {
       return {
         handled: true,
         agentName: this.name,
-        replyText: `Infelizmente *${specialist.name}* não possui horários livres nos próximos dias. 😔\n\nPor favor, fale com um atendente humano para verificar lista de espera.`
+        replyText: `${prefixMsg ? prefixMsg + '\n\n' : ''}Infelizmente *${specialist.name}* não possui horários livres nos próximos dias. 😔\n\nPor favor, fale com um atendente humano para verificar lista de espera.`
       };
     }
 
@@ -873,7 +1040,7 @@ export class BookingAgent implements IAgent {
       offeredDates: dates
     });
 
-    let msg = `📅 *Escolha a data desejada* para o atendimento com *${specialist.name}*:\n\n`;
+    let msg = `${prefixMsg ? prefixMsg + '\n\n' : ''}📅 *Escolha a data desejada* para o atendimento com *${specialist.name}*:\n\n`;
     dates.forEach((item, idx) => {
       msg += `*${idx + 1}.* ${item.label}\n`;
     });
@@ -1097,8 +1264,11 @@ export class BookingAgent implements IAgent {
 
     // Cria o agendamento com validação anti-colisão
     try {
+      const effectiveAgentId = session.agentId || agentId;
+      const effectiveCompanyName = session.companyName || companyName;
+
       const appointment = appointmentManager.createAppointment({
-        agentId,
+        agentId: effectiveAgentId,
         specialistId,
         serviceId,
         clientChatId: chatId,
@@ -1126,7 +1296,7 @@ export class BookingAgent implements IAgent {
         : `🏷️ *Tipo de Atendimento:* Particular\n`;
 
       const responseText = `🎉 *AGENDAMENTO CONFIRMADO COM SUCESSO!*\n\n` +
-        `🏢 *${companyName}*\n` +
+        `🏢 *${effectiveCompanyName}*\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `👤 *Paciente:* ${appointment.clientName}\n` +
         `📱 *WhatsApp:* ${formattedPhone}\n` +

@@ -3,9 +3,16 @@ import { memoryStore } from '../src/gemini/memory.js';
 import { geminiService } from '../src/gemini/client.js';
 import { botTracker } from '../src/orchestrator/bot-tracker.js';
 import { WahaMessagePayload } from '../src/waha/types.js';
+import { agentManager } from '../src/config/agent-manager.js';
 
 async function runTests() {
   console.log('--- INICIANDO TESTES DO ORQUESTRADOR BOTZAP ---\n');
+
+  const defaultAgent = agentManager.getAgent('default');
+  const origBh = defaultAgent?.businessHours?.enabled;
+  if (defaultAgent?.businessHours) defaultAgent.businessHours.enabled = false;
+
+  try {
 
   // Teste 1: Detecção de Transbordo Humano
   console.log('Teste 1: Verificação de intenção de transbordo humano');
@@ -139,6 +146,11 @@ async function runTests() {
   console.log('Descarte de mensagens antigas da WAHA: APROVADO ✅');
 
   console.log('\n✅ TODOS OS TESTES PASSARAM COM SUCESSO!\n');
+  } finally {
+    if (defaultAgent?.businessHours && origBh !== undefined) {
+      defaultAgent.businessHours.enabled = origBh;
+    }
+  }
 }
 
 runTests().catch(err => {
