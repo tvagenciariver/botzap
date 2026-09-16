@@ -60,27 +60,52 @@ export class BookingAgent implements IAgent {
     this.sessions.delete(chatId);
   }
 
+  private sanitizeChoiceText(text: string): { clean: string; digits: string; unaccented: string } {
+    if (!text) return { clean: '', digits: '', unaccented: '' };
+    // Remove caracteres invisíveis do WhatsApp (LTR, RTL, zero-width, BOM, non-breaking space, etc.)
+    const stripped = text.replace(/[\u2000-\u200F\u2028-\u202F\u205F-\u206F\uFEFF\u00A0]/g, '');
+    const clean = stripped
+      .toLowerCase()
+      .trim()
+      .replace(/[\*\_\#\.\,\-\)\(\[\]]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const unaccented = clean
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    const digits = clean.replace(/\D/g, '');
+    return { clean, digits, unaccented };
+  }
+
   /**
    * Identifica se a mensagem é uma opção de confirmação do lembrete D-1
    */
   public isConfirmChoice(text: string): boolean {
-    const clean = (text || '').toLowerCase().trim().replace(/[\*\_\#]/g, '');
-    if (!clean) return false;
+    const { clean, digits, unaccented } = this.sanitizeChoiceText(text);
+    if (!clean && !unaccented) return false;
 
-    // Opções numéricas exatas ou iniciadas por 1
-    if (clean === '1' || clean === '1.' || clean === '1)' || clean === '1️⃣' || clean === '✅') return true;
-    if (/^1\s*[-–.)/:]?\s*(sim|confirmo|confirmar|confirmado|presenca|presença)?$/i.test(clean)) return true;
-    if (/^(o\s+)?(numero|número|opcao|opção)\s+(um|1)$/i.test(clean)) return true;
-    if (clean === 'um') return true;
+    // Se o único dígito for 1 e não contiver 2
+    if (digits === '1') {
+      if (clean === '1' || clean === '1️⃣' || clean === '✅') return true;
+      if (/^(o\s+)?(numero|opcao|op|item)?\s*1$/i.test(unaccented)) return true;
+      if (/^1\s*(sim|confirmo|confirmar|confirmado|presenca|presença|vou|por favor)?$/i.test(unaccented)) return true;
+      if (clean.length <= 30 && !clean.includes('2')) return true;
+    }
+
+    // Formas textuais do número um (sem dígitos)
+    if (/^(o\s+)?(numero|opcao|op|item)?\s*um$/i.test(unaccented)) return true;
+    if (unaccented.includes('numero um') || unaccented.includes('opcao um') || unaccented.includes('item um')) return true;
 
     // Palavras-chave inequívocas de confirmação
     const confirmKeywords = [
       'sim', 'confirmo', 'confirmado', 'confirmar', 'vou', 'com certeza',
-      'confirmar presença', 'confirmar presenca', 'presença confirmada',
-      'sim, confirmo', 'sim confirmo', 'estarei lá', 'estarei la', 'pode confirmar'
+      'confirmar presenca', 'presenca confirmada',
+      'sim confirmo', 'estarei la', 'pode confirmar'
     ];
-    if (confirmKeywords.includes(clean)) return true;
-    if (clean.startsWith('sim ') || clean.startsWith('confirmo ')) return true;
+    if (confirmKeywords.includes(unaccented)) return true;
+    if (unaccented.startsWith('sim ') || unaccented.startsWith('confirmo ') || unaccented.startsWith('confirmar ')) return true;
 
     return false;
   }
@@ -89,28 +114,34 @@ export class BookingAgent implements IAgent {
    * Identifica se a mensagem é uma opção de cancelamento/desistência do lembrete D-1
    */
   public isCancelChoice(text: string): boolean {
-    const clean = (text || '').toLowerCase().trim().replace(/[\*\_\#]/g, '');
-    if (!clean) return false;
+    const { clean, digits, unaccented } = this.sanitizeChoiceText(text);
+    if (!clean && !unaccented) return false;
 
-    // Opções numéricas exatas ou iniciadas por 2
-    if (clean === '2' || clean === '2.' || clean === '2)' || clean === '2️⃣' || clean === '❌') return true;
-    if (/^2\s*[-–.)/:]?\s*(não|nao|cancelo|cancelar|desisto|desistir|liberar vaga|não poderei|nao poderei)?$/i.test(clean)) return true;
-    if (/^(o\s+)?(numero|número|opcao|opção)\s+(dois|2)$/i.test(clean)) return true;
-    if (clean === 'dois') return true;
+    // Se o único dígito for 2 e não contiver 1
+    if (digits === '2') {
+      if (clean === '2' || clean === '2️⃣' || clean === '❌') return true;
+      if (/^(o\s+)?(numero|opcao|op|item)?\s*2$/i.test(unaccented)) return true;
+      if (/^2\s*(não|nao|cancelo|cancelar|desisto|desistir|liberar vaga|não poderei|nao poderei|liberar|vaga|por favor)?$/i.test(unaccented)) return true;
+      if (clean.length <= 30 && !clean.includes('1')) return true;
+    }
+
+    // Formas textuais do número dois (sem dígitos)
+    if (/^(o\s+)?(numero|opcao|op|item)?\s*dois$/i.test(unaccented)) return true;
+    if (unaccented.includes('numero dois') || unaccented.includes('opcao dois') || unaccented.includes('item dois')) return true;
 
     // Expressões e palavras-chave de cancelamento / desistência
     const cancelKeywords = [
-      'não', 'nao', 'cancelo', 'desisto', 'cancelar', 'desistir',
-      'não poderei', 'nao poderei', 'não poderei ir', 'nao poderei ir',
-      'não vou', 'nao vou', 'não vou poder', 'nao vou poder',
-      'liberar vaga', 'desmarcar', 'não posso', 'nao posso',
-      'não poderei ir (liberar vaga)', 'nao poderei ir (liberar vaga)',
-      'não tenho como ir', 'nao tenho como ir'
+      'nao', 'cancelo', 'desisto', 'cancelar', 'desistir',
+      'nao poderei', 'nao poderei ir',
+      'nao vou', 'nao vou poder',
+      'liberar vaga', 'desmarcar', 'nao posso',
+      'nao poderei ir liberar vaga',
+      'nao tenho como ir'
     ];
-    if (cancelKeywords.includes(clean)) return true;
-    if (clean.startsWith('não poderei') || clean.startsWith('nao poderei') || clean.startsWith('não vou') || clean.startsWith('nao vou')) return true;
-    if (clean.includes('liberar vaga') || clean.includes('desmarcar')) return true;
-    if (clean.includes('desist') || clean.includes('cancel')) return true;
+    if (cancelKeywords.includes(unaccented)) return true;
+    if (unaccented.startsWith('nao poderei') || unaccented.startsWith('nao vou') || unaccented.startsWith('nao posso')) return true;
+    if (unaccented.includes('liberar vaga') || unaccented.includes('desmarcar')) return true;
+    if (unaccented.includes('desist') || unaccented.includes('cancel')) return true;
 
     return false;
   }

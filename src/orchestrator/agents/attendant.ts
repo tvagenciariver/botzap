@@ -16,16 +16,30 @@ export class AttendantAgent implements IAgent {
     // 🛡️ BLINDAGEM CRÍTICA DE LEMBRETE D-1:
     // Se o cliente respondeu a um lembrete (1, 2, "sim", "não", "confirmar", "cancelar", "liberar vaga"),
     // NUNCA deixar a IA (Gemini/OpenAI) responder com alucinações (como "material recebido...").
+    const rawClean = (context.userMessage || '')
+      .replace(/[\u2000-\u200F\u2028-\u202F\u205F-\u206F\uFEFF\u00A0]/g, '')
+      .trim();
+    const cleanOnlyDigits = rawClean.replace(/\D/g, '');
+
     const bookingAgent = new BookingAgent();
-    if (bookingAgent.isReminderChoice(context.userMessage)) {
+    const isReminder = bookingAgent.isReminderChoice(context.userMessage) ||
+      cleanOnlyDigits === '1' ||
+      cleanOnlyDigits === '2' ||
+      rawClean === '1' ||
+      rawClean === '2';
+
+    if (isReminder) {
       console.log(`[AttendantAgent] 🛡️ Interceptada escolha de lembrete ("${context.userMessage}"). Tentando resolver via BookingAgent...`);
       const apt = bookingAgent.findReminderAppointment(context);
       if (apt) {
         return await bookingAgent.execute(context);
       } else {
+        const isCancel = cleanOnlyDigits === '2' || bookingAgent.isCancelChoice(context.userMessage);
         return {
           handled: true,
-          replyText: `Olá! Recebemos sua resposta (*${context.userMessage}*).\n\nPara que possamos localizar seu agendamento e confirmar ou liberar sua vaga, por favor informe o seu *Nome Completo*, ou digite *humano* para falar diretamente com a nossa recepção! 😊`,
+          replyText: isCancel
+            ? `Entendido! Você escolheu cancelar seu agendamento (opção *2*).\n\nPara localizarmos seu cadastro e liberar o horário no sistema, por favor informe o seu *Nome Completo*, ou digite *humano* para falar diretamente com a recepção.`
+            : `Entendido! Você escolheu confirmar sua presença (opção *1*).\n\nPara localizarmos seu cadastro e confirmar sua vaga, por favor informe o seu *Nome Completo*, ou digite *humano* para falar diretamente com a recepção.`,
           action: 'none',
           agentName: this.name
         };

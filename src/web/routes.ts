@@ -284,8 +284,8 @@ apiRouter.post('/webhook/chatwoot', async (req: Request, res: Response) => {
  */
 apiRouter.get('/api/version', (_req: Request, res: Response) => {
   res.json({
-    version: '2.7.2',
-    build: '2026-09-16-R2-D1-FIX',
+    version: '2.7.3',
+    build: '2026-09-16-R3-D1-UNICODE-FIX',
     timestamp: new Date().toISOString()
   });
 });
@@ -322,8 +322,8 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.7.2',
-    build: '2026-09-16-R2-D1-FIX',
+    version: '2.7.3',
+    build: '2026-09-16-R3-D1-UNICODE-FIX',
     buildDate: '2026.09.16',
     timestamp: new Date().toISOString(),
     agentsCount: {

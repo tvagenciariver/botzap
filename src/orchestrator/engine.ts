@@ -495,7 +495,8 @@ export class AgentOrchestrator {
       ? rawNotifyName
       : undefined;
 
-    let effectiveBody = body || '';
+    // Sanitiza caracteres invisíveis Unicode (LTR, RTL, zero-width, BOM, non-breaking space, etc.)
+    let effectiveBody = (body || '').replace(/[\u2000-\u200F\u2028-\u202F\u205F-\u206F\uFEFF\u00A0]/g, '');
     let transcribedAudioText = '';
     const isAudio = this.isAudioMessage(payload);
     const isImage = this.isImageMessage(payload);
