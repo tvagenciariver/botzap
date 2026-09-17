@@ -189,6 +189,8 @@ export class BillingManager {
       const todayStr = this.getTodayDateString();
       if (filter.quickFilter === 'sent_initial') {
         list = list.filter(c => c.statusEnvio === 'enviado');
+      } else if (filter.quickFilter === 'scheduled') {
+        list = list.filter(c => c.statusEnvio === 'agendado');
       } else if (filter.quickFilter === 'not_confirmed') {
         list = list.filter(c => c.statusPagamento === 'pendente');
       } else if (filter.quickFilter === 'awaiting_confirmation') {
@@ -295,9 +297,16 @@ export class BillingManager {
       pixQrCodeFilePath,
       pixQrCodeUrl,
 
-      statusEnvio: 'pendente',
+      statusEnvio: (dto.sendOption === 'scheduled' || (!!dto.scheduledSendAt && dto.sendOption !== 'manual' && dto.sendOption !== 'immediate'))
+        ? 'agendado'
+        : 'pendente',
       statusPagamento: 'pendente',
-      sendImmediately: dto.sendImmediately ?? true,
+      sendImmediately: (dto.sendOption === 'scheduled' || dto.sendOption === 'manual' || dto.sendImmediately === false)
+        ? false
+        : (dto.sendImmediately ?? true),
+      scheduledSendAt: (dto.sendOption === 'scheduled' || (!!dto.scheduledSendAt && dto.sendOption !== 'manual' && dto.sendOption !== 'immediate'))
+        ? dto.scheduledSendAt
+        : undefined,
       customMessageTemplate: dto.customMessageTemplate?.trim(),
       sendAttempts: 0,
       notes: dto.notes?.trim(),
@@ -309,15 +318,27 @@ export class BillingManager {
     this.charges.unshift(charge);
     this.saveToDisk();
 
-    this.addLog({
-      billingId: charge.id,
-      agentId: charge.agentId,
-      customerName: charge.customerName,
-      customerPhone: charge.customerPhone,
-      type: 'envio_inicial',
-      status: 'info',
-      message: `Cobrança de R$ ${charge.amount.toFixed(2)} cadastrada (${charge.billingMethod.toUpperCase()}). Vencimento: ${charge.dueDate}.`
-    });
+    if (charge.statusEnvio === 'agendado') {
+      this.addLog({
+        billingId: charge.id,
+        agentId: charge.agentId,
+        customerName: charge.customerName,
+        customerPhone: charge.customerPhone,
+        type: 'envio_agendado',
+        status: 'info',
+        message: `Cobrança de R$ ${charge.amount.toFixed(2)} cadastrada e AGENDADA para envio em ${charge.scheduledSendAt} (${charge.billingMethod.toUpperCase()}). Vencimento: ${charge.dueDate}.`
+      });
+    } else {
+      this.addLog({
+        billingId: charge.id,
+        agentId: charge.agentId,
+        customerName: charge.customerName,
+        customerPhone: charge.customerPhone,
+        type: 'envio_inicial',
+        status: 'info',
+        message: `Cobrança de R$ ${charge.amount.toFixed(2)} cadastrada (${charge.billingMethod.toUpperCase()})${charge.sendImmediately ? ' com envio imediato' : ' (salva sem envio imediato)'}. Vencimento: ${charge.dueDate}.`
+      });
+    }
 
     // Envio inicial imediato se solicitado
     if (charge.sendImmediately) {
@@ -351,7 +372,7 @@ export class BillingManager {
    */
   async dispatchBilling(
     chargeId: string,
-    triggerType: 'envio_inicial' | 'reenvio_manual' | 'regua_recorrente'
+    triggerType: 'envio_inicial' | 'reenvio_manual' | 'regua_recorrente' | 'envio_agendado'
   ): Promise<boolean> {
     const charge = this.getChargeById(chargeId);
     if (!charge) {
@@ -501,6 +522,39 @@ export class BillingManager {
 
       return false;
     }
+  }
+
+  /**
+   * Varre cobranças agendadas cujo horário já chegou e realiza o disparo automático
+   */
+  async checkAndDispatchScheduledCharges(): Promise<number> {
+    const now = new Date();
+    // Procura cobranças com statusEnvio === 'agendado' e scheduledSendAt <= now
+    const eligible = this.charges.filter(c => {
+      if (c.statusEnvio !== 'agendado' || !c.scheduledSendAt) return false;
+      if (c.statusPagamento === 'pago' || c.statusPagamento === 'cancelado') return false;
+      const scheduledTime = new Date(c.scheduledSendAt);
+      return !isNaN(scheduledTime.getTime()) && scheduledTime <= now;
+    });
+
+    if (eligible.length === 0) return 0;
+
+    console.log(`[BillingManager] ⏰ Processando ${eligible.length} cobrança(s) agendada(s) prontas para disparo...`);
+    let dispatched = 0;
+    for (const charge of eligible) {
+      try {
+        console.log(`[BillingManager] ⏰ Disparando cobrança agendada ${charge.id} para ${charge.customerName} (${charge.customerPhone})...`);
+        const success = await this.dispatchBilling(charge.id, 'envio_agendado');
+        if (success) {
+          dispatched++;
+        }
+        // Pausa de 1.5s entre disparos
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      } catch (err: any) {
+        console.error(`[BillingManager] Erro ao disparar cobrança agendada ${charge.id}:`, err.message);
+      }
+    }
+    return dispatched;
   }
 
   /**

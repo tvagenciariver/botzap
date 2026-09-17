@@ -67,6 +67,31 @@ async function runTests() {
   assert.ok(pixCharge.pixQrCodeFilePath && fs.existsSync(pixCharge.pixQrCodeFilePath), 'Arquivo do QR Code deve existir em disco');
   console.log('✅ Cobrança com PIX cadastrada com sucesso!');
 
+  // 2.1 Teste de Criação de Cobrança com Envio Agendado
+  console.log('\n2️⃣.1️⃣ Testando cadastro de cobrança com Envio Agendado...');
+  const scheduledTimeStr = new Date(Date.now() + 60000).toISOString(); // 1 minuto no futuro
+  const scheduledCharge = await billingManager.createCharge({
+    agentId: defaultAgent.id,
+    customerName: 'Cliente Agendado Teste',
+    customerPhone: '5587981112222',
+    serviceType: 'Procedimento Estético',
+    amount: 150.00,
+    dueDate: '2026-09-25',
+    billingMethod: 'pix',
+    pixKey: 'estetica@teste.com',
+    pixKeyType: 'email',
+    sendOption: 'scheduled',
+    scheduledSendAt: scheduledTimeStr
+  });
+
+  assert.strictEqual(scheduledCharge.statusEnvio, 'agendado', 'Status de envio deve ser "agendado"');
+  assert.strictEqual(scheduledCharge.scheduledSendAt, scheduledTimeStr);
+  assert.strictEqual(scheduledCharge.sendImmediately, false);
+
+  const scheduledList = billingManager.getCharges({ quickFilter: 'scheduled' });
+  assert.ok(scheduledList.some(c => c.id === scheduledCharge.id), 'Cobrança agendada deve constar no filtro quickFilter=scheduled');
+  console.log('✅ Cobrança com Envio Agendado criada e validada com sucesso!');
+
   // 3. Teste de Indicadores / KPIs (Stats)
   console.log('\n3️⃣ Testando cálculo de métricas (KPIs)...');
   const stats = billingManager.getStats(defaultAgent.id);
@@ -130,6 +155,7 @@ async function runTests() {
   console.log('\n7️⃣ Limpando registros de teste...');
   billingManager.deleteCharge(boletoCharge.id);
   billingManager.deleteCharge(pixCharge.id);
+  billingManager.deleteCharge(scheduledCharge.id);
   console.log('✅ Cobranças de teste removidas.');
 
   console.log('\n🎉 ======================================================');

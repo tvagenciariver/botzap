@@ -1868,6 +1868,7 @@
             <div class="date-quick-filters" style="display: flex; gap: 6px; flex-wrap: wrap;">
               <button type="button" class="btn btn-sm btn-date-filter active" data-billing-filter="all" id="filter-btn-billing-all">Todos</button>
               <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="sent_initial" id="filter-btn-billing-initial">Receberam Envio Inicial</button>
+              <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="scheduled" id="filter-btn-billing-scheduled" style="border-color: rgba(168,85,247,0.4); color: #c084fc;">⏰ Agendados</button>
               <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="not_confirmed" id="filter-btn-billing-unconfirmed">Ainda Não Confirmaram</button>
               <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="awaiting_confirmation" id="filter-btn-billing-awaiting">Aguardando Confirmação</button>
               <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="paid" id="filter-btn-billing-paid">Confirmados / Baixados</button>
@@ -3422,13 +3423,36 @@
             <small style="color: var(--text-muted);">Tags disponíveis: <code>{nome}</code>, <code>{servico}</code>, <code>{valor}</code>, <code>{vencimento}</code>, <code>{chave_pix}</code></small>
           </div>
 
-          <!-- Opção de Envio Imediato -->
-          <div class="form-group" style="margin-bottom: 0;">
-            <label class="custom-checkbox" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-              <input type="checkbox" id="billing-new-send-immediately" checked>
-              <span class="checkmark"></span>
-              <span><strong>Enviar imediatamente via WhatsApp</strong> após salvar a cobrança</span>
-            </label>
+          <!-- Opções de Envio: Imediato, Agendado ou Salvar sem Enviar -->
+          <div class="form-group" style="margin-bottom: 0; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 10px; font-size: 13px;">Quando enviar ao cliente via WhatsApp? *</label>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px;">
+                <input type="radio" name="billing-send-option" value="immediate" id="radio-billing-send-immediate" checked>
+                <span>🚀 <strong>Enviar Imediatamente</strong> (disparo via WhatsApp logo após salvar)</span>
+              </label>
+
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px;">
+                <input type="radio" name="billing-send-option" value="scheduled" id="radio-billing-send-scheduled">
+                <span>⏰ <strong>Agendar Envio</strong> (escolher dia e horário para disparo automático)</span>
+              </label>
+              
+              <!-- Painel do Seletor de Data e Hora para Envio Agendado -->
+              <div id="billing-scheduled-datetime-container" style="display: none; padding: 10px 14px; margin-left: 24px; border-left: 3px solid #c084fc; background: rgba(168,85,247,0.08); border-radius: 6px;">
+                <label for="billing-new-scheduled-datetime" style="font-size: 12px; font-weight: 600; color: #c084fc; display: block; margin-bottom: 6px;">
+                  📅 Data e Horário do Disparo Automático:
+                </label>
+                <input type="datetime-local" id="billing-new-scheduled-datetime" class="form-control" style="max-width: 280px; font-size: 13px;">
+                <small style="color: var(--text-muted); display: block; margin-top: 6px;">
+                  O robô monitora a cada 30 segundos e fará o envio exato no WhatsApp do cliente com o Boleto/PIX.
+                </small>
+              </div>
+
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px;">
+                <input type="radio" name="billing-send-option" value="manual" id="radio-billing-send-manual">
+                <span>⏸️ <strong>Salvar sem Enviar</strong> (apenas registrar no sistema; envio manual posterior ou régua)</span>
+              </label>
+            </div>
           </div>
 
         </div>

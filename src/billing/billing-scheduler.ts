@@ -21,12 +21,18 @@ export class BillingScheduler {
       this.checkAndRun('auto').catch(err => {
         console.error('[BillingScheduler] Erro na verificação inicial da régua:', err.message);
       });
+      this.checkScheduledDispatches().catch(err => {
+        console.error('[BillingScheduler] Erro na verificação inicial de cobranças agendadas:', err.message);
+      });
     }, 6000);
 
     // Loop a cada 30 segundos
     this.timer = setInterval(() => {
       this.checkAndRun('auto').catch(err => {
         console.error('[BillingScheduler] Erro no ciclo de verificação:', err.message);
+      });
+      this.checkScheduledDispatches().catch(err => {
+        console.error('[BillingScheduler] Erro no ciclo de cobranças agendadas:', err.message);
       });
     }, 30000);
   }
@@ -202,6 +208,18 @@ export class BillingScheduler {
     }
 
     return { dispatched, totalEligible };
+  }
+
+  /**
+   * Verifica cobranças agendadas prontas para disparo
+   */
+  async checkScheduledDispatches(): Promise<number> {
+    try {
+      return await billingManager.checkAndDispatchScheduledCharges();
+    } catch (err: any) {
+      console.error('[BillingScheduler] Erro ao processar disparos agendados:', err.message);
+      return 0;
+    }
   }
 }
 

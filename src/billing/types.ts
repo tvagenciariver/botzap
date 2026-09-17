@@ -1,6 +1,6 @@
 export type BillingMethod = 'boleto' | 'pix' | 'ambos';
 export type PixKeyType = 'cpf' | 'cnpj' | 'telefone' | 'email' | 'aleatoria';
-export type BillingSendStatus = 'pendente' | 'enviado' | 'falha';
+export type BillingSendStatus = 'pendente' | 'agendado' | 'enviado' | 'falha';
 export type BillingPaymentStatus = 'pendente' | 'aguardando_confirmacao' | 'pago' | 'cancelado';
 
 export interface BillingCharge {
@@ -32,7 +32,7 @@ export interface BillingCharge {
   statusEnvio: BillingSendStatus;
   statusPagamento: BillingPaymentStatus;
   sendImmediately: boolean;
-  scheduledSendDate?: string;
+  scheduledSendAt?: string; // YYYY-MM-DDTHH:mm:ss (Data e Hora do Agendamento)
   customMessageTemplate?: string;
   lastSentAt?: string;
   sendAttempts: number;
@@ -60,6 +60,7 @@ export interface BillingLog {
   customerPhone: string;
   type: 
     | 'envio_inicial'
+    | 'envio_agendado'
     | 'regua_recorrente'
     | 'reenvio_manual'
     | 'comprovante_recebido'
@@ -122,6 +123,8 @@ export interface CreateBillingDTO {
   pixQrCodeBase64?: string;
   pixQrCodeFileName?: string;
 
+  sendOption?: 'immediate' | 'scheduled' | 'manual';
+  scheduledSendAt?: string; // YYYY-MM-DDTHH:mm ou ISO string
   sendImmediately?: boolean;
   customMessageTemplate?: string;
   notes?: string;
@@ -132,7 +135,7 @@ export interface BillingFilter {
   statusEnvio?: BillingSendStatus;
   statusPagamento?: BillingPaymentStatus;
   billingMethod?: BillingMethod;
-  quickFilter?: 'all' | 'sent_initial' | 'not_confirmed' | 'awaiting_confirmation' | 'paid' | 'overdue';
+  quickFilter?: 'all' | 'sent_initial' | 'scheduled' | 'not_confirmed' | 'awaiting_confirmation' | 'paid' | 'overdue';
   search?: string;
   startDate?: string;
   endDate?: string;

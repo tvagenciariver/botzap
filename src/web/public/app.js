@@ -8946,6 +8946,19 @@ function renderBillingTable(charges) {
       sendStatusBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399;" title="Enviado. Tentativas: ${c.sendAttempts || 1}">Enviado ✅</span>`;
     } else if (c.statusEnvio === 'falha') {
       sendStatusBadge = `<span class="badge" style="background: rgba(244, 63, 94, 0.15); color: #f43f5e;" title="Falha no disparo">Falha ❌</span>`;
+    } else if (c.statusEnvio === 'agendado') {
+      let schedFormatted = 'Agendado';
+      if (c.scheduledSendAt) {
+        try {
+          const dt = new Date(c.scheduledSendAt);
+          const dStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+          const tStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+          schedFormatted = `${dStr} às ${tStr}`;
+        } catch {
+          schedFormatted = c.scheduledSendAt;
+        }
+      }
+      sendStatusBadge = `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);" title="Disparo automático agendado para ${schedFormatted}">⏰ Agendado (${schedFormatted})</span>`;
     } else {
       sendStatusBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">Pendente ⏳</span>`;
     }
@@ -9311,11 +9324,48 @@ document.addEventListener('DOMContentLoaded', () => {
     // Default forma: boleto
     document.getElementById('method-choice-boleto')?.click();
 
+    // Default envio: imediato
+    const radioImmediate = document.getElementById('radio-billing-send-immediate');
+    if (radioImmediate) radioImmediate.checked = true;
+    const schedContainer = document.getElementById('billing-scheduled-datetime-container');
+    if (schedContainer) schedContainer.style.display = 'none';
+
+    // Default data/hora de agendamento (amanhã às 09:00)
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    const schedYear = tomorrow.getFullYear();
+    const schedMonth = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const schedDay = String(tomorrow.getDate()).padStart(2, '0');
+    const schedHours = String(tomorrow.getHours()).padStart(2, '0');
+    const schedMins = String(tomorrow.getMinutes()).padStart(2, '0');
+    const schedInput = document.getElementById('billing-new-scheduled-datetime');
+    if (schedInput) {
+      schedInput.value = `${schedYear}-${schedMonth}-${schedDay}T${schedHours}:${schedMins}`;
+      const nowDt = new Date();
+      const minIso = `${nowDt.getFullYear()}-${String(nowDt.getMonth() + 1).padStart(2, '0')}-${String(nowDt.getDate()).padStart(2, '0')}T${String(nowDt.getHours()).padStart(2, '0')}:${String(nowDt.getMinutes()).padStart(2, '0')}`;
+      schedInput.min = minIso;
+    }
+
     if (modalNew) modalNew.style.display = 'flex';
   });
 
   btnCloseNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
   btnCancelNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
+
+  // 7.1 Alternância entre Envio Imediato, Agendado e Manual
+  document.querySelectorAll('input[name="billing-send-option"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const isSched = document.getElementById('radio-billing-send-scheduled')?.checked;
+      const container = document.getElementById('billing-scheduled-datetime-container');
+      if (container) {
+        container.style.display = isSched ? 'block' : 'none';
+        if (isSched) {
+          document.getElementById('billing-new-scheduled-datetime')?.focus();
+        }
+      }
+    });
+  });
 
   // 8. Alternância entre Boleto e PIX no Modal de Nova Cobrança
   document.querySelectorAll('input[name="billing-method-choice"]').forEach(radio => {
@@ -9400,7 +9450,33 @@ document.addEventListener('DOMContentLoaded', () => {
     const pixCopiaECola = document.getElementById('billing-pix-copia-cola')?.value?.trim();
 
     const customMessageTemplate = document.getElementById('billing-new-template')?.value?.trim();
-    const sendImmediately = document.getElementById('billing-new-send-immediately')?.checked ?? true;
+    
+    // Opções de Envio: Imediato, Agendado ou Manual
+    const sendOption = document.querySelector('input[name="billing-send-option"]:checked')?.value || 'immediate';
+    let scheduledSendAt = undefined;
+    let sendImmediately = false;
+
+    if (sendOption === 'scheduled') {
+      scheduledSendAt = document.getElementById('billing-new-scheduled-datetime')?.value;
+      if (!scheduledSendAt) {
+        showToast('Por favor, selecione o dia e horário para o agendamento do envio.', 'error');
+        return;
+      }
+      const schedDate = new Date(scheduledSendAt);
+      if (isNaN(schedDate.getTime())) {
+        showToast('Data e horário de agendamento inválidos.', 'error');
+        return;
+      }
+      if (schedDate.getTime() <= Date.now()) {
+        showToast('O horário de agendamento deve ser futuro.', 'error');
+        return;
+      }
+      sendImmediately = false;
+    } else if (sendOption === 'manual') {
+      sendImmediately = false;
+    } else {
+      sendImmediately = true;
+    }
 
     if (!customerName || !customerPhone) {
       showToast('Preencha o nome e o WhatsApp do cliente.', 'error');
@@ -9437,13 +9513,15 @@ document.addEventListener('DOMContentLoaded', () => {
       pixQrCodeBase64: selectedQrCodeBase64 || undefined,
       pixQrCodeFileName: selectedQrCodeFileName || undefined,
       customMessageTemplate: customMessageTemplate || undefined,
+      sendOption,
+      scheduledSendAt: scheduledSendAt || undefined,
       sendImmediately
     };
 
     const submitBtn = document.getElementById('btn-save-billing-new');
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Salvando e Emitindo...';
+      submitBtn.textContent = 'Salvando...';
     }
 
     try {
@@ -9455,7 +9533,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao emitir cobrança');
 
-      showToast(sendImmediately ? 'Cobrança cadastrada e enviada via WhatsApp! 🚀' : 'Cobrança salva com sucesso!', 'success');
+      let successMsg = 'Cobrança salva com sucesso! 💾';
+      if (sendOption === 'immediate') {
+        successMsg = 'Cobrança cadastrada e enviada via WhatsApp! 🚀';
+      } else if (sendOption === 'scheduled') {
+        const dt = new Date(scheduledSendAt);
+        const dtStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')} às ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+        successMsg = `Cobrança salva e agendada para envio em ${dtStr}! ⏰`;
+      }
+      showToast(successMsg, 'success');
       if (modalNew) modalNew.style.display = 'none';
 
       loadBilling();
