@@ -601,6 +601,9 @@ function switchToTab(targetTab) {
       loadBilling();
       loadBillingStats();
       loadBillingSchedulerStatus();
+      if (typeof startBillingRealtimeSync === 'function') startBillingRealtimeSync();
+    } else {
+      if (typeof stopBillingRealtimeSync === 'function') stopBillingRealtimeSync();
     }
     if (targetTab === 'agents' && currentUser?.role === 'admin') loadAgents();
     if (targetTab === 'chats') loadChats();
@@ -8749,12 +8752,36 @@ let selectedBoletoFileName = null;
 let selectedQrCodeBase64 = null;
 let selectedQrCodeFileName = null;
 
+let billingRealtimeTimer = null;
+
+function startBillingRealtimeSync() {
+  if (billingRealtimeTimer) return;
+  billingRealtimeTimer = setInterval(() => {
+    const activeNav = document.querySelector('.nav-menu .nav-btn.active');
+    const activeTab = activeNav ? activeNav.getAttribute('data-tab') : null;
+    if (activeTab === 'billing' && getAuthToken()) {
+      loadBilling(true);
+      loadBillingStats();
+      loadBillingSchedulerStatus();
+    }
+  }, 4000);
+}
+
+function stopBillingRealtimeSync() {
+  if (billingRealtimeTimer) {
+    clearInterval(billingRealtimeTimer);
+    billingRealtimeTimer = null;
+  }
+}
+
 // Funções expostas globalmente
 window.loadBilling = loadBilling;
 window.loadBillingStats = loadBillingStats;
 window.loadBillingSchedulerStatus = loadBillingSchedulerStatus;
+window.startBillingRealtimeSync = startBillingRealtimeSync;
+window.stopBillingRealtimeSync = stopBillingRealtimeSync;
 
-async function loadBilling() {
+async function loadBilling(isSilent = false) {
   const token = getAuthToken();
   if (!token) return;
 
@@ -8770,7 +8797,7 @@ async function loadBilling() {
   }
 
   const tbody = document.getElementById('billing-table-body');
-  if (tbody) {
+  if (!isSilent && tbody) {
     tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 24px; color: var(--text-muted);"><span class="pulse-dot"></span> Carregando cobranças...</td></tr>`;
   }
 
@@ -8794,7 +8821,7 @@ async function loadBilling() {
     renderBillingTable(currentBillingCharges);
   } catch (err) {
     console.error('[Billing] Erro ao carregar cobranças:', err.message);
-    if (tbody) {
+    if (!isSilent && tbody) {
       tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 20px; color: #f43f5e;">Erro ao carregar cobranças: ${escapeHtml(err.message)}</td></tr>`;
     }
   }
@@ -9640,6 +9667,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalHistory = document.getElementById('modal-billing-history-overlay');
   document.getElementById('btn-close-billing-history-modal')?.addEventListener('click', () => { if (modalHistory) modalHistory.style.display = 'none'; });
   document.getElementById('btn-close-billing-history')?.addEventListener('click', () => { if (modalHistory) modalHistory.style.display = 'none'; });
+
+  // 14. Ciclo de Vida da Aba de Cobranças & Sincronização em Tempo Real
+  document.addEventListener('tabChanged', (e) => {
+    if (e.detail?.tab === 'billing') {
+      loadBilling();
+      loadBillingStats();
+      loadBillingSchedulerStatus();
+      startBillingRealtimeSync();
+    } else {
+      stopBillingRealtimeSync();
+    }
+  });
+
+  if (document.querySelector('[data-tab="billing"].active')) {
+    loadBilling();
+    loadBillingStats();
+    loadBillingSchedulerStatus();
+    startBillingRealtimeSync();
+  }
 
 });
 

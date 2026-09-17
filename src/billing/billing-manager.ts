@@ -11,7 +11,7 @@ import {
 import { wahaClient } from '../waha/client.js';
 import { agentManager } from '../config/agent-manager.js';
 import { env } from '../config/index.js';
-import { formatToWhatsAppChatId, getAllChatIdAliases } from '../appointments/phone-utils.js';
+import { formatToWhatsAppChatId, getAllChatIdAliases, matchPhoneOrChatId } from '../appointments/phone-utils.js';
 import { botTracker } from '../orchestrator/bot-tracker.js';
 
 export class BillingManager {
@@ -342,9 +342,11 @@ export class BillingManager {
 
     // Envio inicial imediato se solicitado
     if (charge.sendImmediately) {
-      this.dispatchBilling(charge.id, 'envio_inicial').catch(err => {
+      try {
+        await this.dispatchBilling(charge.id, 'envio_inicial');
+      } catch (err: any) {
         console.error(`[BillingManager] Erro no envio imediato da cobrança ${charge.id}:`, err.message);
-      });
+      }
     }
 
     return charge;
@@ -594,17 +596,42 @@ export class BillingManager {
   }
 
   /**
-   * Localiza cobrança pendente para um contato específico
+   * Localiza cobrança pendente para um contato específico (com inteligência de números brasileiros, 9º dígito e LID)
    */
   findPendingChargeForCustomer(chatId: string, agentId?: string): BillingCharge | undefined {
-    const aliases = getAllChatIdAliases(chatId);
+    const isCustomerMatch = (c: BillingCharge): boolean => {
+      if (matchPhoneOrChatId(chatId, c.customerChatId)) return true;
+      if (matchPhoneOrChatId(chatId, c.customerPhone)) return true;
+      if (matchPhoneOrChatId(c.customerChatId, chatId)) return true;
+      const aliases = getAllChatIdAliases(chatId);
+      if (aliases.includes(c.customerChatId)) return true;
+      const cleanCustomerDigits = (c.customerPhone || '').replace(/\D/g, '');
+      if (cleanCustomerDigits.length >= 8) {
+        for (const a of aliases) {
+          const cleanA = a.replace(/\D/g, '');
+          if (cleanA.includes(cleanCustomerDigits) || cleanCustomerDigits.includes(cleanA)) return true;
+        }
+      }
+      return false;
+    };
 
-    // Primeiro busca cobranças estritamente pendentes ou aguardando confirmação
+    // 1. Tenta buscar cobrança pendente estritamente do agente informado (se não for '*' ou 'all')
+    if (agentId && agentId !== '*' && agentId !== 'all') {
+      const charge = this.charges.find(c => {
+        const matchAgent = c.agentId === agentId;
+        const matchChat = isCustomerMatch(c);
+        const isPending = c.statusPagamento === 'pendente' || c.statusPagamento === 'aguardando_confirmacao';
+        return matchAgent && matchChat && isPending;
+      });
+      if (charge) return charge;
+    }
+
+    // 2. Fallback global: busca por telefone em qualquer agente!
+    // Se o cliente tem uma cobrança pendente e enviou o comprovante, deve associar imediatamente!
     return this.charges.find(c => {
-      const matchAgent = !agentId || agentId === '*' || c.agentId === agentId;
-      const matchChat = aliases.includes(c.customerChatId) || aliases.some(a => c.customerPhone.includes(a.replace(/\D/g, '')));
+      const matchChat = isCustomerMatch(c);
       const isPending = c.statusPagamento === 'pendente' || c.statusPagamento === 'aguardando_confirmacao';
-      return matchAgent && matchChat && isPending;
+      return matchChat && isPending;
     });
   }
 

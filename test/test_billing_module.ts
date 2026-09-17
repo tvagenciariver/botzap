@@ -135,6 +135,48 @@ async function runTests() {
   assert.strictEqual(updatedCharge?.statusPagamento, 'aguardando_confirmacao', 'Status deve mudar para aguardando_confirmacao');
   console.log('✅ BillingAgent interceptou o comprovante e atualizou status para "aguardando_confirmacao"!');
 
+  // 5.1 Teste com variação de número (sem o 9º dígito) e apenas texto ("já fiz o pix!")
+  console.log('\n5️⃣.1️⃣ Testando reconhecimento com variação de 9º dígito e apenas texto de pagamento...');
+  const altTestChatId = '5587999991111@c.us'; // O pixCharge foi criado com '5587999991111'
+  const altContext: AgentContext = {
+    chatId: '558799991111@c.us', // Variação sem o 9º dígito!
+    userMessage: 'olá, já fiz o pix e tá pago!',
+    session: 'default',
+    agent: defaultAgent
+  };
+
+  const canHandleAlt = await billingAgent.canHandle(altContext);
+  assert.strictEqual(canHandleAlt, true, 'BillingAgent deve reconhecer mesmo com variação do 9º dígito');
+  const altResponse = await billingAgent.execute(altContext);
+  assert.strictEqual(altResponse.handled, true);
+
+  const updatedPixCharge = billingManager.getChargeById(pixCharge.id);
+  assert.strictEqual(updatedPixCharge?.statusPagamento, 'aguardando_confirmacao', 'Status da cobrança PIX deve mudar para aguardando_confirmacao');
+  console.log('✅ BillingAgent reconheceu com variação do 9º dígito e atualizou status da cobrança PIX!');
+
+  // 5.2 Teste com envio exclusivo de imagem sem legenda (legenda vazia)
+  console.log('\n5️⃣.2️⃣ Testando reconhecimento de envio exclusivo de foto sem legenda...');
+  const imageOnlyContext: AgentContext = {
+    chatId: '5587981112222@c.us', // scheduledCharge
+    userMessage: '[Imagem / Comprovante Anexo Enviado pelo Cliente]',
+    session: 'default',
+    agent: defaultAgent,
+    metadata: {
+      payload: {
+        hasMedia: true,
+        type: 'image',
+        media: { mimetype: 'image/jpeg' }
+      }
+    }
+  };
+
+  const canHandleImg = await billingAgent.canHandle(imageOnlyContext);
+  assert.strictEqual(canHandleImg, true, 'BillingAgent deve reconhecer envio de imagem/foto como comprovante');
+  await billingAgent.execute(imageOnlyContext);
+  const updatedSchedCharge = billingManager.getChargeById(scheduledCharge.id);
+  assert.strictEqual(updatedSchedCharge?.statusPagamento, 'aguardando_confirmacao');
+  console.log('✅ BillingAgent reconheceu envio de imagem sem legenda e atualizou status para "aguardando_confirmacao"!');
+
   // 6. Teste de Baixa Manual
   console.log('\n6️⃣ Testando Baixa Manual do Pagamento...');
   const paidCharge = billingManager.markAsPaidManual(boletoCharge.id, {

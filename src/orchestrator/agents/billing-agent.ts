@@ -8,15 +8,17 @@ export class BillingAgent implements IAgent {
   description = 'Detecta envio de comprovantes de pagamento (imagens, PDFs) e confirmações de pagamento ("já paguei", "fiz o pix"), registrando baixa para conferência e respondendo cordialmente.';
 
   private paymentKeywords = [
-    'ja paguei',
-    'já paguei',
     'paguei',
+    'ja paguei',
     'ta pago',
-    'tá pago',
+    'pago',
+    'pago hoje',
+    'pago agora',
     'fiz o pix',
     'fiz o pagamento',
     'pagamento feito',
     'pagamento realizado',
+    'pagamento efetuado',
     'segue o comprovante',
     'segue comprovante',
     'mandei o comprovante',
@@ -27,12 +29,27 @@ export class BillingAgent implements IAgent {
     'acabei de pagar',
     'acabei de transferir',
     'fiz a transferencia',
-    'fiz a transferência',
     'pix enviado',
     'pix feito',
+    'mandei o pix',
+    'enviei o pix',
+    'chave pix',
     'boleto pago',
-    'pago hoje',
-    'pago agora'
+    'quitei',
+    'liquidado',
+    'depositei',
+    'deposito feito',
+    'mandei o print',
+    'print do pix',
+    'print',
+    'ta na conta',
+    'olha o comprovante',
+    'anexo',
+    'segue anexo',
+    'conferir pagamento',
+    'confere ai',
+    'ja transferi',
+    'ja mandei'
   ];
 
   async canHandle(context: AgentContext): Promise<boolean> {
@@ -40,24 +57,32 @@ export class BillingAgent implements IAgent {
     const lower = raw.toLowerCase();
     const agentId = context.agent?.id;
 
-    // 1. Verifica se o contato possui cobrança pendente para este agente/empresa
+    // 1. Verifica se o contato possui cobrança pendente para este agente/empresa (com fallback global)
     const pendingCharge = billingManager.findPendingChargeForCustomer(context.chatId, agentId);
     if (!pendingCharge) {
       return false;
     }
 
-    // 2. Se tiver mídia (foto ou documento)
+    // 2. Se tiver mídia (foto, comprovante ou documento)
+    const payload = context.metadata?.payload;
     const hasMedia = !!(
-      context.metadata?.payload?.hasMedia ||
+      payload?.hasMedia ||
       context.metadata?.hasMedia ||
+      payload?.media ||
+      payload?._data?.hasMedia ||
+      payload?.type === 'image' ||
+      payload?.type === 'document' ||
       raw.includes('[Imagem') ||
       raw.includes('[Documento') ||
       raw.includes('[Foto') ||
-      raw.includes('[Arquivo')
+      raw.includes('[Arquivo') ||
+      raw.includes('[Mídia') ||
+      raw.includes('[Midia')
     );
 
-    // 3. Se a mensagem contém palavras-chave explícitas de pagamento
-    const hasPaymentIntent = this.paymentKeywords.some(keyword => lower.includes(keyword));
+    // 3. Se a mensagem contém palavras-chave explícitas de pagamento (com normalização de acentos)
+    const norm = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const hasPaymentIntent = this.paymentKeywords.some(keyword => norm.includes(keyword));
 
     // Se o cliente possui cobrança pendente e enviou mídia ou texto de pagamento
     if (hasMedia || hasPaymentIntent) {
@@ -81,7 +106,7 @@ export class BillingAgent implements IAgent {
     let mimeType: string | undefined;
 
     // Se houver mídia recebida no webhook, baixa o arquivo via WAHA
-    if (payload?.hasMedia && (payload.media?.url || payload.id)) {
+    if ((payload?.hasMedia || payload?.media || payload?._data?.hasMedia) && (payload?.media?.url || payload?.id)) {
       try {
         console.log(`[BillingAgent] 📥 Baixando comprovante de pagamento enviado por ${context.chatId}...`);
         const downloaded = await wahaClient.downloadMedia(payload.media?.url, payload, session);

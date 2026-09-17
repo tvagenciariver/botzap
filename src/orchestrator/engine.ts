@@ -81,30 +81,24 @@ export class AgentOrchestrator {
    * Identifica se a mensagem recebida é uma imagem/foto (comprovante, foto, documento anexo)
    */
   isImageMessage(payload: WahaMessagePayload): boolean {
-    if (!payload.hasMedia) return false;
-    const type = (payload._data?.type || '').toLowerCase();
-    const mime = (payload.media?.mimetype || payload._data?.mimetype || '').toLowerCase();
-    return (
-      type === 'image' ||
-      mime.startsWith('image/')
-    );
+    const hasMedia = payload.hasMedia || (payload as any)._data?.hasMedia || !!payload.media;
+    const type = ((payload as any).type || payload._data?.type || '').toLowerCase();
+    const mime = (payload.media?.mimetype || payload._data?.mimetype || (payload as any).mimetype || '').toLowerCase();
+    if (type === 'image' || mime.startsWith('image/')) return true;
+    if (hasMedia && (type === 'image' || mime.includes('image') || mime.includes('jpeg') || mime.includes('png') || mime.includes('jpg') || mime.includes('webp'))) return true;
+    return false;
   }
 
   /**
    * Identifica se a mensagem recebida é um documento (PDF de laudo, requisição, etc.)
    */
   isDocumentMessage(payload: WahaMessagePayload): boolean {
-    if (!payload.hasMedia) return false;
-    const type = (payload._data?.type || '').toLowerCase();
-    const mime = (payload.media?.mimetype || payload._data?.mimetype || '').toLowerCase();
-    return (
-      type === 'document' ||
-      mime.startsWith('application/pdf') ||
-      mime.includes('pdf') ||
-      mime.includes('document') ||
-      mime.includes('msword') ||
-      mime.includes('officedocument')
-    );
+    const hasMedia = payload.hasMedia || (payload as any)._data?.hasMedia || !!payload.media;
+    const type = ((payload as any).type || payload._data?.type || '').toLowerCase();
+    const mime = (payload.media?.mimetype || payload._data?.mimetype || (payload as any).mimetype || '').toLowerCase();
+    if (type === 'document' || mime.startsWith('application/pdf') || mime.includes('pdf')) return true;
+    if (hasMedia && (type === 'document' || mime.includes('pdf') || mime.includes('document') || mime.includes('msword') || mime.includes('officedocument') || mime.includes('sheet'))) return true;
+    return false;
   }
 
   /**
@@ -523,15 +517,16 @@ export class AgentOrchestrator {
     }
 
     // 4.1b. Processamento Inteligente de Imagens e Documentos
-    if (isImage || isDocument) {
+    const hasRawMedia = hasMedia || payload.hasMedia || !!payload.media || (payload as any)._data?.hasMedia;
+    if (isImage || isDocument || hasRawMedia) {
       if (!effectiveBody || effectiveBody.trim() === '') {
         effectiveBody = isImage
-          ? '[Imagem / Arquivo Anexo Enviado pelo Cliente]'
-          : '[Documento / Arquivo Anexo Enviado pelo Cliente]';
+          ? '[Imagem / Comprovante Anexo Enviado pelo Cliente]'
+          : (isDocument ? '[Documento / Comprovante Anexo Enviado pelo Cliente]' : '[Arquivo / Mídia Anexa Enviada pelo Cliente]');
       } else {
         effectiveBody = isImage
           ? `[Imagem Anexa]: ${effectiveBody.trim()}`
-          : `[Documento Anexo]: ${effectiveBody.trim()}`;
+          : (isDocument ? `[Documento Anexo]: ${effectiveBody.trim()}` : `[Mídia Anexa]: ${effectiveBody.trim()}`);
       }
       payload.body = effectiveBody;
     }
@@ -623,15 +618,12 @@ export class AgentOrchestrator {
 
     // 5. Verifica se há texto válido
     if (!effectiveBody || effectiveBody.trim() === '') {
-      if (hasMedia) {
-        this.addLog({
-          type: 'info',
-          chatId,
-          contactName,
-          message: 'Mensagem com mídia recebida sem legenda.'
-        });
+      if (hasMedia || payload.hasMedia || !!payload.media || (payload as any)._data?.hasMedia) {
+        effectiveBody = '[Arquivo / Mídia Anexa Enviada pelo Cliente]';
+        payload.body = effectiveBody;
+      } else {
+        return;
       }
-      return;
     }
 
     this.addLog({
