@@ -13,6 +13,7 @@ import { agentManager } from '../config/agent-manager.js';
 import { env } from '../config/index.js';
 import { formatToWhatsAppChatId, getAllChatIdAliases, matchPhoneOrChatId } from '../appointments/phone-utils.js';
 import { botTracker } from '../orchestrator/bot-tracker.js';
+import { customerManager } from './customer-manager.js';
 
 export class BillingManager {
   private dataDir: string;
@@ -247,6 +248,16 @@ export class BillingManager {
     const agent = (dto.agentId ? agentManager.getAgent(dto.agentId) : null) || agentManager.getDefaultAgent();
     const customerChatId = formatToWhatsAppChatId(dto.customerPhone);
 
+    let customerId = dto.customerId;
+    if (!customerId && dto.saveCustomer) {
+      try {
+        const savedCust = customerManager.upsertCustomerFromBilling(agent.id, dto.customerName, dto.customerPhone);
+        customerId = savedCust.id;
+      } catch (err: any) {
+        console.warn('[BillingManager] Não foi possível salvar cliente automaticamente:', err.message);
+      }
+    }
+
     let pdfFileName: string | undefined;
     let pdfFilePath: string | undefined;
     let pdfUrl: string | undefined;
@@ -277,6 +288,7 @@ export class BillingManager {
     const charge: BillingCharge = {
       id: billingId,
       agentId: agent.id,
+      customerId,
       customerName: dto.customerName.trim(),
       customerPhone: dto.customerPhone.trim(),
       customerChatId,

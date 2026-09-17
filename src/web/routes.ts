@@ -26,7 +26,8 @@ import { blastEngine } from '../blast/blast-engine.js';
 import { BlastCampaign, BlastContact, BlastSettings } from '../blast/types.js';
 import { billingManager } from '../billing/billing-manager.js';
 import { billingScheduler } from '../billing/billing-scheduler.js';
-import { CreateBillingDTO, BillingFilter } from '../billing/types.js';
+import { customerManager } from '../billing/customer-manager.js';
+import { CreateBillingDTO, BillingFilter, CreateCustomerDTO, UpdateCustomerDTO, CustomerFilter } from '../billing/types.js';
 import { UserSession, AppModule } from '../auth/user-types.js';
 
 declare global {
@@ -2504,6 +2505,102 @@ apiRouter.delete('/api/billing/:id', requireAuth, (req: Request, res: Response) 
       return res.status(404).json({ error: 'Cobrança não encontrada para exclusão.' });
     }
     res.json({ success: true, message: 'Cobrança cancelada e removida com sucesso.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/billing/customers
+ * Lista os clientes cadastrados para cobranças e locatários
+ */
+apiRouter.get('/api/billing/customers', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { agentId, isRental, search } = req.query;
+    const filter: CustomerFilter = {
+      search: search as string
+    };
+
+    if (agentId) {
+      filter.agentId = agentId as string;
+    }
+    if (isRental !== undefined) {
+      filter.isRentalCustomer = isRental === 'true' || isRental === '1';
+    }
+
+    // Atendentes com agente específico só enxergam clientes daquela empresa
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      filter.agentId = req.user.assignedAgentId;
+    }
+
+    const customers = customerManager.getCustomers(filter);
+    res.json({ success: true, customers, total: customers.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/billing/customers/:id
+ * Retorna os detalhes de um cliente específico
+ */
+apiRouter.get('/api/billing/customers/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const customer = customerManager.getCustomerById(req.params.id);
+    if (!customer) {
+      return res.status(404).json({ error: 'Cliente não encontrado.' });
+    }
+    res.json({ success: true, customer });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/billing/customers
+ * Cadastra um novo cliente / locatário
+ */
+apiRouter.post('/api/billing/customers', requireAuth, (req: Request, res: Response) => {
+  try {
+    const dto: CreateCustomerDTO = req.body;
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      dto.agentId = req.user.assignedAgentId;
+    }
+    const created = customerManager.createCustomer(dto);
+    res.status(201).json({ success: true, customer: created });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * PUT /api/billing/customers/:id
+ * Atualiza dados de um cliente / locatário existente
+ */
+apiRouter.put('/api/billing/customers/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const dto: UpdateCustomerDTO = req.body;
+    if (req.user?.role === 'attendant' && req.user.assignedAgentId && req.user.assignedAgentId !== '*') {
+      dto.agentId = req.user.assignedAgentId;
+    }
+    const updated = customerManager.updateCustomer(req.params.id, dto);
+    res.json({ success: true, customer: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/billing/customers/:id
+ * Remove um cliente / locatário do sistema
+ */
+apiRouter.delete('/api/billing/customers/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const ok = customerManager.deleteCustomer(req.params.id);
+    if (!ok) {
+      return res.status(404).json({ error: 'Cliente não encontrado para exclusão.' });
+    }
+    res.json({ success: true, message: 'Cliente excluído com sucesso.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

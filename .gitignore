@@ -41,6 +41,7 @@ data/blast_campaigns.json
 data/pending_reminders.json
 data/billing.json
 data/billing_logs.json
+data/billing_customers.json
 data/uploads/
 !data/.gitkeep
 scratch/

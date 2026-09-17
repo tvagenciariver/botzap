@@ -211,6 +211,7 @@ function setActiveCompany(companyId, reload = true) {
     } else if (activeTab === 'billing' && typeof loadBilling === 'function') {
       loadBilling();
       loadBillingStats();
+      if (typeof loadBillingCustomers === 'function') loadBillingCustomers();
     } else if (activeTab === 'chats' && typeof loadChats === 'function') {
       loadChats();
     } else if (activeTab === 'blast') {
@@ -601,6 +602,7 @@ function switchToTab(targetTab) {
       loadBilling();
       loadBillingStats();
       loadBillingSchedulerStatus();
+      if (typeof loadBillingCustomers === 'function') loadBillingCustomers();
       if (typeof startBillingRealtimeSync === 'function') startBillingRealtimeSync();
     } else {
       if (typeof stopBillingRealtimeSync === 'function') stopBillingRealtimeSync();
@@ -8778,8 +8780,250 @@ function stopBillingRealtimeSync() {
 window.loadBilling = loadBilling;
 window.loadBillingStats = loadBillingStats;
 window.loadBillingSchedulerStatus = loadBillingSchedulerStatus;
+window.loadBillingCustomers = loadBillingCustomers;
 window.startBillingRealtimeSync = startBillingRealtimeSync;
 window.stopBillingRealtimeSync = stopBillingRealtimeSync;
+
+// --- GESTÃO DE CLIENTES & LOCATÁRIOS DE IMÓVEIS ---
+let cachedBillingCustomers = [];
+
+async function loadBillingCustomers(agentId = null) {
+  const token = getAuthToken();
+  if (!token) return;
+
+  const effectiveCompany = agentId || getEffectiveActiveCompanyId();
+  try {
+    let url = `/api/billing/customers?agentId=${encodeURIComponent(effectiveCompany)}`;
+    const res = await fetchWithAuth(url);
+    if (!res.ok) throw new Error('Falha ao carregar clientes');
+    const data = await res.json();
+    cachedBillingCustomers = data.customers || [];
+    renderBillingCustomersTable(cachedBillingCustomers);
+    updateBillingCustomerSelectOptions(cachedBillingCustomers);
+  } catch (err) {
+    console.warn('[Billing] Erro ao carregar clientes:', err.message);
+  }
+}
+
+function updateBillingCustomerSelectOptions(customers, selectedId = null) {
+  const select = document.getElementById('billing-new-customer-select');
+  if (!select) return;
+
+  const currentVal = selectedId || select.value;
+  let optionsHtml = '<option value="">-- Digitar dados manualmente ou selecionar abaixo --</option>';
+
+  customers.forEach(c => {
+    const isRental = c.isRentalCustomer ? '🏠 [Locatário]' : '👤';
+    const propInfo = c.rentalInfo?.propertyCode ? ` (${c.rentalInfo.propertyCode})` : '';
+    optionsHtml += `<option value="${c.id}">${isRental} ${escapeHtml(c.name)}${escapeHtml(propInfo)} - ${escapeHtml(c.phone)}</option>`;
+  });
+
+  select.innerHTML = optionsHtml;
+  if (currentVal && customers.some(c => c.id === currentVal)) {
+    select.value = currentVal;
+  }
+}
+
+function calculateNextDueDateFromDay(dueDay) {
+  const day = parseInt(dueDay, 10);
+  if (isNaN(day) || day < 1 || day > 31) return null;
+
+  const now = new Date();
+  let targetYear = now.getFullYear();
+  let targetMonth = now.getMonth(); // 0-indexed
+
+  if (now.getDate() > day) {
+    targetMonth += 1;
+    if (targetMonth > 11) {
+      targetMonth = 0;
+      targetYear += 1;
+    }
+  }
+
+  const maxDaysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const validDay = Math.min(day, maxDaysInMonth);
+
+  const mm = String(targetMonth + 1).padStart(2, '0');
+  const dd = String(validDay).padStart(2, '0');
+  return `${targetYear}-${mm}-${dd}`;
+}
+
+function renderBillingCustomersTable(customers) {
+  const tbody = document.getElementById('billing-customers-table-body');
+  if (!tbody) return;
+
+  const search = document.getElementById('billing-customers-search')?.value?.toLowerCase().trim();
+  const filterType = document.getElementById('billing-customers-filter-type')?.value || 'all';
+
+  let filtered = customers.filter(c => {
+    if (filterType === 'rental' && !c.isRentalCustomer) return false;
+    if (filterType === 'regular' && c.isRentalCustomer) return false;
+    if (search) {
+      const matchName = c.name?.toLowerCase().includes(search);
+      const matchPhone = c.phone?.toLowerCase().includes(search);
+      const matchDoc = c.document?.toLowerCase().includes(search);
+      const matchAddr = c.rentalInfo?.propertyAddress?.toLowerCase().includes(search);
+      const matchCode = c.rentalInfo?.propertyCode?.toLowerCase().includes(search);
+      return matchName || matchPhone || matchDoc || matchAddr || matchCode;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; padding: 32px; color: var(--text-muted);">
+          Nenhum cliente ou locatário encontrado.<br>
+          <small>Clique em <strong>➕ Novo Cliente / Locatário</strong> para cadastrar.</small>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(c => {
+    const cleanPhone = (c.phone || '').replace(/\D/g, '');
+    const waLink = cleanPhone ? `https://wa.me/${cleanPhone}` : '#';
+
+    let catBadge = c.isRentalCustomer
+      ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">🏠 Locatário</span>`
+      : `<span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);">👤 Cliente Geral</span>`;
+
+    let propHtml = '—';
+    if (c.isRentalCustomer && c.rentalInfo) {
+      const codeBadge = c.rentalInfo.propertyCode
+        ? `<strong style="color: #38bdf8; font-size: 11px; background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 4px; margin-right: 4px;">${escapeHtml(c.rentalInfo.propertyCode)}</strong>`
+        : '';
+      const typeStr = c.rentalInfo.propertyType ? `<small style="color: var(--text-muted); display: block;">${escapeHtml(c.rentalInfo.propertyType)}</small>` : '';
+      const addrStr = c.rentalInfo.propertyAddress ? `<span title="${escapeHtml(c.rentalInfo.propertyAddress)}">${escapeHtml(c.rentalInfo.propertyAddress.length > 35 ? c.rentalInfo.propertyAddress.substring(0, 35) + '...' : c.rentalInfo.propertyAddress)}</span>` : 'Sem endereço';
+      propHtml = `<div>${codeBadge}${addrStr}${typeStr}</div>`;
+    }
+
+    let rentHtml = '—';
+    if (c.isRentalCustomer && c.rentalInfo) {
+      const rentAmt = c.rentalInfo.rentAmount
+        ? `<strong style="color: #34d399;">${Number(c.rentalInfo.rentAmount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>`
+        : '—';
+      const dueDay = c.rentalInfo.dueDay
+        ? `<small style="color: var(--text-muted); display: block;">Vence todo dia <strong>${c.rentalInfo.dueDay}</strong></small>`
+        : '';
+      rentHtml = `<div>${rentAmt}${dueDay}</div>`;
+    }
+
+    const docStr = c.document ? `<small style="color: var(--text-muted); display: block;">Doc: ${escapeHtml(c.document)}</small>` : '';
+
+    return `
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <td style="padding: 10px 12px;">
+          <div style="font-weight: 600; color: #fff;">${escapeHtml(c.name)}</div>
+          ${docStr}
+        </td>
+        <td style="padding: 10px 12px; font-family: monospace;">
+          <a href="${waLink}" target="_blank" rel="noopener" style="color: #38bdf8; text-decoration: none; display: flex; align-items: center; gap: 4px;">
+            <span>💬</span> ${escapeHtml(c.phone)}
+          </a>
+        </td>
+        <td style="padding: 10px 12px;">${catBadge}</td>
+        <td style="padding: 10px 12px; font-size: 13px;">${propHtml}</td>
+        <td style="padding: 10px 12px; font-size: 13px;">${rentHtml}</td>
+        <td style="padding: 10px 12px; text-align: right;">
+          <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
+            <button type="button" class="btn btn-outline btn-xs btn-billing-customer-charge" data-id="${c.id}" title="Emitir cobrança rápida para este cliente" style="color: #34d399; border-color: rgba(52, 211, 153, 0.4);">
+              ⚡ Cobrar
+            </button>
+            <button type="button" class="btn btn-outline btn-xs btn-billing-customer-edit" data-id="${c.id}" title="Editar cadastro e imóvel" style="color: #60a5fa; border-color: rgba(96, 165, 250, 0.4);">
+              ✏️
+            </button>
+            <button type="button" class="btn btn-outline btn-xs btn-billing-customer-delete" data-id="${c.id}" title="Excluir cliente" style="color: #f87171; border-color: rgba(248, 113, 113, 0.4);">
+              🗑️
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openBillingCustomerFormModal(customerId = null) {
+  const modal = document.getElementById('modal-billing-customer-form-overlay');
+  const form = document.getElementById('form-billing-customer');
+  if (!modal || !form) return;
+
+  form.reset();
+
+  const agentSelect = document.getElementById('billing-customer-agent');
+  if (agentSelect) {
+    const agents = (typeof allAgents !== 'undefined' ? allAgents : []);
+    agentSelect.innerHTML = agents.map(a => `<option value="${a.id}">${escapeHtml(a.companyName || a.name)}</option>`).join('');
+    const effectiveCompany = getEffectiveActiveCompanyId();
+    if (effectiveCompany !== 'all') {
+      agentSelect.value = effectiveCompany;
+    }
+  }
+
+  const idInput = document.getElementById('billing-customer-id');
+  const titleEl = document.getElementById('modal-billing-customer-form-title');
+  const subEl = document.getElementById('modal-billing-customer-form-subtitle');
+  const rentalSec = document.getElementById('billing-customer-rental-section');
+  const rentalChk = document.getElementById('billing-customer-is-rental');
+
+  if (customerId) {
+    const cust = cachedBillingCustomers.find(c => c.id === customerId);
+    if (!cust) return;
+
+    if (idInput) idInput.value = cust.id;
+    if (titleEl) titleEl.textContent = '✏️ Editar Cliente / Locatário';
+    if (subEl) subEl.textContent = `Atualize os dados cadastrais de ${cust.name}`;
+
+    if (cust.agentId && agentSelect) agentSelect.value = cust.agentId;
+    document.getElementById('billing-customer-name').value = cust.name || '';
+    document.getElementById('billing-customer-phone').value = cust.phone || '';
+    document.getElementById('billing-customer-document').value = cust.document || '';
+    document.getElementById('billing-customer-email').value = cust.email || '';
+    document.getElementById('billing-customer-notes').value = cust.notes || '';
+
+    if (rentalChk) rentalChk.checked = Boolean(cust.isRentalCustomer);
+    if (rentalSec) rentalSec.style.display = cust.isRentalCustomer ? 'block' : 'none';
+
+    if (cust.rentalInfo) {
+      document.getElementById('billing-customer-prop-code').value = cust.rentalInfo.propertyCode || '';
+      document.getElementById('billing-customer-prop-type').value = cust.rentalInfo.propertyType || 'Apartamento';
+      document.getElementById('billing-customer-prop-address').value = cust.rentalInfo.propertyAddress || '';
+      document.getElementById('billing-customer-rent-amount').value = cust.rentalInfo.rentAmount ? Number(cust.rentalInfo.rentAmount).toFixed(2).replace('.', ',') : '';
+      document.getElementById('billing-customer-due-day').value = cust.rentalInfo.dueDay || '';
+      document.getElementById('billing-customer-prop-notes').value = cust.rentalInfo.notes || '';
+    }
+  } else {
+    if (idInput) idInput.value = '';
+    if (titleEl) titleEl.textContent = '👤 Cadastrar Cliente / Locatário';
+    if (subEl) subEl.textContent = 'Preencha os dados de contato e do imóvel alugado';
+    if (rentalChk) rentalChk.checked = false;
+    if (rentalSec) rentalSec.style.display = 'none';
+  }
+
+  modal.style.display = 'flex';
+}
+
+async function deleteBillingCustomer(customerId) {
+  const cust = cachedBillingCustomers.find(c => c.id === customerId);
+  const name = cust ? cust.name : 'este cliente';
+  if (!confirm(`Deseja realmente excluir o cadastro de ${name}? Esta ação não poderá ser desfeita.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetchWithAuth(`/api/billing/customers/${customerId}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao excluir cliente');
+
+    showToast('Cliente removido com sucesso!', 'success');
+    loadBillingCustomers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
 
 async function loadBilling(isSilent = false) {
   const token = getAuthToken();
@@ -9374,11 +9618,70 @@ document.addEventListener('DOMContentLoaded', () => {
       schedInput.min = minIso;
     }
 
+    // Carrega clientes da empresa selecionada
+    loadBillingCustomers(agentSelect ? agentSelect.value : null);
+
     if (modalNew) modalNew.style.display = 'flex';
   });
 
   btnCloseNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
   btnCancelNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
+
+  // Alternância de empresa no modal de nova cobrança
+  document.getElementById('billing-new-agent')?.addEventListener('change', (e) => {
+    loadBillingCustomers(e.target.value);
+  });
+
+  // Botão de cadastro rápido a partir do modal de nova cobrança
+  document.getElementById('btn-billing-quick-new-customer')?.addEventListener('click', () => {
+    openBillingCustomerFormModal();
+  });
+
+  // Auto-preenchimento ao selecionar cliente cadastrado
+  document.getElementById('billing-new-customer-select')?.addEventListener('change', (e) => {
+    const custId = e.target.value;
+    if (!custId) return;
+
+    const customer = cachedBillingCustomers.find(c => c.id === custId);
+    if (!customer) return;
+
+    const nameInput = document.getElementById('billing-new-customer-name');
+    const phoneInput = document.getElementById('billing-new-customer-phone');
+    if (nameInput) nameInput.value = customer.name || '';
+    if (phoneInput) phoneInput.value = customer.phone || '';
+
+    // Se for cliente de aluguel de imóveis, preenche dados do imóvel e valor/vencimento
+    if (customer.isRentalCustomer && customer.rentalInfo) {
+      const svcSelect = document.getElementById('billing-new-service-type');
+      if (svcSelect) {
+        let opt = Array.from(svcSelect.options).find(o => o.value === 'Aluguel de Imóvel');
+        if (opt) svcSelect.value = 'Aluguel de Imóvel';
+      }
+
+      const descInput = document.getElementById('billing-new-description');
+      if (descInput) {
+        const parts = [];
+        if (customer.rentalInfo.propertyCode) parts.push(customer.rentalInfo.propertyCode);
+        if (customer.rentalInfo.propertyAddress) parts.push(customer.rentalInfo.propertyAddress);
+        descInput.value = parts.length ? `Aluguel Ref: ${parts.join(' - ')}` : 'Aluguel de Imóvel';
+      }
+
+      if (customer.rentalInfo.rentAmount) {
+        const amtInput = document.getElementById('billing-new-amount');
+        if (amtInput) {
+          amtInput.value = Number(customer.rentalInfo.rentAmount).toFixed(2).replace('.', ',');
+        }
+      }
+
+      if (customer.rentalInfo.dueDay) {
+        const calculatedDueDate = calculateNextDueDateFromDay(customer.rentalInfo.dueDay);
+        const dueInput = document.getElementById('billing-new-due-date');
+        if (dueInput && calculatedDueDate) {
+          dueInput.value = calculatedDueDate;
+        }
+      }
+    }
+  });
 
   // 7.1 Alternância entre Envio Imediato, Agendado e Manual
   document.querySelectorAll('input[name="billing-send-option"]').forEach(radio => {
@@ -9523,8 +9826,13 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const customerId = document.getElementById('billing-new-customer-select')?.value || undefined;
+    const saveCustomer = document.getElementById('billing-new-save-customer')?.checked !== false;
+
     const payload = {
       agentId,
+      customerId,
+      saveCustomer,
       customerName,
       customerPhone,
       serviceType,
@@ -9573,6 +9881,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       loadBilling();
       loadBillingStats();
+      loadBillingCustomers();
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -9668,12 +9977,193 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-close-billing-history-modal')?.addEventListener('click', () => { if (modalHistory) modalHistory.style.display = 'none'; });
   document.getElementById('btn-close-billing-history')?.addEventListener('click', () => { if (modalHistory) modalHistory.style.display = 'none'; });
 
+  // 13.1 Gerenciamento de Clientes & Locatários (Imóveis)
+  const modalCustomers = document.getElementById('modal-billing-customers-overlay');
+  const btnOpenCustomers = document.getElementById('btn-billing-open-customers');
+  const btnCloseCustomersModal = document.getElementById('btn-close-billing-customers-modal');
+  const btnCloseCustomers = document.getElementById('btn-close-billing-customers');
+
+  btnOpenCustomers?.addEventListener('click', () => {
+    loadBillingCustomers();
+    if (modalCustomers) modalCustomers.style.display = 'flex';
+  });
+  btnCloseCustomersModal?.addEventListener('click', () => { if (modalCustomers) modalCustomers.style.display = 'none'; });
+  btnCloseCustomers?.addEventListener('click', () => { if (modalCustomers) modalCustomers.style.display = 'none'; });
+
+  // Busca em tempo real e filtro por tipo de cliente
+  document.getElementById('billing-customers-search')?.addEventListener('input', () => {
+    renderBillingCustomersTable(cachedBillingCustomers);
+  });
+  document.getElementById('billing-customers-filter-type')?.addEventListener('change', () => {
+    renderBillingCustomersTable(cachedBillingCustomers);
+  });
+
+  // Botão Novo Cliente na listagem
+  document.getElementById('btn-billing-customer-add')?.addEventListener('click', () => {
+    openBillingCustomerFormModal();
+  });
+
+  // Ações por linha na tabela de clientes
+  document.getElementById('modal-billing-customers-overlay')?.addEventListener('click', (e) => {
+    const btnCharge = e.target.closest('.btn-billing-customer-charge');
+    if (btnCharge) {
+      const custId = btnCharge.getAttribute('data-id');
+      const customer = cachedBillingCustomers.find(c => c.id === custId);
+      if (customer) {
+        if (modalCustomers) modalCustomers.style.display = 'none';
+        const btnNew = document.getElementById('btn-billing-new');
+        if (btnNew) btnNew.click();
+
+        if (customer.agentId && customer.agentId !== 'default') {
+          const agentSelect = document.getElementById('billing-new-agent');
+          if (agentSelect) agentSelect.value = customer.agentId;
+        }
+
+        setTimeout(() => {
+          const custSelect = document.getElementById('billing-new-customer-select');
+          if (custSelect) {
+            custSelect.value = customer.id;
+            custSelect.dispatchEvent(new Event('change'));
+          }
+        }, 80);
+      }
+      return;
+    }
+
+    const btnEdit = e.target.closest('.btn-billing-customer-edit');
+    if (btnEdit) {
+      const custId = btnEdit.getAttribute('data-id');
+      openBillingCustomerFormModal(custId);
+      return;
+    }
+
+    const btnDelete = e.target.closest('.btn-billing-customer-delete');
+    if (btnDelete) {
+      const custId = btnDelete.getAttribute('data-id');
+      deleteBillingCustomer(custId);
+      return;
+    }
+  });
+
+  // 13.2 Formulário de Cadastro e Edição de Cliente / Locatário
+  const modalCustForm = document.getElementById('modal-billing-customer-form-overlay');
+  const btnCloseCustFormModal = document.getElementById('btn-close-billing-customer-form-modal');
+  const btnCancelCustForm = document.getElementById('btn-cancel-billing-customer');
+
+  btnCloseCustFormModal?.addEventListener('click', () => { if (modalCustForm) modalCustForm.style.display = 'none'; });
+  btnCancelCustForm?.addEventListener('click', () => { if (modalCustForm) modalCustForm.style.display = 'none'; });
+
+  // Alternância dos campos de locação / imóvel
+  document.getElementById('billing-customer-is-rental')?.addEventListener('change', (e) => {
+    const sec = document.getElementById('billing-customer-rental-section');
+    if (sec) sec.style.display = e.target.checked ? 'block' : 'none';
+    if (e.target.checked) {
+      document.getElementById('billing-customer-prop-address')?.focus();
+    }
+  });
+
+  // Submissão do cadastro de cliente
+  document.getElementById('form-billing-customer')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('billing-customer-id')?.value;
+    const agentId = document.getElementById('billing-customer-agent')?.value;
+    const name = document.getElementById('billing-customer-name')?.value?.trim();
+    const phone = document.getElementById('billing-customer-phone')?.value?.trim();
+    const documentVal = document.getElementById('billing-customer-document')?.value?.trim();
+    const email = document.getElementById('billing-customer-email')?.value?.trim();
+    const notes = document.getElementById('billing-customer-notes')?.value?.trim();
+    const isRentalCustomer = document.getElementById('billing-customer-is-rental')?.checked || false;
+
+    if (!name || !phone) {
+      showToast('Nome e telefone são obrigatórios.', 'error');
+      return;
+    }
+
+    let rentalInfo = undefined;
+    if (isRentalCustomer) {
+      const propertyAddress = document.getElementById('billing-customer-prop-address')?.value?.trim();
+      if (!propertyAddress) {
+        showToast('Informe o endereço do imóvel para o locatário.', 'error');
+        return;
+      }
+      const propertyCode = document.getElementById('billing-customer-prop-code')?.value?.trim();
+      const propertyType = document.getElementById('billing-customer-prop-type')?.value;
+      const rawRent = document.getElementById('billing-customer-rent-amount')?.value?.replace(/[R$\s.]/g, '').replace(',', '.');
+      const rentAmount = parseFloat(rawRent || '0') || undefined;
+      const dueDay = parseInt(document.getElementById('billing-customer-due-day')?.value || '0', 10) || undefined;
+      const propNotes = document.getElementById('billing-customer-prop-notes')?.value?.trim();
+
+      rentalInfo = {
+        propertyCode: propertyCode || undefined,
+        propertyType,
+        propertyAddress,
+        rentAmount,
+        dueDay,
+        notes: propNotes || undefined
+      };
+    }
+
+    const payload = {
+      agentId,
+      name,
+      phone,
+      document: documentVal || undefined,
+      email: email || undefined,
+      notes: notes || undefined,
+      isRentalCustomer,
+      rentalInfo
+    };
+
+    const submitBtn = document.getElementById('btn-save-billing-customer');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Salvando...';
+    }
+
+    try {
+      const isEdit = Boolean(id);
+      const url = isEdit ? `/api/billing/customers/${id}` : '/api/billing/customers';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetchWithAuth(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao salvar cliente');
+
+      showToast(isEdit ? 'Cliente atualizado com sucesso! ✅' : 'Cliente cadastrado com sucesso! 🎉', 'success');
+      if (modalCustForm) modalCustForm.style.display = 'none';
+
+      await loadBillingCustomers();
+
+      // Se o modal de Nova Cobrança estiver aberto, seleciona este cliente
+      if (modalNew && modalNew.style.display !== 'none' && data.customer) {
+        updateBillingCustomerSelectOptions(cachedBillingCustomers, data.customer.id);
+        const custSelect = document.getElementById('billing-new-customer-select');
+        if (custSelect) {
+          custSelect.value = data.customer.id;
+          custSelect.dispatchEvent(new Event('change'));
+        }
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '💾 Salvar Cliente';
+      }
+    }
+  });
+
   // 14. Ciclo de Vida da Aba de Cobranças & Sincronização em Tempo Real
   document.addEventListener('tabChanged', (e) => {
     if (e.detail?.tab === 'billing') {
       loadBilling();
       loadBillingStats();
       loadBillingSchedulerStatus();
+      loadBillingCustomers();
       startBillingRealtimeSync();
     } else {
       stopBillingRealtimeSync();
@@ -9684,6 +10174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadBilling();
     loadBillingStats();
     loadBillingSchedulerStatus();
+    loadBillingCustomers();
     startBillingRealtimeSync();
   }
 

@@ -6,6 +6,7 @@ export type BillingPaymentStatus = 'pendente' | 'aguardando_confirmacao' | 'pago
 export interface BillingCharge {
   id: string;
   agentId: string;
+  customerId?: string;
   customerName: string;
   customerPhone: string;
   customerChatId: string;
@@ -102,8 +103,65 @@ export interface BillingSchedulerConfig {
   };
 }
 
+export interface RentalPropertyInfo {
+  propertyCode?: string; // ex: 'APT-102', 'CASA-04', 'SALA-301'
+  propertyAddress: string; // Endereço Completo
+  propertyType?: string; // Apartamento, Casa, Sala Comercial, etc.
+  rentAmount?: number; // Valor Padrão do Aluguel
+  dueDay?: number; // Dia de Vencimento Mensal (1 a 31)
+  notes?: string; // Observações do Contrato / Imóvel
+}
+
+export interface BillingCustomer {
+  id: string;
+  agentId: string;
+  name: string;
+  phone: string;
+  chatId: string;
+  document?: string; // CPF / CNPJ
+  email?: string;
+  notes?: string;
+  
+  // Imóvel / Aluguel
+  isRentalCustomer: boolean;
+  rentalInfo?: RentalPropertyInfo;
+
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCustomerDTO {
+  agentId?: string;
+  name: string;
+  phone: string;
+  document?: string;
+  email?: string;
+  notes?: string;
+  isRentalCustomer?: boolean;
+  rentalInfo?: RentalPropertyInfo;
+}
+
+export interface UpdateCustomerDTO {
+  agentId?: string;
+  name?: string;
+  phone?: string;
+  document?: string;
+  email?: string;
+  notes?: string;
+  isRentalCustomer?: boolean;
+  rentalInfo?: RentalPropertyInfo;
+}
+
+export interface CustomerFilter {
+  agentId?: string;
+  isRentalCustomer?: boolean;
+  search?: string;
+}
+
 export interface CreateBillingDTO {
   agentId?: string;
+  customerId?: string;
+  saveCustomer?: boolean;
   customerName: string;
   customerPhone: string;
   serviceType: string;
