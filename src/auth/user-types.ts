@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'attendant';
-export type AppModule = 'appointments' | 'exams' | 'chats' | 'simulator';
+export type AppModule = 'appointments' | 'exams' | 'chats' | 'simulator' | 'billing';
 
 export interface UserProfile {
   id: string;

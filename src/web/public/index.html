@@ -98,6 +98,9 @@
         <button class="nav-btn" data-tab="exams" data-module="exams">
           <span class="nav-icon">🔬</span> Envio de Exames
         </button>
+        <button class="nav-btn" data-tab="billing" data-module="billing">
+          <span class="nav-icon">💳</span> Gestão de Cobranças
+        </button>
         <button class="nav-btn" data-tab="agents" data-admin-only="true">
           <span class="nav-icon">🤖</span> Agentes & Clientes
         </button>
@@ -129,8 +132,8 @@
 
       <div class="sidebar-footer">
         <div class="footer-version-row">
-          <span class="footer-version-tag">⚡ BotZap <strong id="footer-version-num">v2.7.0</strong></span>
-          <span class="footer-build-tag" id="footer-build-tag" title="Compilação de deploy">build 2026.09.08</span>
+          <span class="footer-version-tag">⚡ BotZap <strong id="footer-version-num">v2.8.0</strong></span>
+          <span class="footer-build-tag" id="footer-build-tag" title="Compilação de deploy">build 2026.09.17</span>
         </div>
 
         <small>WAHA + Gemini / OpenAI GPT</small>
@@ -167,7 +170,7 @@
         </div>
 
         <div class="topbar-actions">
-          <span class="topbar-version-pill" id="topbar-version-pill" title="Versão oficial instalada do BotZap">v2.7.0</span>
+          <span class="topbar-version-pill" id="topbar-version-pill" title="Versão oficial instalada do BotZap">v2.8.0</span>
           <!-- 🚨 BOTÃO DE PÂNICO GLOBAL — SEMPRE VISÍVEL -->
           <button type="button" id="btn-global-panic" class="btn btn-panic btn-sm" title="EMERGÊNCIA: Parar todos os agentes imediatamente" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
             🚨 PARAR TUDO
@@ -1793,6 +1796,130 @@
           </div>
         </div>
       </section>
+
+      <!-- TAB: Gestão de Cobranças & Régua de Cobrança Automática -->
+      <section class="tab-pane" id="pane-billing">
+        <div class="card tab-header-card">
+          <div class="tab-header-left">
+            <div class="tab-header-title">
+              <span class="tab-header-icon">💳</span>
+              <div>
+                <h2>Gestão de Cobranças &amp; Régua Automática</h2>
+                <p>Controle financeiro, emissão de faturas (Boleto &amp; PIX), régua diária de cobrança recorrente e confirmação inteligente por IA.</p>
+              </div>
+            </div>
+            <div class="tab-header-meta d-flex align-center gap-2">
+              <span class="badge badge-emerald" id="badge-billing-scheduler" style="cursor: pointer;" title="Clique para configurar a régua automática">
+                ⏰ Régua Diária: Ativa às 09:00 (Atraso ≥ 3 dias)
+              </span>
+              <span class="badge" id="badge-billing-active-company" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);">
+                🏢 Empresa Ativa: Carregando...
+              </span>
+            </div>
+          </div>
+          <div class="tab-header-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-outline" id="btn-billing-open-config" title="Configurar regras, horário e mensagens da Régua Automática">
+              ⚙️ Configurar Régua
+            </button>
+            <button type="button" class="btn btn-secondary" id="btn-billing-run-scheduler" title="Executar imediatamente a régua de cobrança para títulos vencidos há 3+ dias">
+              ⚡ Executar Régua Agora
+            </button>
+            <button type="button" class="btn btn-outline" id="btn-billing-refresh" title="Atualizar lista e indicadores">
+              🔄 Atualizar
+            </button>
+            <button type="button" class="btn btn-primary btn-glow" id="btn-billing-new">
+              ➕ Nova Cobrança
+            </button>
+          </div>
+        </div>
+
+        <!-- Dashboard Analítico: KPIs Rápidos -->
+        <div class="kpi-strip" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+          <!-- KPI 1: Total Emitidas -->
+          <div class="kpi-card" id="card-kpi-billing-total" style="cursor: pointer;">
+            <div class="kpi-val" id="kpi-billing-total-amount">R$ 0,00</div>
+            <div class="kpi-lbl">Total de Cobranças Emitidas (<span id="kpi-billing-total-count">0</span>)</div>
+            <div class="kpi-bar" style="background: var(--primary);"></div>
+          </div>
+          <!-- KPI 2: Recebidas / Confirmadas (Verde) -->
+          <div class="kpi-card" id="card-kpi-billing-received" style="cursor: pointer;">
+            <div class="kpi-val text-emerald" id="kpi-billing-received-amount">R$ 0,00</div>
+            <div class="kpi-lbl">Recebidas / Confirmadas (<span id="kpi-billing-received-count">0</span>)</div>
+            <div class="kpi-bar" style="background: #10b981;"></div>
+          </div>
+          <!-- KPI 3: Aguardando Confirmação (Amarelo) -->
+          <div class="kpi-card" id="card-kpi-billing-awaiting" style="cursor: pointer;">
+            <div class="kpi-val text-amber" id="kpi-billing-awaiting-amount">R$ 0,00</div>
+            <div class="kpi-lbl">Aguardando Confirmação (<span id="kpi-billing-awaiting-count">0</span>)</div>
+            <div class="kpi-bar" style="background: #f59e0b;"></div>
+          </div>
+          <!-- KPI 4: Inadimplentes / Em Cobrança Recorrente (Vermelho) -->
+          <div class="kpi-card" id="card-kpi-billing-overdue" style="cursor: pointer;">
+            <div class="kpi-val text-rose" id="kpi-billing-overdue-amount">R$ 0,00</div>
+            <div class="kpi-lbl">Inadimplentes / Na Régua (<span id="kpi-billing-overdue-count">0</span>)</div>
+            <div class="kpi-bar" style="background: #f43f5e;"></div>
+          </div>
+        </div>
+
+        <!-- Barra de Ferramentas e Filtros Rápidos -->
+        <div class="card appointments-toolbar" style="margin-bottom: 16px;">
+          <div class="toolbar-row" style="display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+            <!-- Filtros Rápidos de Status -->
+            <div class="date-quick-filters" style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-sm btn-date-filter active" data-billing-filter="all" id="filter-btn-billing-all">Todos</button>
+              <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="sent_initial" id="filter-btn-billing-initial">Receberam Envio Inicial</button>
+              <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="not_confirmed" id="filter-btn-billing-unconfirmed">Ainda Não Confirmaram</button>
+              <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="awaiting_confirmation" id="filter-btn-billing-awaiting">Aguardando Confirmação</button>
+              <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="paid" id="filter-btn-billing-paid">Confirmados / Baixados</button>
+              <button type="button" class="btn btn-sm btn-date-filter" data-billing-filter="overdue" id="filter-btn-billing-overdue" style="border-color: rgba(244,63,94,0.4); color: #fb7185;">⚠️ Inadimplentes (≥ 3 dias)</button>
+            </div>
+
+            <!-- Busca Textual e Filtro de Modalidade -->
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; flex: 1; justify-content: flex-end;">
+              <select id="billing-method-filter" class="form-control form-control-sm" style="max-width: 170px;">
+                <option value="">Todas as Formas</option>
+                <option value="boleto">📄 Apenas Boleto</option>
+                <option value="pix">💠 Apenas PIX</option>
+                <option value="ambos">📑 Boleto + PIX</option>
+              </select>
+
+              <div class="search-box" style="min-width: 250px; max-width: 380px; flex: 1;">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="billing-search-input" class="form-control form-control-sm" placeholder="Buscar cliente, WhatsApp, serviço...">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabela de Cobranças -->
+        <div class="card appointments-content-card">
+          <div class="table-responsive">
+            <table class="table appointments-table" id="billing-table">
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Serviço</th>
+                  <th>Forma</th>
+                  <th>Valor</th>
+                  <th>Vencimento</th>
+                  <th>Boleto / PIX</th>
+                  <th>Comprovante</th>
+                  <th>Envio</th>
+                  <th>Status</th>
+                  <th style="text-align: right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="billing-table-body">
+                <tr>
+                  <td colspan="10" style="text-align: center; padding: 30px; color: var(--text-muted);">
+                    Carregando cobranças...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -2559,6 +2686,10 @@
                 <input type="checkbox" id="user-mod-simulator" value="simulator">
                 <span>💬 <strong>Simulador WhatsApp</strong></span>
               </label>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; user-select: none;">
+                <input type="checkbox" id="user-mod-billing" value="billing" checked>
+                <span>💳 <strong>Gestão de Cobranças</strong></span>
+              </label>
             </div>
             <small class="form-hint" id="modal-user-modules-hint">Defina se este usuário acessa apenas Agenda, Agenda + Exames, ou outras combinações.</small>
           </div>
@@ -3152,6 +3283,286 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-outline" id="btn-cancel-holiday">Cancelar</button>
           <button type="submit" class="btn btn-primary btn-glow" id="btn-save-holiday">💾 Salvar Feriado</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       MODAIS DO MÓDULO DE GESTÃO DE COBRANÇAS
+       ========================================================================== -->
+
+  <!-- MODAL 1: Nova Cobrança (Boleto & PIX) -->
+  <div id="modal-billing-new-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 680px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">💳</span>
+          <div>
+            <h3>Cadastrar Nova Cobrança</h3>
+            <p>Emita faturas com Boleto Bancário (PDF) ou PIX com envio direto no WhatsApp</p>
+          </div>
+        </div>
+        <button type="button" class="btn-modal-close" id="btn-close-billing-new-modal">✕</button>
+      </div>
+
+      <form id="form-billing-new">
+        <div class="modal-body" style="padding: 20px; max-height: 75vh; overflow-y: auto;">
+          
+          <!-- Empresa / Agente -->
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label for="billing-new-agent">Empresa / Unidade Emissora *</label>
+            <select id="billing-new-agent" class="form-control" required></select>
+          </div>
+
+          <!-- Dados do Cliente -->
+          <div class="form-row" style="display: flex; gap: 12px; margin-bottom: 14px;">
+            <div class="form-group col-6" style="flex: 1;">
+              <label for="billing-new-customer-name">Nome Completo do Cliente *</label>
+              <input type="text" id="billing-new-customer-name" class="form-control" placeholder="Ex: Maria da Silva" required>
+            </div>
+            <div class="form-group col-6" style="flex: 1;">
+              <label for="billing-new-customer-phone">WhatsApp do Cliente *</label>
+              <input type="text" id="billing-new-customer-phone" class="form-control" placeholder="Ex: (87) 98800-1122" required>
+            </div>
+          </div>
+
+          <!-- Serviço, Valor e Vencimento -->
+          <div class="form-row" style="display: flex; gap: 12px; margin-bottom: 14px;">
+            <div class="form-group" style="flex: 1.2;">
+              <label for="billing-new-service-type">Tipo de Serviço *</label>
+              <select id="billing-new-service-type" class="form-control">
+                <option value="Consulta Médica">🩺 Consulta Médica</option>
+                <option value="Exame Laboratorial / Imagem">🔬 Exame Laboratorial / Imagem</option>
+                <option value="Procedimento Clínico">💉 Procedimento Clínico</option>
+                <option value="Mensalidade / Plano">🗓️ Mensalidade / Plano</option>
+                <option value="Serviço">💼 Outro Serviço</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label for="billing-new-amount">Valor (R$) *</label>
+              <input type="text" id="billing-new-amount" class="form-control" placeholder="Ex: 150,00" required>
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label for="billing-new-due-date">Vencimento *</label>
+              <input type="date" id="billing-new-due-date" class="form-control" required>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="billing-new-description">Descrição / Detalhes (Opcional)</label>
+            <input type="text" id="billing-new-description" class="form-control" placeholder="Ex: Consulta Dra. Valéria + Laudo de Avaliação">
+          </div>
+
+          <!-- Seletor da Forma de Cobrança -->
+          <div style="background: rgba(15, 23, 42, 0.5); padding: 14px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 16px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 13px;">Forma de Pagamento da Cobrança *</label>
+            <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+                <input type="radio" name="billing-method-choice" value="boleto" checked id="method-choice-boleto">
+                <span>📄 <strong>Boleto Bancário (PDF)</strong></span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+                <input type="radio" name="billing-method-choice" value="pix" id="method-choice-pix">
+                <span>💠 <strong>PIX (QR Code &amp; Copia e Cola)</strong></span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px;">
+                <input type="radio" name="billing-method-choice" value="ambos" id="method-choice-ambos">
+                <span>📑 <strong>Boleto + PIX (Ambos)</strong></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- SEÇÃO BOLETO (Upload PDF) -->
+          <div id="billing-section-boleto" style="margin-bottom: 16px;">
+            <div class="form-group">
+              <label for="billing-file-boleto">Arquivo do Boleto Bancário (PDF) *</label>
+              <input type="file" id="billing-file-boleto" class="form-control" accept="application/pdf">
+              <small style="color: var(--text-muted);">Envie o boleto em formato PDF. O arquivo será disparado diretamente no WhatsApp do cliente via WAHA.</small>
+              <div id="billing-boleto-file-info" style="margin-top: 6px; font-size: 12px; color: #34d399; display: none;"></div>
+            </div>
+          </div>
+
+          <!-- SEÇÃO PIX (Chave, Copia e Cola, Imagem QR Code) -->
+          <div id="billing-section-pix" style="display: none; background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.2); padding: 14px; border-radius: 8px; margin-bottom: 16px;">
+            <div class="form-row" style="display: flex; gap: 12px; margin-bottom: 12px;">
+              <div class="form-group" style="flex: 1;">
+                <label for="billing-pix-key-type">Tipo de Chave PIX</label>
+                <select id="billing-pix-key-type" class="form-control">
+                  <option value="cpf">CPF</option>
+                  <option value="cnpj">CNPJ</option>
+                  <option value="telefone">Telefone Celular</option>
+                  <option value="email">E-mail</option>
+                  <option value="aleatoria">Chave Aleatória (EVP)</option>
+                </select>
+              </div>
+              <div class="form-group" style="flex: 2;">
+                <label for="billing-pix-key">Chave PIX</label>
+                <input type="text" id="billing-pix-key" class="form-control" placeholder="Digite a chave PIX da clínica/empresa">
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label for="billing-pix-copia-cola">Código PIX Copia e Cola (BR Code)</label>
+              <textarea id="billing-pix-copia-cola" class="form-control" rows="2" placeholder="Cole aqui o código PIX Copia e Cola gerado pelo seu banco..."></textarea>
+              <small style="color: var(--text-muted);">O cliente receberá este código em destaque no WhatsApp para copiar com 1 toque no celular.</small>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="billing-file-qrcode">Imagem do QR Code PIX (Opcional - PNG, JPG ou PDF)</label>
+              <input type="file" id="billing-file-qrcode" class="form-control" accept="image/*,application/pdf">
+              <div id="billing-qrcode-file-info" style="margin-top: 6px; font-size: 12px; color: #34d399; display: none;"></div>
+            </div>
+          </div>
+
+          <!-- Mensagem Personalizada Opcional -->
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="billing-new-template">Template da Mensagem no WhatsApp (Opcional)</label>
+            <textarea id="billing-new-template" class="form-control" rows="3" placeholder="Deixe em branco para usar a mensagem padrão humanizada do sistema."></textarea>
+            <small style="color: var(--text-muted);">Tags disponíveis: <code>{nome}</code>, <code>{servico}</code>, <code>{valor}</code>, <code>{vencimento}</code>, <code>{chave_pix}</code></small>
+          </div>
+
+          <!-- Opção de Envio Imediato -->
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="custom-checkbox" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="billing-new-send-immediately" checked>
+              <span class="checkmark"></span>
+              <span><strong>Enviar imediatamente via WhatsApp</strong> após salvar a cobrança</span>
+            </label>
+          </div>
+
+        </div>
+
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border-color);">
+          <button type="button" class="btn btn-outline" id="btn-cancel-billing-new">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-glow" id="btn-save-billing-new">💾 Salvar &amp; Emitir Cobrança</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 2: Histórico de Disparos & Auditoria -->
+  <div id="modal-billing-history-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 600px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">📋</span>
+          <div>
+            <h3 id="modal-billing-history-title">Histórico de Disparos</h3>
+            <p id="modal-billing-history-subtitle">Auditoria completa de envios, régua e comprovantes</p>
+          </div>
+        </div>
+        <button type="button" class="btn-modal-close" id="btn-close-billing-history-modal">✕</button>
+      </div>
+
+      <div class="modal-body" style="padding: 20px; max-height: 70vh; overflow-y: auto;">
+        <div id="billing-history-timeline" style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- Linhas renderizadas dinamicamente via app.js -->
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding: 12px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
+        <button type="button" class="btn btn-outline" id="btn-close-billing-history">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: Baixa Manual de Cobrança -->
+  <div id="modal-billing-paid-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">✅</span>
+          <div>
+            <h3>Dar Baixa Manual</h3>
+            <p>Confirmar recebimento do pagamento</p>
+          </div>
+        </div>
+        <button type="button" class="btn-modal-close" id="btn-close-billing-paid-modal">✕</button>
+      </div>
+
+      <form id="form-billing-paid">
+        <input type="hidden" id="billing-paid-id" value="">
+        <div class="modal-body" style="padding: 20px;">
+          <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+            <div style="font-size: 13px; color: var(--text-muted);">Cliente: <strong id="billing-paid-customer-name" style="color: #fff;">—</strong></div>
+            <div style="font-size: 14px; margin-top: 4px;">Valor: <strong id="billing-paid-amount" style="color: #34d399;">R$ 0,00</strong></div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label for="billing-paid-method">Forma / Método de Recebimento</label>
+            <select id="billing-paid-method" class="form-control">
+              <option value="PIX" selected>💠 PIX</option>
+              <option value="Boleto Bancário">📄 Boleto Bancário Compensado</option>
+              <option value="Cartão de Crédito">💳 Cartão de Crédito</option>
+              <option value="Cartão de Débito">💳 Cartão de Débito</option>
+              <option value="Dinheiro / Espécie">💵 Dinheiro / Espécie</option>
+              <option value="Transferência Bancária">🏦 Transferência Bancária / TED</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="billing-paid-notes">Observações da Baixa (Opcional)</label>
+            <input type="text" id="billing-paid-notes" class="form-control" placeholder="Ex: Comprovante conferido no extrato bancário">
+          </div>
+        </div>
+
+        <div class="modal-footer" style="padding: 14px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" class="btn btn-outline" id="btn-cancel-billing-paid">Cancelar</button>
+          <button type="submit" class="btn btn-primary" style="background: #10b981; border-color: #059669;">Confirmar Baixa ✅</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 4: Configuração da Régua Automática -->
+  <div id="modal-billing-config-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">⚙️</span>
+          <div>
+            <h3>Configuração da Régua de Cobrança</h3>
+            <p>Parâmetros da régua diária de cobrança recorrente</p>
+          </div>
+        </div>
+        <button type="button" class="btn-modal-close" id="btn-close-billing-config-modal">✕</button>
+      </div>
+
+      <form id="form-billing-config">
+        <div class="modal-body" style="padding: 20px;">
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="custom-checkbox" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="billing-config-enabled" checked>
+              <span class="checkmark"></span>
+              <span><strong>Régua de Cobrança Diária Ativa:</strong> Disparo automático todo dia</span>
+            </label>
+          </div>
+
+          <div class="form-row" style="display: flex; gap: 12px; margin-bottom: 16px;">
+            <div class="form-group" style="flex: 1;">
+              <label for="billing-config-time">Horário de Execução Diário *</label>
+              <input type="time" id="billing-config-time" class="form-control" value="09:00" required>
+              <small style="color: var(--text-muted);">Padrão: 09:00 (Fuso Brasília)</small>
+            </div>
+            <div class="form-group" style="flex: 1;">
+              <label for="billing-config-days">Dias de Atraso para Início *</label>
+              <input type="number" id="billing-config-days" class="form-control" min="1" max="60" value="3" required>
+              <small style="color: var(--text-muted);">Padrão: 3 dias pós-vencimento</small>
+            </div>
+          </div>
+
+          <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); padding: 12px; border-radius: 8px;">
+            <div style="font-size: 12px; color: #a5b4fc; line-height: 1.5;">
+              ℹ️ <strong>Como funciona a Régua:</strong><br>
+              Todos os dias no horário programado, o sistema localiza cobranças não pagas com vencimento igual ou anterior a <strong>Data Atual - X dias</strong>. Um lembrete amigável é enviado solicitando comprovante ou reemitindo os dados de pagamento até que o status seja alterado para "Pago".
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="padding: 14px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" class="btn btn-outline" id="btn-cancel-billing-config">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-glow" id="btn-save-billing-config">💾 Salvar Configurações</button>
         </div>
       </form>
     </div>

@@ -208,6 +208,9 @@ function setActiveCompany(companyId, reload = true) {
       if (typeof startAppointmentsRealtimeSync === 'function') startAppointmentsRealtimeSync();
     } else if (activeTab === 'exams' && typeof loadExams === 'function') {
       loadExams();
+    } else if (activeTab === 'billing' && typeof loadBilling === 'function') {
+      loadBilling();
+      loadBillingStats();
     } else if (activeTab === 'chats' && typeof loadChats === 'function') {
       loadChats();
     } else if (activeTab === 'blast') {
@@ -416,7 +419,7 @@ function applyRolePermissions(user) {
   // 2. Controla visibilidade de abas conforme módulos permitidos
   const userModules = Array.isArray(user.allowedModules) && user.allowedModules.length > 0
     ? user.allowedModules
-    : (isAdmin ? ['appointments', 'exams', 'chats', 'simulator'] : ['appointments', 'exams', 'chats', 'simulator']);
+    : (isAdmin ? ['appointments', 'exams', 'chats', 'simulator', 'billing'] : ['appointments', 'exams', 'chats', 'simulator', 'billing']);
 
   document.querySelectorAll('.nav-menu .nav-btn[data-module]').forEach(btn => {
     const mod = btn.getAttribute('data-module');
@@ -573,6 +576,7 @@ function switchToTab(targetTab) {
     simulator: 'Simulador de Atendimento (WhatsApp)',
     appointments: 'Central de Agendamentos & Agenda Inteligente',
     exams: 'Envio & Gestão de Exames e Laudos',
+    billing: 'Gestão de Cobranças & Régua Automática',
     agents: 'Gerenciador de Agentes & Clientes (Multi-Agentes)',
     prompts: 'Configuração Geral & Agente Padrão',
     schedule: 'Horário Comercial & Mensagem de Ausência',
@@ -593,6 +597,11 @@ function switchToTab(targetTab) {
       startAppointmentsRealtimeSync();
     }
     if (targetTab === 'exams') loadExams();
+    if (targetTab === 'billing') {
+      loadBilling();
+      loadBillingStats();
+      loadBillingSchedulerStatus();
+    }
     if (targetTab === 'agents' && currentUser?.role === 'admin') loadAgents();
     if (targetTab === 'chats') loadChats();
     if (targetTab === 'logs' && currentUser?.role === 'admin') loadLogs();
@@ -8726,4 +8735,826 @@ setupExamDropzone();
   }
 
 })();
+
+/* ==========================================================================
+   MÓDULO: GESTÃO DE COBRANÇAS & RÉGUA DE COBRANÇA AUTOMÁTICA
+   ========================================================================== */
+let currentBillingCharges = [];
+let currentBillingFilter = 'all';
+let currentBillingMethodFilter = '';
+let currentBillingSearch = '';
+
+let selectedBoletoBase64 = null;
+let selectedBoletoFileName = null;
+let selectedQrCodeBase64 = null;
+let selectedQrCodeFileName = null;
+
+// Funções expostas globalmente
+window.loadBilling = loadBilling;
+window.loadBillingStats = loadBillingStats;
+window.loadBillingSchedulerStatus = loadBillingSchedulerStatus;
+
+async function loadBilling() {
+  const token = getAuthToken();
+  if (!token) return;
+
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  const badgeComp = document.getElementById('badge-billing-active-company');
+  if (badgeComp) {
+    if (effectiveCompany === 'all') {
+      badgeComp.textContent = '🏢 Todas as Empresas (Visão Global)';
+    } else {
+      const ag = (typeof allAgents !== 'undefined' ? allAgents : []).find(a => a.id === effectiveCompany);
+      badgeComp.textContent = `🏢 Empresa: ${ag ? (ag.companyName || ag.name) : effectiveCompany}`;
+    }
+  }
+
+  const tbody = document.getElementById('billing-table-body');
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 24px; color: var(--text-muted);"><span class="pulse-dot"></span> Carregando cobranças...</td></tr>`;
+  }
+
+  try {
+    let url = `/api/billing?agentId=${encodeURIComponent(effectiveCompany)}`;
+    if (currentBillingFilter && currentBillingFilter !== 'all') {
+      url += `&quickFilter=${encodeURIComponent(currentBillingFilter)}`;
+    }
+    if (currentBillingMethodFilter) {
+      url += `&billingMethod=${encodeURIComponent(currentBillingMethodFilter)}`;
+    }
+    if (currentBillingSearch && currentBillingSearch.trim()) {
+      url += `&search=${encodeURIComponent(currentBillingSearch.trim())}`;
+    }
+
+    const res = await fetchWithAuth(url);
+    if (!res.ok) throw new Error('Falha ao carregar cobranças');
+    const data = await res.json();
+
+    currentBillingCharges = data.charges || [];
+    renderBillingTable(currentBillingCharges);
+  } catch (err) {
+    console.error('[Billing] Erro ao carregar cobranças:', err.message);
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 20px; color: #f43f5e;">Erro ao carregar cobranças: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+}
+
+async function loadBillingStats() {
+  const token = getAuthToken();
+  if (!token) return;
+
+  const effectiveCompany = getEffectiveActiveCompanyId();
+  try {
+    const res = await fetchWithAuth(`/api/billing/stats?agentId=${encodeURIComponent(effectiveCompany)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const stats = data.stats || {};
+
+    // Formata valores
+    const fmt = (val) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    const elTotalAmt = document.getElementById('kpi-billing-total-amount');
+    const elTotalCnt = document.getElementById('kpi-billing-total-count');
+    if (elTotalAmt) elTotalAmt.textContent = fmt(stats.totalAmount);
+    if (elTotalCnt) elTotalCnt.textContent = stats.totalCount || 0;
+
+    const elRecAmt = document.getElementById('kpi-billing-received-amount');
+    const elRecCnt = document.getElementById('kpi-billing-received-count');
+    if (elRecAmt) elRecAmt.textContent = fmt(stats.receivedAmount);
+    if (elRecCnt) elRecCnt.textContent = stats.receivedCount || 0;
+
+    const elWaitAmt = document.getElementById('kpi-billing-awaiting-amount');
+    const elWaitCnt = document.getElementById('kpi-billing-awaiting-count');
+    if (elWaitAmt) elWaitAmt.textContent = fmt(stats.awaitingConfirmationAmount);
+    if (elWaitCnt) elWaitCnt.textContent = stats.awaitingConfirmationCount || 0;
+
+    const elOverAmt = document.getElementById('kpi-billing-overdue-amount');
+    const elOverCnt = document.getElementById('kpi-billing-overdue-count');
+    if (elOverAmt) elOverAmt.textContent = fmt(stats.overdueAmount);
+    if (elOverCnt) elOverCnt.textContent = stats.overdueCount || 0;
+  } catch (err) {
+    console.warn('[Billing] Erro ao carregar stats:', err.message);
+  }
+}
+
+async function loadBillingSchedulerStatus() {
+  try {
+    const res = await fetchWithAuth('/api/billing/scheduler/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    const badge = document.getElementById('badge-billing-scheduler');
+    if (badge && data.config) {
+      const statusText = data.config.enabled
+        ? `⏰ Régua Diária: Ativa às ${data.config.targetTime || '09:00'} (Atraso ≥ ${data.config.overdueDaysThreshold || 3} dias)`
+        : `⏰ Régua Diária: Desativada ⏸️`;
+      badge.textContent = statusText;
+      badge.className = data.config.enabled ? 'badge badge-emerald' : 'badge';
+    }
+  } catch {}
+}
+
+function renderBillingTable(charges) {
+  const tbody = document.getElementById('billing-table-body');
+  if (!tbody) return;
+
+  if (!charges || charges.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="10" style="text-align: center; padding: 36px; color: var(--text-muted);">
+          <span style="font-size: 28px; display: block; margin-bottom: 8px;">💳</span>
+          Nenhuma cobrança encontrada com os filtros selecionados.<br>
+          <small>Clique em <strong>➕ Nova Cobrança</strong> para emitir faturas por Boleto ou PIX.</small>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  const rowsHtml = charges.map(c => {
+    // Formata WhatsApp e Link
+    const cleanPhone = (c.customerPhone || '').replace(/\D/g, '');
+    const waLink = cleanPhone ? `https://wa.me/${cleanPhone}` : '#';
+
+    // Badge da Forma de Pagamento
+    let methodBadge = '';
+    if (c.billingMethod === 'pix') {
+      methodBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">💠 PIX</span>`;
+    } else if (c.billingMethod === 'ambos') {
+      methodBadge = `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">📑 Boleto+PIX</span>`;
+    } else {
+      methodBadge = `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">📄 Boleto</span>`;
+    }
+
+    // Badge Inteligente de Vencimento
+    let dueBadge = '';
+    const parts = (c.dueDate || '').split('-');
+    const formattedDue = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : c.dueDate;
+
+    if (c.statusPagamento === 'pago') {
+      dueBadge = `<span style="color: #34d399; font-weight: 500;">${formattedDue}</span> <span class="badge badge-emerald" style="font-size: 10px;">Quitado</span>`;
+    } else if (c.dueDate === todayStr) {
+      dueBadge = `<span style="color: #60a5fa; font-weight: 700;">${formattedDue}</span> <span class="badge" style="background: rgba(59,130,246,0.15); color: #60a5fa; font-size: 10px;">Vence Hoje</span>`;
+    } else if (c.dueDate < todayStr) {
+      // Calcula dias de atraso
+      const diffMs = new Date(todayStr).getTime() - new Date(c.dueDate).getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      const inRecurrence = diffDays >= 3;
+      const color = inRecurrence ? '#f43f5e' : '#f59e0b';
+      dueBadge = `
+        <span style="color: ${color}; font-weight: 700;">${formattedDue}</span> 
+        <span class="badge" style="background: ${inRecurrence ? 'rgba(244,63,94,0.15)' : 'rgba(245,158,11,0.15)'}; color: ${color}; font-size: 10px;">
+          ${inRecurrence ? `⚠️ Atrasado ${diffDays}d (Régua)` : `Atrasado ${diffDays}d`}
+        </span>
+      `;
+    } else {
+      dueBadge = `<span>${formattedDue}</span> <span class="badge" style="background: rgba(148,163,184,0.12); color: #94a3b8; font-size: 10px;">No Prazo</span>`;
+    }
+
+    // Arquivos (Boleto PDF e/ou PIX)
+    let docHtml = '<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">';
+    if (c.pdfUrl) {
+      docHtml += `<a href="${c.pdfUrl}" target="_blank" class="btn btn-outline btn-xs" title="Baixar Boleto PDF">📄 Boleto</a>`;
+    }
+    if (c.pixQrCodeUrl) {
+      docHtml += `<a href="${c.pixQrCodeUrl}" target="_blank" class="btn btn-outline btn-xs" title="Ver Imagem do QR Code">💠 QR Code</a>`;
+    }
+    if (c.pixCopiaECola) {
+      docHtml += `<button type="button" class="btn btn-outline btn-xs btn-copy-pix-code" data-pix="${escapeHtml(c.pixCopiaECola)}" title="Copiar código PIX Copia e Cola">📋 Copiar PIX</button>`;
+    }
+    if (!c.pdfUrl && !c.pixQrCodeUrl && !c.pixCopiaECola) {
+      docHtml += '<span style="color: var(--text-muted); font-size: 11px;">Sem anexo</span>';
+    }
+    docHtml += '</div>';
+
+    // Comprovante Recebido
+    let compHtml = '';
+    if (c.comprovanteUrl) {
+      compHtml = `<a href="${c.comprovanteUrl}" target="_blank" class="btn btn-xs" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 600;" title="Visualizar comprovante enviado pelo cliente">📎 Ver Comprovante</a>`;
+    } else if (c.comprovanteNote) {
+      compHtml = `<span class="badge" style="background: rgba(99, 102, 241, 0.12); color: #818cf8;" title="${escapeHtml(c.comprovanteNote)}">💬 Texto enviado</span>`;
+    } else {
+      compHtml = `<span style="color: var(--text-muted); font-size: 12px;">—</span>`;
+    }
+
+    // Status Envio
+    let sendStatusBadge = '';
+    if (c.statusEnvio === 'enviado') {
+      sendStatusBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399;" title="Enviado. Tentativas: ${c.sendAttempts || 1}">Enviado ✅</span>`;
+    } else if (c.statusEnvio === 'falha') {
+      sendStatusBadge = `<span class="badge" style="background: rgba(244, 63, 94, 0.15); color: #f43f5e;" title="Falha no disparo">Falha ❌</span>`;
+    } else {
+      sendStatusBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">Pendente ⏳</span>`;
+    }
+
+    // Status Pagamento
+    let payStatusBadge = '';
+    if (c.statusPagamento === 'pago') {
+      payStatusBadge = `<span class="badge badge-emerald" title="Pago em ${c.paidAt ? new Date(c.paidAt).toLocaleString('pt-BR') : ''}">Pago ✅</span>`;
+    } else if (c.statusPagamento === 'aguardando_confirmacao') {
+      payStatusBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);" title="Comprovante recebido! Aguardando conferência humana.">Aguardando Confirmação 🟡</span>`;
+    } else {
+      payStatusBadge = `<span class="badge" style="background: rgba(244, 63, 94, 0.15); color: #f43f5e; border: 1px solid rgba(244, 63, 94, 0.3);">Pendente 🔴</span>`;
+    }
+
+    // Ações da Linha
+    let actionsHtml = `<div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap;">`;
+    
+    // Se ainda não foi pago, mostra Dar Baixa Manual e Reenviar
+    if (c.statusPagamento !== 'pago') {
+      actionsHtml += `
+        <button type="button" class="btn btn-sm btn-outline btn-billing-action-pay" data-id="${c.id}" data-name="${escapeHtml(c.customerName)}" data-amount="${c.amount}" title="Dar Baixa Manual no Pagamento" style="border-color: #10b981; color: #34d399;">
+          ✅ Baixa
+        </button>
+        <button type="button" class="btn btn-sm btn-outline btn-billing-action-resend" data-id="${c.id}" title="Reenviar Boleto / PIX pelo WhatsApp agora" style="border-color: #38bdf8; color: #38bdf8;">
+          📤 Reenviar
+        </button>
+      `;
+    }
+
+    actionsHtml += `
+      <button type="button" class="btn btn-sm btn-outline btn-billing-action-history" data-id="${c.id}" data-name="${escapeHtml(c.customerName)}" title="Ver Histórico de Disparos e Logs">
+        📋 Logs
+      </button>
+      <a href="${waLink}" target="_blank" class="btn btn-sm btn-outline" title="Abrir conversa no WhatsApp" style="color: #25d366; border-color: rgba(37,211,102,0.4);">
+        💬 Chat
+      </a>
+      <button type="button" class="btn btn-sm btn-outline btn-billing-action-delete" data-id="${c.id}" title="Excluir Cobrança" style="color: #fb7185; border-color: rgba(244,63,94,0.3);">
+        🗑️
+      </button>
+    </div>`;
+
+    return `
+      <tr>
+        <td>
+          <div style="font-weight: 600; color: #fff;">${escapeHtml(c.customerName)}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(c.customerPhone)}</div>
+        </td>
+        <td>
+          <div style="font-weight: 500;">${escapeHtml(c.serviceType)}</div>
+          ${c.serviceDescription ? `<div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(c.serviceDescription)}</div>` : ''}
+        </td>
+        <td>${methodBadge}</td>
+        <td>
+          <strong style="color: #34d399; font-size: 13px;">
+            ${Number(c.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          </strong>
+        </td>
+        <td>${dueBadge}</td>
+        <td>${docHtml}</td>
+        <td>${compHtml}</td>
+        <td>${sendStatusBadge}</td>
+        <td>${payStatusBadge}</td>
+        <td style="text-align: right;">${actionsHtml}</td>
+      </tr>
+    `;
+  }).join('');
+
+  tbody.innerHTML = rowsHtml;
+
+  // Vincula eventos dos botões da tabela
+  attachBillingTableEvents();
+}
+
+function attachBillingTableEvents() {
+  // Botões de Copiar PIX
+  document.querySelectorAll('.btn-copy-pix-code').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const code = btn.getAttribute('data-pix');
+      if (code) {
+        navigator.clipboard.writeText(code).then(() => {
+          showToast('Código PIX Copia e Cola copiado com sucesso! 📱', 'success');
+        }).catch(() => {
+          showToast('Código PIX selecionado.', 'info');
+        });
+      }
+    });
+  });
+
+  // Botões de Baixa Manual
+  document.querySelectorAll('.btn-billing-action-pay').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      const name = btn.getAttribute('data-name');
+      const amount = Number(btn.getAttribute('data-amount') || 0);
+
+      const modal = document.getElementById('modal-billing-paid-overlay');
+      const inputId = document.getElementById('billing-paid-id');
+      const elName = document.getElementById('billing-paid-customer-name');
+      const elAmt = document.getElementById('billing-paid-amount');
+
+      if (inputId) inputId.value = id;
+      if (elName) elName.textContent = name;
+      if (elAmt) elAmt.textContent = amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+      if (modal) modal.style.display = 'flex';
+    });
+  });
+
+  // Botões de Reenviar
+  document.querySelectorAll('.btn-billing-action-resend').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-id');
+      if (!id) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Enviando...';
+
+      try {
+        const res = await fetchWithAuth(`/api/billing/${id}/send`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          showToast('Cobrança reenviada com sucesso pelo WhatsApp! 📤', 'success');
+          loadBilling();
+          loadBillingStats();
+        } else {
+          showToast(data.error || 'Falha ao reenviar cobrança.', 'error');
+        }
+      } catch (err) {
+        showToast(`Erro: ${err.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📤 Reenviar';
+      }
+    });
+  });
+
+  // Botões de Histórico
+  document.querySelectorAll('.btn-billing-action-history').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-id');
+      const name = btn.getAttribute('data-name');
+      openBillingHistoryModal(id, name);
+    });
+  });
+
+  // Botões de Excluir
+  document.querySelectorAll('.btn-billing-action-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-id');
+      if (!id) return;
+      if (!confirm('Deseja realmente cancelar e excluir esta cobrança?')) return;
+
+      try {
+        const res = await fetchWithAuth(`/api/billing/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          showToast('Cobrança cancelada com sucesso.', 'info');
+          loadBilling();
+          loadBillingStats();
+        } else {
+          const data = await res.json();
+          showToast(data.error || 'Erro ao excluir.', 'error');
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  });
+}
+
+// Histórico de Disparos
+async function openBillingHistoryModal(id, name) {
+  const modal = document.getElementById('modal-billing-history-overlay');
+  const title = document.getElementById('modal-billing-history-title');
+  const subtitle = document.getElementById('modal-billing-history-subtitle');
+  const timeline = document.getElementById('billing-history-timeline');
+
+  if (title) title.textContent = `Histórico de Disparos: ${name || 'Cobrança'}`;
+  if (subtitle) subtitle.textContent = `Auditoria de disparos e confirmações da fatura #${id}`;
+  if (timeline) timeline.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 20px;">Carregando histórico...</div>`;
+
+  if (modal) modal.style.display = 'flex';
+
+  try {
+    const res = await fetchWithAuth(`/api/billing/${id}/logs`);
+    const data = await res.json();
+    const logs = data.logs || [];
+
+    if (logs.length === 0) {
+      timeline.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 20px;">Nenhum registro de log para esta cobrança.</div>`;
+      return;
+    }
+
+    const typeIcons = {
+      envio_inicial: '🚀',
+      regua_recorrente: '⏰',
+      reenvio_manual: '📤',
+      comprovante_recebido: '📎',
+      confirmacao_cliente: '💬',
+      baixa_manual: '✅',
+      cancelamento: '🗑️',
+      erro_envio: '⚠️'
+    };
+
+    timeline.innerHTML = logs.map(l => {
+      const icon = typeIcons[l.type] || '📋';
+      const timeStr = new Date(l.timestamp).toLocaleString('pt-BR');
+      const isSuccess = l.status === 'sucesso';
+
+      return `
+        <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; gap: 12px; align-items: flex-start;">
+          <span style="font-size: 20px; line-height: 1;">${icon}</span>
+          <div style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <strong style="font-size: 13px; color: ${isSuccess ? '#34d399' : '#e2e8f0'}; text-transform: uppercase;">
+                ${l.type.replace('_', ' ')}
+              </strong>
+              <small style="color: var(--text-muted); font-size: 11px;">${timeStr}</small>
+            </div>
+            <div style="font-size: 12px; color: #cbd5e1;">${escapeHtml(l.message)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    if (timeline) timeline.innerHTML = `<div style="color: #f43f5e; padding: 14px;">Erro ao carregar histórico: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Inicialização dos Controladores da Tela de Cobrança
+document.addEventListener('DOMContentLoaded', () => {
+
+  // 1. Alternância de Filtros Rápidos
+  document.querySelectorAll('[data-billing-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-billing-filter]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentBillingFilter = btn.getAttribute('data-billing-filter');
+      loadBilling();
+    });
+  });
+
+  // 2. Filtro por Modalidade (Boleto / PIX)
+  const methodFilter = document.getElementById('billing-method-filter');
+  if (methodFilter) {
+    methodFilter.addEventListener('change', () => {
+      currentBillingMethodFilter = methodFilter.value;
+      loadBilling();
+    });
+  }
+
+  // 3. Busca Textual com Debounce
+  const searchInput = document.getElementById('billing-search-input');
+  let searchTimer = null;
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        currentBillingSearch = searchInput.value;
+        loadBilling();
+      }, 350);
+    });
+  }
+
+  // 4. Clique nos Cards de KPI para filtrar tabela
+  document.getElementById('card-kpi-billing-total')?.addEventListener('click', () => {
+    document.getElementById('filter-btn-billing-all')?.click();
+  });
+  document.getElementById('card-kpi-billing-received')?.addEventListener('click', () => {
+    document.getElementById('filter-btn-billing-paid')?.click();
+  });
+  document.getElementById('card-kpi-billing-awaiting')?.addEventListener('click', () => {
+    document.getElementById('filter-btn-billing-awaiting')?.click();
+  });
+  document.getElementById('card-kpi-billing-overdue')?.addEventListener('click', () => {
+    document.getElementById('filter-btn-billing-overdue')?.click();
+  });
+
+  // 5. Botões de Ação do Cabeçalho
+  document.getElementById('btn-billing-refresh')?.addEventListener('click', () => {
+    loadBilling();
+    loadBillingStats();
+    loadBillingSchedulerStatus();
+    showToast('Cobranças e indicadores atualizados!', 'info');
+  });
+
+  // 6. Botão Executar Régua Agora
+  document.getElementById('btn-billing-run-scheduler')?.addEventListener('click', async () => {
+    if (!confirm('Deseja executar a Régua de Cobrança Automática agora para todos os títulos vencidos há 3 ou mais dias?')) {
+      return;
+    }
+
+    const btn = document.getElementById('btn-billing-run-scheduler');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Executando...';
+    }
+
+    try {
+      const effectiveCompany = getEffectiveActiveCompanyId();
+      const res = await fetchWithAuth('/api/billing/scheduler/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId: effectiveCompany !== 'all' ? effectiveCompany : undefined })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || 'Régua executada com sucesso!', 'success');
+        loadBilling();
+        loadBillingStats();
+        loadBillingSchedulerStatus();
+      } else {
+        showToast(data.error || 'Erro ao executar régua.', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '⚡ Executar Régua Agora';
+      }
+    }
+  });
+
+  // 7. Modal de Nova Cobrança: Abrir e Fechar
+  const modalNew = document.getElementById('modal-billing-new-overlay');
+  const btnOpenNew = document.getElementById('btn-billing-new');
+  const btnCloseNew = document.getElementById('btn-close-billing-new-modal');
+  const btnCancelNew = document.getElementById('btn-cancel-billing-new');
+
+  btnOpenNew?.addEventListener('click', () => {
+    // Popula dropdown de empresas/agentes
+    const agentSelect = document.getElementById('billing-new-agent');
+    if (agentSelect) {
+      const agents = (typeof allAgents !== 'undefined' ? allAgents : []);
+      agentSelect.innerHTML = agents.map(a => `<option value="${a.id}">${escapeHtml(a.companyName || a.name)}</option>`).join('');
+      const effectiveCompany = getEffectiveActiveCompanyId();
+      if (effectiveCompany !== 'all') {
+        agentSelect.value = effectiveCompany;
+      }
+    }
+
+    // Reseta form
+    document.getElementById('form-billing-new')?.reset();
+    selectedBoletoBase64 = null;
+    selectedBoletoFileName = null;
+    selectedQrCodeBase64 = null;
+    selectedQrCodeFileName = null;
+
+    const boletoInfo = document.getElementById('billing-boleto-file-info');
+    if (boletoInfo) boletoInfo.style.display = 'none';
+    const qrInfo = document.getElementById('billing-qrcode-file-info');
+    if (qrInfo) qrInfo.style.display = 'none';
+
+    // Data de vencimento padrão: 3 dias a partir de hoje
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    const dueDateInput = document.getElementById('billing-new-due-date');
+    if (dueDateInput) {
+      dueDateInput.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    // Default forma: boleto
+    document.getElementById('method-choice-boleto')?.click();
+
+    if (modalNew) modalNew.style.display = 'flex';
+  });
+
+  btnCloseNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
+  btnCancelNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
+
+  // 8. Alternância entre Boleto e PIX no Modal de Nova Cobrança
+  document.querySelectorAll('input[name="billing-method-choice"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const val = document.querySelector('input[name="billing-method-choice"]:checked')?.value || 'boleto';
+      const secBoleto = document.getElementById('billing-section-boleto');
+      const secPix = document.getElementById('billing-section-pix');
+
+      if (val === 'boleto') {
+        if (secBoleto) secBoleto.style.display = 'block';
+        if (secPix) secPix.style.display = 'none';
+      } else if (val === 'pix') {
+        if (secBoleto) secBoleto.style.display = 'none';
+        if (secPix) secPix.style.display = 'block';
+      } else if (val === 'ambos') {
+        if (secBoleto) secBoleto.style.display = 'block';
+        if (secPix) secPix.style.display = 'block';
+      }
+    });
+  });
+
+  // 9. Leitura do arquivo do Boleto (PDF Base64)
+  document.getElementById('billing-file-boleto')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    const info = document.getElementById('billing-boleto-file-info');
+    if (!file) {
+      selectedBoletoBase64 = null;
+      selectedBoletoFileName = null;
+      if (info) info.style.display = 'none';
+      return;
+    }
+    selectedBoletoFileName = file.name;
+    const reader = new FileReader();
+    reader.onload = () => {
+      selectedBoletoBase64 = reader.result;
+      if (info) {
+        info.textContent = `✅ Arquivo carregado: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        info.style.display = 'block';
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // 10. Leitura do arquivo do QR Code PIX (PNG/JPG/PDF Base64)
+  document.getElementById('billing-file-qrcode')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    const info = document.getElementById('billing-qrcode-file-info');
+    if (!file) {
+      selectedQrCodeBase64 = null;
+      selectedQrCodeFileName = null;
+      if (info) info.style.display = 'none';
+      return;
+    }
+    selectedQrCodeFileName = file.name;
+    const reader = new FileReader();
+    reader.onload = () => {
+      selectedQrCodeBase64 = reader.result;
+      if (info) {
+        info.textContent = `✅ QR Code carregado: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        info.style.display = 'block';
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // 11. Submissão da Nova Cobrança
+  document.getElementById('form-billing-new')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const agentId = document.getElementById('billing-new-agent')?.value;
+    const customerName = document.getElementById('billing-new-customer-name')?.value?.trim();
+    const customerPhone = document.getElementById('billing-new-customer-phone')?.value?.trim();
+    const serviceType = document.getElementById('billing-new-service-type')?.value;
+    const serviceDescription = document.getElementById('billing-new-description')?.value?.trim();
+    const rawAmount = document.getElementById('billing-new-amount')?.value?.replace(/[R$\s.]/g, '').replace(',', '.');
+    const amount = parseFloat(rawAmount || '0');
+    const dueDate = document.getElementById('billing-new-due-date')?.value;
+    const billingMethod = document.querySelector('input[name="billing-method-choice"]:checked')?.value || 'boleto';
+
+    const pixKeyType = document.getElementById('billing-pix-key-type')?.value;
+    const pixKey = document.getElementById('billing-pix-key')?.value?.trim();
+    const pixCopiaECola = document.getElementById('billing-pix-copia-cola')?.value?.trim();
+
+    const customMessageTemplate = document.getElementById('billing-new-template')?.value?.trim();
+    const sendImmediately = document.getElementById('billing-new-send-immediately')?.checked ?? true;
+
+    if (!customerName || !customerPhone) {
+      showToast('Preencha o nome e o WhatsApp do cliente.', 'error');
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      showToast('Informe um valor válido em reais.', 'error');
+      return;
+    }
+    if (!dueDate) {
+      showToast('Informe a data de vencimento.', 'error');
+      return;
+    }
+
+    if ((billingMethod === 'boleto' || billingMethod === 'ambos') && !selectedBoletoBase64) {
+      showToast('Por favor, selecione o arquivo PDF do boleto bancário.', 'error');
+      return;
+    }
+
+    const payload = {
+      agentId,
+      customerName,
+      customerPhone,
+      serviceType,
+      serviceDescription,
+      amount,
+      dueDate,
+      billingMethod,
+      pdfBase64: selectedBoletoBase64 || undefined,
+      pdfFileName: selectedBoletoFileName || undefined,
+      pixKey,
+      pixKeyType,
+      pixCopiaECola,
+      pixQrCodeBase64: selectedQrCodeBase64 || undefined,
+      pixQrCodeFileName: selectedQrCodeFileName || undefined,
+      customMessageTemplate: customMessageTemplate || undefined,
+      sendImmediately
+    };
+
+    const submitBtn = document.getElementById('btn-save-billing-new');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Salvando e Emitindo...';
+    }
+
+    try {
+      const res = await fetchWithAuth('/api/billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao emitir cobrança');
+
+      showToast(sendImmediately ? 'Cobrança cadastrada e enviada via WhatsApp! 🚀' : 'Cobrança salva com sucesso!', 'success');
+      if (modalNew) modalNew.style.display = 'none';
+
+      loadBilling();
+      loadBillingStats();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '💾 Salvar & Emitir Cobrança';
+      }
+    }
+  });
+
+  // 12. Modal de Baixa Manual: Submissão e Fechamento
+  const modalPaid = document.getElementById('modal-billing-paid-overlay');
+  document.getElementById('btn-close-billing-paid-modal')?.addEventListener('click', () => { if (modalPaid) modalPaid.style.display = 'none'; });
+  document.getElementById('btn-cancel-billing-paid')?.addEventListener('click', () => { if (modalPaid) modalPaid.style.display = 'none'; });
+
+  document.getElementById('form-billing-paid')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = document.getElementById('billing-paid-id')?.value;
+    const paidMethod = document.getElementById('billing-paid-method')?.value;
+    const notes = document.getElementById('billing-paid-notes')?.value?.trim();
+
+    if (!id) return;
+
+    try {
+      const res = await fetchWithAuth(`/api/billing/${id}/mark-paid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paidMethod, notes })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao confirmar baixa');
+
+      showToast('Baixa manual confirmada com sucesso! ✅', 'success');
+      if (modalPaid) modalPaid.style.display = 'none';
+      loadBilling();
+      loadBillingStats();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // 13. Modal de Configuração da Régua
+  const modalConfig = document.getElementById('modal-billing-config-overlay');
+  document.getElementById('btn-billing-open-config')?.addEventListener('click', async () => {
+    try {
+      const res = await fetchWithAuth('/api/billing/scheduler/status');
+      const data = await res.json();
+      if (data.config) {
+        const chk = document.getElementById('billing-config-enabled');
+        const timeInput = document.getElementById('billing-config-time');
+        const daysInput = document.getElementById('billing-config-days');
+
+        if (chk) chk.checked = data.config.enabled !== false;
+        if (timeInput) timeInput.value = data.config.targetTime || '09:00';
+        if (daysInput) daysInput.value = data.config.overdueDaysThreshold ?? 3;
+      }
+    } catch {}
+    if (modalConfig) modalConfig.style.display = 'flex';
+  });
+
+  document.getElementById('badge-billing-scheduler')?.addEventListener('click', () => {
+    document.getElementById('btn-billing-open-config')?.click();
+  });
+
+  document.getElementById('btn-close-billing-config-modal')?.addEventListener('click', () => { if (modalConfig) modalConfig.style.display = 'none'; });
+  document.getElementById('btn-cancel-billing-config')?.addEventListener('click', () => { if (modalConfig) modalConfig.style.display = 'none'; });
+
+  document.getElementById('form-billing-config')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const enabled = document.getElementById('billing-config-enabled')?.checked;
+    const targetTime = document.getElementById('billing-config-time')?.value || '09:00';
+    const overdueDaysThreshold = parseInt(document.getElementById('billing-config-days')?.value || '3', 10);
+
+    try {
+      const res = await fetchWithAuth('/api/billing/scheduler/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, targetTime, overdueDaysThreshold })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao salvar configuração');
+
+      showToast('Configurações da régua de cobrança salvas! ⚙️', 'success');
+      if (modalConfig) modalConfig.style.display = 'none';
+      loadBillingSchedulerStatus();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // Fechamento de Histórico
+  const modalHistory = document.getElementById('modal-billing-history-overlay');
+  document.getElementById('btn-close-billing-history-modal')?.addEventListener('click', () => { if (modalHistory) modalHistory.style.display = 'none'; });
+  document.getElementById('btn-close-billing-history')?.addEventListener('click', () => { if (modalHistory) modalHistory.style.display = 'none'; });
+
+});
+
 

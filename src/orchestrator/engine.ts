@@ -5,6 +5,7 @@ import { HandoffAgent } from './agents/handoff.js';
 import { BookingAgent } from './agents/booking.js';
 import { ExamDeliveryAgent } from './agents/exam-delivery.js';
 import { AttendantAgent } from './agents/attendant.js';
+import { BillingAgent } from './agents/billing-agent.js';
 import { messageDebouncer } from './debouncer.js';
 import { botTracker } from './bot-tracker.js';
 import { memoryStore } from '../gemini/memory.js';
@@ -39,13 +40,15 @@ export class AgentOrchestrator {
   constructor() {
     // Ordem de prioridade dos agentes:
     // 1. BusinessHoursAgent (verifica se está fora do horário comercial)
-    // 2. MediaHandoffAgent (detecta fotos de pedidos médicos/laudos e transfere para humanizado)
-    // 3. HandoffAgent (checa se o cliente quer atendente humano)
-    // 4. ExamDeliveryAgent (Validação dos 3 primeiros dígitos do CPF e entrega de exames LGPD)
-    // 5. BookingAgent (Agendamentos, anti-conflitos e confirmação D-1)
-    // 6. AttendantAgent (IA: Google Gemini / OpenAI)
+    // 2. BillingAgent (detecta comprovantes e confirmações de pagamento pendentes)
+    // 3. MediaHandoffAgent (detecta fotos de pedidos médicos/laudos e transfere para humanizado)
+    // 4. HandoffAgent (checa se o cliente quer atendente humano)
+    // 5. ExamDeliveryAgent (Validação dos 3 primeiros dígitos do CPF e entrega de exames LGPD)
+    // 6. BookingAgent (Agendamentos, anti-conflitos e confirmação D-1)
+    // 7. AttendantAgent (IA: Google Gemini / OpenAI)
     this.agents = [
       new BusinessHoursAgent(),
+      new BillingAgent(),
       new MediaHandoffAgent(),
       new HandoffAgent(),
       new ExamDeliveryAgent(),
@@ -537,28 +540,35 @@ export class AgentOrchestrator {
     if (memoryStore.isChatPaused(chatId, agent.id)) {
       const bookingAgent = this.agents.find(a => a.name === 'BookingAgent');
       const examAgent = this.agents.find(a => a.name === 'ExamDeliveryAgent');
+      const billingAgent = this.agents.find(a => a.name === 'BillingAgent');
 
       let canHandleBooking = false;
       let canHandleExam = false;
+      let canHandleBilling = false;
+
+      let testCtx: any = {
+        chatId,
+        userMessage: effectiveBody,
+        contactName,
+        session: sessionName,
+        agent,
+        metadata: { payload }
+      };
+
+      // 0. Verificação de comprovante ou confirmação de cobrança pendente
+      if (billingAgent) {
+        canHandleBilling = await billingAgent.canHandle(testCtx);
+      }
 
       // 1. Verificação de resposta estrita a lembrete D-1 de consulta (1 ou 2, sim/não, confirmar/cancelar/liberar vaga)
       // Pode despausar mesmo se a sessão atual for default, caso haja agendamento ativo com lembrete pendente
       const isReminderMsg = (bookingAgent as any)?.isReminderChoice?.(effectiveBody);
-      let testCtx: any = null;
-      if (isReminderMsg && bookingAgent) {
-        testCtx = {
-          chatId,
-          userMessage: effectiveBody,
-          contactName,
-          session: sessionName,
-          agent,
-          metadata: { payload }
-        };
+      if (isReminderMsg && bookingAgent && !canHandleBilling) {
         canHandleBooking = await bookingAgent.canHandle(testCtx);
       }
 
       // 2. Verificação de validação de exame LGPD (apenas se a empresa possuir agendamento/exames ativos)
-      if (agent.enableBooking && !canHandleBooking) {
+      if (agent.enableBooking && !canHandleBooking && !canHandleBilling) {
         const cleanDigits = effectiveBody.replace(/\D/g, '');
         const isStrictlyCpfFormat = cleanDigits.length >= 3 && cleanDigits.length <= 11 &&
           /^[0-9.\-\s]+$/.test(effectiveBody.trim());
@@ -571,7 +581,7 @@ export class AgentOrchestrator {
         }
       }
 
-      if (canHandleBooking || canHandleExam) {
+      if (canHandleBooking || canHandleExam || canHandleBilling) {
         memoryStore.resumeChat(chatId, agent.id);
         if (canHandleBooking && (bookingAgent as any)?.findReminderAppointment) {
           const matchedApt = (bookingAgent as any).findReminderAppointment(testCtx || chatId, agent.id);
@@ -580,7 +590,7 @@ export class AgentOrchestrator {
           }
         }
 
-        const reason = canHandleExam ? 'validação de exame (CPF)' : 'agenda/lembrete';
+        const reason = canHandleBilling ? 'comprovante/pagamento de cobrança' : (canHandleExam ? 'validação de exame (CPF)' : 'agenda/lembrete');
         console.log(`[Orchestrator] Contato ${chatId} enviou resposta estrita de ${reason} ("${effectiveBody}"). Pausa cancelada automaticamente.`);
         this.addLog({
           type: 'info',

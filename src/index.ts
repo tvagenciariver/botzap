@@ -9,6 +9,7 @@ import { wahaClient } from './waha/client.js';
 import { geminiService } from './gemini/client.js';
 import { reminderScheduler } from './appointments/reminder-scheduler.js';
 import { blastScheduler } from './blast/blast-scheduler.js';
+import { billingScheduler } from './billing/billing-scheduler.js';
 import { agentManager } from './config/agent-manager.js';
 
 
@@ -48,7 +49,7 @@ app.get('*', (_req, res) => {
 app.listen(env.port, async () => {
   const config = loadBotConfig();
   console.log('\n======================================================');
-  console.log('🤖 BotZap v2.7.8 [Build 2026-09-16-R8-NATURAL-BOOKING-FLOW]');
+  console.log('🤖 BotZap v2.8.0 [Build 2026-09-17-R1-BILLING-MODULE]');
   console.log('   Orquestrador de Agentes IA (WAHA + Gemini Flash)');
   console.log('======================================================');
   console.log(`🌐 Servidor rodando em: http://localhost:${env.port}`);
@@ -58,6 +59,7 @@ app.listen(env.port, async () => {
   console.log(`✨ Modelo Gemini Flash: ${config.model || env.geminiModel}`);
   console.log(`🔑 Gemini Configurado:  ${geminiService.isConfigured() ? 'SIM ✅' : 'NÃO (Informe a chave no painel web) ⚠️'}`);
   console.log(`⏰ Lembretes Automáticos D-1: ${config.enableAutoReminders !== false ? `Ativo às ${config.autoReminderTime || '18:00'} ✅` : 'Desativado ❌'}`);
+  console.log(`💳 Régua de Cobrança Diária: Ativa às ${(config as any).billingScheduler?.targetTime || '09:00'} ✅`);
   console.log('======================================================\n');
 
   // Inicializa o agendador automático em segundo plano para lembretes D-1
@@ -65,6 +67,9 @@ app.listen(env.port, async () => {
 
   // Inicializa o agendador automático para campanhas de disparo agendadas
   blastScheduler.start();
+
+  // Inicializa a régua de cobrança automática diária (09:00)
+  billingScheduler.start();
 
   // Teste de conexão não-bloqueante com a WAHA
 
