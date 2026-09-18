@@ -100,7 +100,7 @@ export class CustomerManager {
 
     const customer: BillingCustomer = {
       id: crypto.randomUUID(),
-      agentId: dto.agentId || 'default',
+      agentId: dto.agentId || 'all',
       name: dto.name.trim(),
       phone: dto.phone.trim(),
       chatId,
@@ -159,7 +159,7 @@ export class CustomerManager {
 
     const updated: BillingCustomer = {
       ...existing,
-      agentId: dto.agentId || existing.agentId,
+      agentId: dto.agentId !== undefined ? (dto.agentId || 'all') : existing.agentId,
       name: dto.name ? dto.name.trim() : existing.name,
       phone,
       chatId,

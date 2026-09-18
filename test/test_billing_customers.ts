@@ -157,7 +157,32 @@ async function runTests() {
   const deleted = customerManager.deleteCustomer(normalCust.id);
   assert.strictEqual(deleted, true, 'Deve retornar true ao excluir');
   assert.strictEqual(customerManager.getCustomerById(normalCust.id), undefined, 'Não deve mais existir');
-  console.log('✅ Exclusão validada com sucesso!');
+  // 8. Teste de Visibilidade Multiempresa (Geral 'all' e Agente específico)
+  console.log('\n8️⃣ Testando visibilidade multiempresa de clientes...');
+  const globalCust = customerManager.createCustomer({
+    agentId: 'all',
+    name: 'Cliente Global Multiuso',
+    phone: '(87) 98877-6655',
+    isRentalCustomer: false
+  });
+  const studioCust = customerManager.createCustomer({
+    agentId: 'agent_vale_studio',
+    name: 'Cliente Exclusivo Vale Studio',
+    phone: '(87) 98833-2211',
+    isRentalCustomer: false
+  });
+
+  const allFiltered = customerManager.getCustomers({ agentId: 'all' });
+  assert.ok(allFiltered.some(c => c.id === globalCust.id), 'Visão global deve conter cliente global');
+  assert.ok(allFiltered.some(c => c.id === studioCust.id), 'Visão global deve conter cliente da Vale Studio');
+
+  const studioFiltered = customerManager.getCustomers({ agentId: 'agent_vale_studio' });
+  assert.ok(studioFiltered.some(c => c.id === studioCust.id), 'Filtro de estúdio deve conter cliente do estúdio');
+  assert.ok(studioFiltered.some(c => c.id === globalCust.id), 'Filtro de estúdio deve conter cliente global');
+
+  customerManager.deleteCustomer(globalCust.id);
+  customerManager.deleteCustomer(studioCust.id);
+  console.log('✅ Visibilidade multiempresa validada com sucesso!');
 
   // Cleanup dos registros de teste
   customerManager.deleteCustomer(rentalCust.id);

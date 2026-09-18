@@ -2521,7 +2521,7 @@ apiRouter.get('/api/billing/customers', requireAuth, (req: Request, res: Respons
       search: search as string
     };
 
-    if (agentId) {
+    if (agentId && agentId !== 'all') {
       filter.agentId = agentId as string;
     }
     if (isRental !== undefined) {

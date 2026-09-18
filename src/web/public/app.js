@@ -8787,21 +8787,29 @@ window.stopBillingRealtimeSync = stopBillingRealtimeSync;
 // --- GESTÃO DE CLIENTES & LOCATÁRIOS DE IMÓVEIS ---
 let cachedBillingCustomers = [];
 
-async function loadBillingCustomers(agentId = null) {
+async function loadBillingCustomers(agentId = null, forceAll = true) {
   const token = getAuthToken();
-  if (!token) return;
+  if (!token) return [];
 
-  const effectiveCompany = agentId || getEffectiveActiveCompanyId();
+  let companyParam = 'all';
+  if (currentUser?.role === 'attendant' && currentUser.assignedAgentId && currentUser.assignedAgentId !== '*') {
+    companyParam = currentUser.assignedAgentId;
+  } else if (!forceAll && agentId && agentId !== 'all') {
+    companyParam = agentId;
+  }
+
   try {
-    let url = `/api/billing/customers?agentId=${encodeURIComponent(effectiveCompany)}`;
+    const url = `/api/billing/customers?agentId=${encodeURIComponent(companyParam)}`;
     const res = await fetchWithAuth(url);
     if (!res.ok) throw new Error('Falha ao carregar clientes');
     const data = await res.json();
     cachedBillingCustomers = data.customers || [];
     renderBillingCustomersTable(cachedBillingCustomers);
     updateBillingCustomerSelectOptions(cachedBillingCustomers);
+    return cachedBillingCustomers;
   } catch (err) {
     console.warn('[Billing] Erro ao carregar clientes:', err.message);
+    return cachedBillingCustomers;
   }
 }
 
@@ -8812,14 +8820,25 @@ function updateBillingCustomerSelectOptions(customers, selectedId = null) {
   const currentVal = selectedId || select.value;
   let optionsHtml = '<option value="">-- Digitar dados manualmente ou selecionar abaixo --</option>';
 
-  customers.forEach(c => {
-    const isRental = c.isRentalCustomer ? '🏠 [Locatário]' : '👤';
-    const propInfo = c.rentalInfo?.propertyCode ? ` (${c.rentalInfo.propertyCode})` : '';
-    optionsHtml += `<option value="${c.id}">${isRental} ${escapeHtml(c.name)}${escapeHtml(propInfo)} - ${escapeHtml(c.phone)}</option>`;
-  });
+  const agentsList = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+    ? allAgents
+    : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+
+  if (Array.isArray(customers) && customers.length > 0) {
+    customers.forEach(c => {
+      const isRental = c.isRentalCustomer ? '🏠 [Locatário]' : '👤';
+      const propInfo = c.rentalInfo?.propertyCode ? ` (${c.rentalInfo.propertyCode})` : '';
+      let compBadge = '';
+      if (c.agentId && c.agentId !== 'all' && agentsList.length > 1) {
+        const ag = agentsList.find(a => a.id === c.agentId);
+        if (ag) compBadge = ` [${ag.companyName || ag.name}]`;
+      }
+      optionsHtml += `<option value="${c.id}">${isRental} ${escapeHtml(c.name)}${escapeHtml(propInfo)} - ${escapeHtml(c.phone)}${escapeHtml(compBadge)}</option>`;
+    });
+  }
 
   select.innerHTML = optionsHtml;
-  if (currentVal && customers.some(c => c.id === currentVal)) {
+  if (currentVal && Array.isArray(customers) && customers.some(c => c.id === currentVal)) {
     select.value = currentVal;
   }
 }
@@ -8953,11 +8972,20 @@ function openBillingCustomerFormModal(customerId = null) {
 
   const agentSelect = document.getElementById('billing-customer-agent');
   if (agentSelect) {
-    const agents = (typeof allAgents !== 'undefined' ? allAgents : []);
-    agentSelect.innerHTML = agents.map(a => `<option value="${a.id}">${escapeHtml(a.companyName || a.name)}</option>`).join('');
-    const effectiveCompany = getEffectiveActiveCompanyId();
-    if (effectiveCompany !== 'all') {
+    const agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+      ? allAgents
+      : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
+
+    let html = '<option value="all">🏢 Todas as Empresas (Geral)</option>';
+    html += agents.map(a => `<option value="${a.id}">${escapeHtml(a.companyName || a.name)}</option>`).join('');
+    agentSelect.innerHTML = html;
+
+    const currentBillingNewAgent = document.getElementById('billing-new-agent')?.value;
+    const effectiveCompany = currentBillingNewAgent || getEffectiveActiveCompanyId();
+    if (effectiveCompany && effectiveCompany !== 'all' && agents.some(a => a.id === effectiveCompany)) {
       agentSelect.value = effectiveCompany;
+    } else {
+      agentSelect.value = 'all';
     }
   }
 
@@ -8975,7 +9003,13 @@ function openBillingCustomerFormModal(customerId = null) {
     if (titleEl) titleEl.textContent = '✏️ Editar Cliente / Locatário';
     if (subEl) subEl.textContent = `Atualize os dados cadastrais de ${cust.name}`;
 
-    if (cust.agentId && agentSelect) agentSelect.value = cust.agentId;
+    if (agentSelect) {
+      if (cust.agentId && Array.from(agentSelect.options).some(o => o.value === cust.agentId)) {
+        agentSelect.value = cust.agentId;
+      } else {
+        agentSelect.value = 'all';
+      }
+    }
     document.getElementById('billing-customer-name').value = cust.name || '';
     document.getElementById('billing-customer-phone').value = cust.phone || '';
     document.getElementById('billing-customer-document').value = cust.document || '';
@@ -9564,10 +9598,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Popula dropdown de empresas/agentes
     const agentSelect = document.getElementById('billing-new-agent');
     if (agentSelect) {
-      const agents = (typeof allAgents !== 'undefined' ? allAgents : []);
+      const agents = (typeof allAgents !== 'undefined' && allAgents.length > 0)
+        ? allAgents
+        : (typeof allAgentsCache !== 'undefined' ? allAgentsCache : []);
       agentSelect.innerHTML = agents.map(a => `<option value="${a.id}">${escapeHtml(a.companyName || a.name)}</option>`).join('');
       const effectiveCompany = getEffectiveActiveCompanyId();
-      if (effectiveCompany !== 'all') {
+      if (effectiveCompany !== 'all' && agents.some(a => a.id === effectiveCompany)) {
         agentSelect.value = effectiveCompany;
       }
     }
@@ -9618,19 +9654,15 @@ document.addEventListener('DOMContentLoaded', () => {
       schedInput.min = minIso;
     }
 
-    // Carrega clientes da empresa selecionada
-    loadBillingCustomers(agentSelect ? agentSelect.value : null);
+    // Popula imediatamente as opções do cliente a partir do cache e atualiza do backend
+    updateBillingCustomerSelectOptions(cachedBillingCustomers);
+    loadBillingCustomers('all', true);
 
     if (modalNew) modalNew.style.display = 'flex';
   });
 
   btnCloseNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
   btnCancelNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
-
-  // Alternância de empresa no modal de nova cobrança
-  document.getElementById('billing-new-agent')?.addEventListener('change', (e) => {
-    loadBillingCustomers(e.target.value);
-  });
 
   // Botão de cadastro rápido a partir do modal de nova cobrança
   document.getElementById('btn-billing-quick-new-customer')?.addEventListener('click', () => {
@@ -9644,6 +9676,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const customer = cachedBillingCustomers.find(c => c.id === custId);
     if (!customer) return;
+
+    // Se o cliente pertencer a uma empresa específica, sincroniza a empresa emissora
+    if (customer.agentId && customer.agentId !== 'all') {
+      const agentSelect = document.getElementById('billing-new-agent');
+      if (agentSelect && Array.from(agentSelect.options).some(o => o.value === customer.agentId)) {
+        agentSelect.value = customer.agentId;
+      }
+    }
 
     const nameInput = document.getElementById('billing-new-customer-name');
     const phoneInput = document.getElementById('billing-new-customer-phone');
@@ -9984,7 +10024,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCloseCustomers = document.getElementById('btn-close-billing-customers');
 
   btnOpenCustomers?.addEventListener('click', () => {
-    loadBillingCustomers();
+    loadBillingCustomers('all', true);
     if (modalCustomers) modalCustomers.style.display = 'flex';
   });
   btnCloseCustomersModal?.addEventListener('click', () => { if (modalCustomers) modalCustomers.style.display = 'none'; });
@@ -10014,18 +10054,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnNew = document.getElementById('btn-billing-new');
         if (btnNew) btnNew.click();
 
-        if (customer.agentId && customer.agentId !== 'default') {
+        if (customer.agentId && customer.agentId !== 'all') {
           const agentSelect = document.getElementById('billing-new-agent');
-          if (agentSelect) agentSelect.value = customer.agentId;
+          if (agentSelect && Array.from(agentSelect.options).some(o => o.value === customer.agentId)) {
+            agentSelect.value = customer.agentId;
+          }
         }
 
         setTimeout(() => {
+          updateBillingCustomerSelectOptions(cachedBillingCustomers, customer.id);
           const custSelect = document.getElementById('billing-new-customer-select');
           if (custSelect) {
             custSelect.value = customer.id;
             custSelect.dispatchEvent(new Event('change'));
           }
-        }, 80);
+        }, 50);
       }
       return;
     }
@@ -10136,10 +10179,10 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(isEdit ? 'Cliente atualizado com sucesso! ✅' : 'Cliente cadastrado com sucesso! 🎉', 'success');
       if (modalCustForm) modalCustForm.style.display = 'none';
 
-      await loadBillingCustomers();
+      await loadBillingCustomers('all', true);
 
-      // Se o modal de Nova Cobrança estiver aberto, seleciona este cliente
-      if (modalNew && modalNew.style.display !== 'none' && data.customer) {
+      // Atualiza o dropdown de Nova Cobrança e seleciona o cliente recém-cadastrado
+      if (data.customer) {
         updateBillingCustomerSelectOptions(cachedBillingCustomers, data.customer.id);
         const custSelect = document.getElementById('billing-new-customer-select');
         if (custSelect) {
