@@ -2394,22 +2394,6 @@ apiRouter.get('/api/billing/stats', requireAuth, (req: Request, res: Response) =
 });
 
 /**
- * GET /api/billing/:id
- * Retorna detalhes de uma cobrança específica
- */
-apiRouter.get('/api/billing/:id', requireAuth, (req: Request, res: Response) => {
-  try {
-    const charge = billingManager.getChargeById(req.params.id);
-    if (!charge) {
-      return res.status(404).json({ error: 'Cobrança não encontrada.' });
-    }
-    res.json({ success: true, charge });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
  * POST /api/billing
  * Cadastra nova cobrança (Boleto PDF e/ou PIX) com envio inicial opcional
  */
@@ -2430,85 +2414,9 @@ apiRouter.post('/api/billing', requireAuth, async (req: Request, res: Response) 
   }
 });
 
-/**
- * POST /api/billing/:id/send
- * Reenvia a cobrança (Boleto ou PIX) imediatamente via WhatsApp
- */
-apiRouter.post('/api/billing/:id/send', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const ok = await billingManager.dispatchBilling(req.params.id, 'reenvio_manual');
-    if (ok) {
-      const updated = billingManager.getChargeById(req.params.id);
-      res.json({ success: true, message: 'Cobrança reenviada com sucesso pelo WhatsApp!', charge: updated });
-    } else {
-      res.status(500).json({ error: 'Falha ao reenviar cobrança via WAHA. Verifique os logs e status da sessão.' });
-    }
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-/**
- * POST /api/billing/:id/mark-paid
- * Dá baixa manual na cobrança (marca como pago)
- */
-apiRouter.post('/api/billing/:id/mark-paid', requireAuth, (req: Request, res: Response) => {
-  try {
-    const { notes, paidMethod } = req.body;
-    const paidBy = req.user?.name || 'Operador';
-    const updated = billingManager.markAsPaidManual(req.params.id, {
-      paidBy,
-      notes,
-      paidMethod: paidMethod || 'manual'
-    });
-    res.json({ success: true, message: 'Baixa manual efetuada com sucesso!', charge: updated });
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-/**
- * GET /api/billing/:id/logs
- * Retorna os logs de auditoria e histórico de disparos da cobrança
- */
-apiRouter.get('/api/billing/:id/logs', requireAuth, (req: Request, res: Response) => {
-  try {
-    const logs = billingManager.getLogs(req.params.id);
-    res.json({ success: true, logs });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * GET /api/billing/logs/all
- * Retorna todos os logs de cobranças
- */
-apiRouter.get('/api/billing/logs/all', requireAuth, (req: Request, res: Response) => {
-  try {
-    const agentId = req.query.agentId as string;
-    const logs = billingManager.getLogs(undefined, agentId);
-    res.json({ success: true, logs, total: logs.length });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * DELETE /api/billing/:id
- * Exclui ou cancela uma cobrança
- */
-apiRouter.delete('/api/billing/:id', requireAuth, (req: Request, res: Response) => {
-  try {
-    const ok = billingManager.deleteCharge(req.params.id);
-    if (!ok) {
-      return res.status(404).json({ error: 'Cobrança não encontrada para exclusão.' });
-    }
-    res.json({ success: true, message: 'Cobrança cancelada e removida com sucesso.' });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// ============================================================================
+// ROTAS DE CLIENTES & LOCATÁRIOS (Devem preceder /api/billing/:id)
+// ============================================================================
 
 /**
  * GET /api/billing/customers
@@ -2606,20 +2514,19 @@ apiRouter.delete('/api/billing/customers/:id', requireAuth, (req: Request, res: 
   }
 });
 
+// ============================================================================
+// ROTAS DO SCHEDULER & LOGS GLOBAIS (Devem preceder /api/billing/:id)
+// ============================================================================
+
 /**
- * POST /api/billing/scheduler/trigger
- * Dispara a execução manual da Régua de Cobrança Diária
+ * GET /api/billing/logs/all
+ * Retorna todos os logs de cobranças
  */
-apiRouter.post('/api/billing/scheduler/trigger', requireAuth, async (req: Request, res: Response) => {
+apiRouter.get('/api/billing/logs/all', requireAuth, (req: Request, res: Response) => {
   try {
-    const { agentId } = req.body;
-    console.log('[API] Disparo manual da Régua de Cobrança solicitado pelo usuário:', req.user?.username);
-    const result = await billingScheduler.checkAndRun('manual', agentId);
-    res.json({
-      success: true,
-      message: `Régua executada com sucesso! ${result.dispatched} de ${result.totalEligible} cobrança(s) elegível(is) disparada(s).`,
-      ...result
-    });
+    const agentId = req.query.agentId as string;
+    const logs = billingManager.getLogs(undefined, agentId);
+    res.json({ success: true, logs, total: logs.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -2646,6 +2553,25 @@ apiRouter.get('/api/billing/scheduler/status', requireAuth, (_req: Request, res:
 });
 
 /**
+ * POST /api/billing/scheduler/trigger
+ * Dispara a execução manual da Régua de Cobrança Diária
+ */
+apiRouter.post('/api/billing/scheduler/trigger', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { agentId } = req.body;
+    console.log('[API] Disparo manual da Régua de Cobrança solicitado pelo usuário:', req.user?.username);
+    const result = await billingScheduler.checkAndRun('manual', agentId);
+    res.json({
+      success: true,
+      message: `Régua executada com sucesso! ${result.dispatched} de ${result.totalEligible} cobrança(s) elegível(is) disparada(s).`,
+      ...result
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * POST /api/billing/scheduler/config
  * Atualiza as configurações da Régua Diária
  */
@@ -2655,6 +2581,92 @@ apiRouter.post('/api/billing/scheduler/config', requireAuth, (req: Request, res:
     res.json({ success: true, message: 'Configurações da régua de cobrança atualizadas!', config: updated });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// ROTAS DE COBRANÇAS POR ID (Parâmetro dinâmico :id no final)
+// ============================================================================
+
+/**
+ * POST /api/billing/:id/send
+ * Reenvia a cobrança (Boleto ou PIX) imediatamente via WhatsApp
+ */
+apiRouter.post('/api/billing/:id/send', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const ok = await billingManager.dispatchBilling(req.params.id, 'reenvio_manual');
+    if (ok) {
+      const updated = billingManager.getChargeById(req.params.id);
+      res.json({ success: true, message: 'Cobrança reenviada com sucesso pelo WhatsApp!', charge: updated });
+    } else {
+      res.status(500).json({ error: 'Falha ao reenviar cobrança via WAHA. Verifique os logs e status da sessão.' });
+    }
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/billing/:id/mark-paid
+ * Dá baixa manual na cobrança (marca como pago)
+ */
+apiRouter.post('/api/billing/:id/mark-paid', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { notes, paidMethod } = req.body;
+    const paidBy = req.user?.name || 'Operador';
+    const updated = billingManager.markAsPaidManual(req.params.id, {
+      paidBy,
+      notes,
+      paidMethod: paidMethod || 'manual'
+    });
+    res.json({ success: true, message: 'Baixa manual efetuada com sucesso!', charge: updated });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/billing/:id/logs
+ * Retorna os logs de auditoria e histórico de disparos da cobrança
+ */
+apiRouter.get('/api/billing/:id/logs', requireAuth, (req: Request, res: Response) => {
+  try {
+    const logs = billingManager.getLogs(req.params.id);
+    res.json({ success: true, logs });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/billing/:id
+ * Retorna detalhes de uma cobrança específica
+ */
+apiRouter.get('/api/billing/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const charge = billingManager.getChargeById(req.params.id);
+    if (!charge) {
+      return res.status(404).json({ error: 'Cobrança não encontrada.' });
+    }
+    res.json({ success: true, charge });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/billing/:id
+ * Exclui ou cancela uma cobrança
+ */
+apiRouter.delete('/api/billing/:id', requireAuth, (req: Request, res: Response) => {
+  try {
+    const ok = billingManager.deleteCharge(req.params.id);
+    if (!ok) {
+      return res.status(404).json({ error: 'Cobrança não encontrada para exclusão.' });
+    }
+    res.json({ success: true, message: 'Cobrança cancelada e removida com sucesso.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

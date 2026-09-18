@@ -47,6 +47,18 @@ export class UserManager {
           this.saveUsers();
         }
       }
+
+      // Garante que usuários existentes tenham acesso ao módulo billing
+      let updatedModules = false;
+      for (const u of this.users) {
+        if (Array.isArray(u.allowedModules) && !u.allowedModules.includes('billing')) {
+          u.allowedModules.push('billing');
+          updatedModules = true;
+        }
+      }
+      if (updatedModules) {
+        this.saveUsers();
+      }
     }
   }
 
@@ -71,7 +83,7 @@ export class UserManager {
         name: 'Administrador Geral',
         role: 'admin',
         assignedAgentId: '*',
-        allowedModules: ['appointments', 'exams', 'chats', 'simulator'],
+        allowedModules: ['appointments', 'exams', 'chats', 'simulator', 'billing'],
         active: true,
         createdAt: new Date().toISOString()
       },
@@ -82,7 +94,7 @@ export class UserManager {
         name: 'Recepção / Atendimento',
         role: 'attendant',
         assignedAgentId: '*',
-        allowedModules: ['appointments', 'exams', 'chats', 'simulator'],
+        allowedModules: ['appointments', 'exams', 'chats', 'simulator', 'billing'],
         active: true,
         createdAt: new Date().toISOString()
       }
@@ -222,7 +234,7 @@ export class UserManager {
     }
 
     const token = crypto.randomBytes(32).toString('hex');
-    const defaultModules: AppModule[] = ['appointments', 'exams', 'chats', 'simulator'];
+    const defaultModules: AppModule[] = ['appointments', 'exams', 'chats', 'simulator', 'billing'];
     const session: UserSession = {
       token,
       userId: user.id,
@@ -232,7 +244,7 @@ export class UserManager {
       assignedAgentId: user.assignedAgentId || '*',
       allowedModules: Array.isArray(user.allowedModules) && user.allowedModules.length > 0
         ? user.allowedModules
-        : (user.role === 'admin' ? defaultModules : ['appointments', 'exams', 'chats', 'simulator']),
+        : defaultModules,
       createdAt: Date.now()
     };
 

@@ -10179,9 +10179,27 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(isEdit ? 'Cliente atualizado com sucesso! ✅' : 'Cliente cadastrado com sucesso! 🎉', 'success');
       if (modalCustForm) modalCustForm.style.display = 'none';
 
+      // Atualização imediata no cache em memória para resposta instantânea na UI
+      if (data.customer) {
+        const existingIdx = cachedBillingCustomers.findIndex(c => c.id === data.customer.id);
+        if (existingIdx >= 0) {
+          cachedBillingCustomers[existingIdx] = data.customer;
+        } else {
+          cachedBillingCustomers.unshift(data.customer);
+        }
+        renderBillingCustomersTable(cachedBillingCustomers);
+        updateBillingCustomerSelectOptions(cachedBillingCustomers, data.customer.id);
+        const custSelect = document.getElementById('billing-new-customer-select');
+        if (custSelect) {
+          custSelect.value = data.customer.id;
+          custSelect.dispatchEvent(new Event('change'));
+        }
+      }
+
+      // Sincroniza em segundo plano com o backend
       await loadBillingCustomers('all', true);
 
-      // Atualiza o dropdown de Nova Cobrança e seleciona o cliente recém-cadastrado
+      // Re-garante seleção no dropdown de Nova Cobrança
       if (data.customer) {
         updateBillingCustomerSelectOptions(cachedBillingCustomers, data.customer.id);
         const custSelect = document.getElementById('billing-new-customer-select');
