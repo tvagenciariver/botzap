@@ -35,13 +35,35 @@ let publicPath = path.resolve(__dirname, 'web', 'public');
 if (!fs.existsSync(publicPath)) {
   publicPath = path.resolve(process.cwd(), 'src', 'web', 'public');
 }
-app.use(express.static(publicPath));
+
+// Middleware anti-cache para garantir que index.html e assets HTML nunca fiquem em cache
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+
+app.use(express.static(publicPath, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
 
 // Rotas da API e Webhooks
 app.use(apiRouter);
 
 // Rota de fallback para SPA do Painel
 app.get('*', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 
@@ -49,7 +71,7 @@ app.get('*', (_req, res) => {
 app.listen(env.port, async () => {
   const config = loadBotConfig();
   console.log('\n======================================================');
-  console.log('🤖 BotZap v2.8.0 [Build 2026-09-17-R1-BILLING-MODULE]');
+  console.log('🤖 BotZap v2.8.6 [Build 2026-09-18-R2-RECURRENT-BILLING]');
   console.log('   Orquestrador de Agentes IA (WAHA + Gemini Flash)');
   console.log('======================================================');
   console.log(`🌐 Servidor rodando em: http://localhost:${env.port}`);

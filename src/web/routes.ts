@@ -327,9 +327,9 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.7.8',
-    build: '2026-09-16-R8-NATURAL-BOOKING-FLOW',
-    buildDate: '2026.09.16',
+    version: '2.8.6',
+    build: '2026-09-18-R2-RECURRENT-BILLING',
+    buildDate: '2026.09.18',
     timestamp: new Date().toISOString(),
     agentsCount: {
       total: allAgents.length,
