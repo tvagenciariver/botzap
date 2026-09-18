@@ -8867,6 +8867,51 @@ function calculateNextDueDateFromDay(dueDay) {
   return `${targetYear}-${mm}-${dd}`;
 }
 
+function updateRecurringPreview() {
+  const isRec = document.getElementById('billing-new-is-recurring')?.checked;
+  const previewEl = document.getElementById('billing-new-recurring-preview');
+  if (!previewEl) return;
+
+  if (!isRec) {
+    previewEl.innerHTML = 'ℹ️ Serão geradas mensalidades com vencimento mensal automático.';
+    return;
+  }
+
+  const rawAmount = document.getElementById('billing-new-amount')?.value?.replace(/[R$\s.]/g, '').replace(',', '.');
+  const amount = parseFloat(rawAmount || '0');
+  const months = parseInt(document.getElementById('billing-new-recurring-months')?.value || '12', 10) || 12;
+  const firstDate = document.getElementById('billing-new-first-payment-date')?.value || document.getElementById('billing-new-due-date')?.value;
+
+  if (!firstDate) {
+    previewEl.innerHTML = `ℹ️ Selecione a data do 1º pagamento para calcular as ${months} mensalidades.`;
+    return;
+  }
+
+  const parts = firstDate.split('-');
+  if (parts.length !== 3) return;
+  const d = parts[2];
+  const m = parts[1];
+  const y = parts[0];
+
+  const baseYear = parseInt(y, 10);
+  const baseMonth = parseInt(m, 10) - 1;
+  const targetDay = parseInt(d, 10);
+  const lastTarget = new Date(baseYear, baseMonth + months - 1, 1);
+  const daysInLastMonth = new Date(lastTarget.getFullYear(), lastTarget.getMonth() + 1, 0).getDate();
+  const lastDay = Math.min(targetDay, daysInLastMonth);
+  const lastDateFormatted = `${String(lastDay).padStart(2, '0')}/${String(lastTarget.getMonth() + 1).padStart(2, '0')}/${lastTarget.getFullYear()}`;
+
+  const fmtAmt = amount > 0 ? amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00';
+  const totalAmt = amount > 0 ? (amount * months).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00';
+
+  previewEl.innerHTML = `
+    <div>📅 <strong>${months} mensalidades</strong> de <strong>${fmtAmt}</strong> (Total: <strong>${totalAmt}</strong>)</div>
+    <div style="margin-top: 4px; color: #cbd5e1; font-size: 11px;">
+      1º Vencimento: <strong>${d}/${m}/${y}</strong> • Último: <strong>${lastDateFormatted}</strong> (vencimento todo dia ${parseInt(d, 10)})
+    </div>
+  `;
+}
+
 function renderBillingCustomersTable(customers) {
   const tbody = document.getElementById('billing-customers-table-body');
   if (!tbody) return;
@@ -9312,7 +9357,10 @@ function renderBillingTable(charges) {
           <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(c.customerPhone)}</div>
         </td>
         <td>
-          <div style="font-weight: 500;">${escapeHtml(c.serviceType)}</div>
+          <div style="font-weight: 500; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span>${escapeHtml(c.serviceType)}</span>
+            ${c.isRecurring ? `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); font-size: 10px;" title="Cobrança Recorrente (Mensalidade / Aluguel)">🔁 ${c.installmentNumber || 1}/${c.totalInstallments || '∞'}</span>` : ''}
+          </div>
           ${c.serviceDescription ? `<div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(c.serviceDescription)}</div>` : ''}
         </td>
         <td>${methodBadge}</td>
@@ -9635,6 +9683,17 @@ document.addEventListener('DOMContentLoaded', () => {
       dueDateInput.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
+    // Reseta controles de recorrência
+    const chkRec = document.getElementById('billing-new-is-recurring');
+    if (chkRec) chkRec.checked = false;
+    const secRec = document.getElementById('billing-new-recurring-section');
+    if (secRec) secRec.style.display = 'none';
+    const firstPayInput = document.getElementById('billing-new-first-payment-date');
+    if (firstPayInput && dueDateInput) firstPayInput.value = dueDateInput.value;
+    const monthsInput = document.getElementById('billing-new-recurring-months');
+    if (monthsInput) monthsInput.value = '12';
+    updateRecurringPreview();
+
     // Default forma: boleto
     document.getElementById('method-choice-boleto')?.click();
 
@@ -9670,6 +9729,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnCloseNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
   btnCancelNew?.addEventListener('click', () => { if (modalNew) modalNew.style.display = 'none'; });
+
+  // Eventos de Recorrência
+  document.getElementById('billing-new-is-recurring')?.addEventListener('change', (e) => {
+    const sec = document.getElementById('billing-new-recurring-section');
+    if (sec) sec.style.display = e.target.checked ? 'block' : 'none';
+    const dueVal = document.getElementById('billing-new-due-date')?.value;
+    const firstPay = document.getElementById('billing-new-first-payment-date');
+    if (firstPay && !firstPay.value && dueVal) {
+      firstPay.value = dueVal;
+    }
+    updateRecurringPreview();
+  });
+
+  document.getElementById('billing-new-first-payment-date')?.addEventListener('input', (e) => {
+    const dueInput = document.getElementById('billing-new-due-date');
+    if (dueInput && e.target.value) {
+      dueInput.value = e.target.value;
+    }
+    updateRecurringPreview();
+  });
+
+  document.getElementById('billing-new-due-date')?.addEventListener('change', (e) => {
+    const isRec = document.getElementById('billing-new-is-recurring')?.checked;
+    const firstPay = document.getElementById('billing-new-first-payment-date');
+    if (isRec && firstPay && e.target.value) {
+      firstPay.value = e.target.value;
+    }
+    updateRecurringPreview();
+  });
+
+  document.getElementById('billing-new-recurring-months')?.addEventListener('input', updateRecurringPreview);
+  document.getElementById('billing-new-amount')?.addEventListener('input', updateRecurringPreview);
 
   // Botão de cadastro rápido a partir do modal de nova cobrança
   document.getElementById('btn-billing-quick-new-customer')?.addEventListener('click', () => {
@@ -9726,6 +9817,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dueInput && calculatedDueDate) {
           dueInput.value = calculatedDueDate;
         }
+        const firstPay = document.getElementById('billing-new-first-payment-date');
+        if (firstPay && calculatedDueDate) {
+          firstPay.value = calculatedDueDate;
+        }
+      }
+
+      // Sugere cobrança recorrente automaticamente para locatários
+      const chkRec = document.getElementById('billing-new-is-recurring');
+      if (chkRec) {
+        chkRec.checked = true;
+        const secRec = document.getElementById('billing-new-recurring-section');
+        if (secRec) secRec.style.display = 'block';
+        updateRecurringPreview();
       }
     }
   });
@@ -9876,6 +9980,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const customerId = document.getElementById('billing-new-customer-select')?.value || undefined;
     const saveCustomer = document.getElementById('billing-new-save-customer')?.checked !== false;
 
+    // Dados de Recorrência (Mensalidade / Aluguel)
+    const isRecurring = document.getElementById('billing-new-is-recurring')?.checked || false;
+    const firstPaymentDate = document.getElementById('billing-new-first-payment-date')?.value || dueDate;
+    const recurrenceMonths = isRecurring ? (parseInt(document.getElementById('billing-new-recurring-months')?.value || '12', 10) || 12) : undefined;
+
     const payload = {
       agentId,
       customerId,
@@ -9885,8 +9994,11 @@ document.addEventListener('DOMContentLoaded', () => {
       serviceType,
       serviceDescription,
       amount,
-      dueDate,
+      dueDate: isRecurring && firstPaymentDate ? firstPaymentDate : dueDate,
       billingMethod,
+      isRecurring,
+      firstPaymentDate: isRecurring ? firstPaymentDate : undefined,
+      recurrenceMonths,
       pdfBase64: selectedBoletoBase64 || undefined,
       pdfFileName: selectedBoletoFileName || undefined,
       pixKey,
@@ -9915,13 +10027,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao emitir cobrança');
 
-      let successMsg = 'Cobrança salva com sucesso! 💾';
+      let successMsg = isRecurring
+        ? `Cobrança recorrente criada com sucesso! (${data.totalInstallments || recurrenceMonths} mensalidades geradas) 🔁`
+        : 'Cobrança salva com sucesso! 💾';
+
       if (sendOption === 'immediate') {
-        successMsg = 'Cobrança cadastrada e enviada via WhatsApp! 🚀';
+        successMsg = isRecurring
+          ? `Cobrança recorrente criada (${data.totalInstallments || recurrenceMonths} mensalidades) e 1ª parcela enviada no WhatsApp! 🚀`
+          : 'Cobrança cadastrada e enviada via WhatsApp! 🚀';
       } else if (sendOption === 'scheduled') {
         const dt = new Date(scheduledSendAt);
         const dtStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')} às ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
-        successMsg = `Cobrança salva e agendada para envio em ${dtStr}! ⏰`;
+        successMsg = isRecurring
+          ? `Cobrança recorrente criada e 1ª parcela agendada para ${dtStr}! ⏰`
+          : `Cobrança salva e agendada para envio em ${dtStr}! ⏰`;
       }
       showToast(successMsg, 'success');
       if (modalNew) modalNew.style.display = 'none';

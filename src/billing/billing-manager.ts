@@ -284,6 +284,16 @@ export class BillingManager {
       pixQrCodeUrl = saved.url;
     }
 
+    const isRecurring = Boolean(dto.isRecurring && Number(dto.recurrenceMonths) >= 2);
+    const totalInstallments = isRecurring ? Math.min(60, Math.max(2, Math.round(Number(dto.recurrenceMonths) || 12))) : 1;
+    const firstPaymentDate = (dto.firstPaymentDate?.trim() || dto.dueDate);
+    const recurrenceGroupId = isRecurring ? ('rec_' + crypto.randomBytes(8).toString('hex')) : undefined;
+
+    const baseServiceDesc = dto.serviceDescription?.trim() || '';
+    const initialDesc = isRecurring
+      ? (baseServiceDesc ? `${baseServiceDesc} (01/${String(totalInstallments).padStart(2, '0')})` : `${dto.serviceType || 'Mensalidade'} (01/${String(totalInstallments).padStart(2, '0')})`)
+      : (baseServiceDesc || undefined);
+
     const now = new Date().toISOString();
     const charge: BillingCharge = {
       id: billingId,
@@ -293,9 +303,9 @@ export class BillingManager {
       customerPhone: dto.customerPhone.trim(),
       customerChatId,
       serviceType: dto.serviceType || 'Serviço',
-      serviceDescription: dto.serviceDescription?.trim(),
+      serviceDescription: initialDesc,
       amount: Number(dto.amount),
-      dueDate: dto.dueDate,
+      dueDate: firstPaymentDate,
       billingMethod: dto.billingMethod || 'boleto',
 
       pdfFileName,
@@ -323,14 +333,83 @@ export class BillingManager {
       sendAttempts: 0,
       notes: dto.notes?.trim(),
 
+      isRecurring,
+      recurrenceGroupId,
+      installmentNumber: isRecurring ? 1 : undefined,
+      totalInstallments: isRecurring ? totalInstallments : undefined,
+
       createdAt: now,
       updatedAt: now
     };
 
-    this.charges.unshift(charge);
+    const newCharges: BillingCharge[] = [charge];
+
+    // Se for cobrança recorrente, gera automaticamente as mensalidades seguintes (mês 2 em diante)
+    if (isRecurring) {
+      for (let i = 2; i <= totalInstallments; i++) {
+        const instId = 'bill_' + crypto.randomBytes(6).toString('hex');
+        const instDueDate = this.addMonthsToDate(firstPaymentDate, i - 1);
+        const instPad = String(i).padStart(2, '0');
+        const totalPad = String(totalInstallments).padStart(2, '0');
+        const instDesc = baseServiceDesc
+          ? `${baseServiceDesc} (${instPad}/${totalPad})`
+          : `${dto.serviceType || 'Mensalidade'} (${instPad}/${totalPad})`;
+
+        const instCharge: BillingCharge = {
+          id: instId,
+          agentId: agent.id,
+          customerId,
+          customerName: dto.customerName.trim(),
+          customerPhone: dto.customerPhone.trim(),
+          customerChatId,
+          serviceType: dto.serviceType || 'Serviço',
+          serviceDescription: instDesc,
+          amount: Number(dto.amount),
+          dueDate: instDueDate,
+          billingMethod: dto.billingMethod || 'boleto',
+
+          // Herda dados de PIX para pagamentos automáticos dos meses seguintes
+          pixKey: dto.pixKey?.trim(),
+          pixKeyType: dto.pixKeyType,
+          pixCopiaECola: dto.pixCopiaECola?.trim(),
+          pixQrCodeFileName,
+          pixQrCodeFilePath,
+          pixQrCodeUrl,
+
+          statusEnvio: 'pendente',
+          statusPagamento: 'pendente',
+          sendImmediately: false,
+          sendAttempts: 0,
+          customMessageTemplate: dto.customMessageTemplate?.trim(),
+          notes: dto.notes?.trim(),
+
+          isRecurring: true,
+          recurrenceGroupId,
+          installmentNumber: i,
+          totalInstallments,
+
+          createdAt: now,
+          updatedAt: now
+        };
+        newCharges.push(instCharge);
+      }
+    }
+
+    // Insere no início mantendo a ordem correta
+    this.charges.unshift(...newCharges);
     this.saveToDisk();
 
-    if (charge.statusEnvio === 'agendado') {
+    if (isRecurring) {
+      this.addLog({
+        billingId: charge.id,
+        agentId: charge.agentId,
+        customerName: charge.customerName,
+        customerPhone: charge.customerPhone,
+        type: 'envio_inicial',
+        status: 'info',
+        message: `Cobrança recorrente criada com sucesso! Total de ${totalInstallments} mensalidades de R$ ${charge.amount.toFixed(2)}. 1º vencimento: ${charge.dueDate}. Grupo: ${recurrenceGroupId}.`
+      });
+    } else if (charge.statusEnvio === 'agendado') {
       this.addLog({
         billingId: charge.id,
         agentId: charge.agentId,
@@ -863,6 +942,36 @@ export class BillingManager {
       return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
     return isoDate;
+  }
+
+  /**
+   * Adiciona N meses a uma data (YYYY-MM-DD), mantendo o dia base e ajustando meses mais curtos
+   */
+  addMonthsToDate(dateStr: string, monthsToAdd: number): string {
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const baseYear = parseInt(parts[0], 10);
+    const baseMonth = parseInt(parts[1], 10) - 1; // 0-based
+    const targetDay = parseInt(parts[2], 10);
+
+    const targetDate = new Date(baseYear, baseMonth + monthsToAdd, 1);
+    const targetYear = targetDate.getFullYear();
+    const targetMonth = targetDate.getMonth();
+    const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+    const finalDay = Math.min(targetDay, daysInTargetMonth);
+
+    const mm = String(targetMonth + 1).padStart(2, '0');
+    const dd = String(finalDay).padStart(2, '0');
+    return `${targetYear}-${mm}-${dd}`;
+  }
+
+  /**
+   * Retorna todas as cobranças vinculadas ao mesmo grupo de recorrência
+   */
+  getChargesByRecurrenceGroup(groupId: string): BillingCharge[] {
+    return this.charges
+      .filter(c => c.recurrenceGroupId === groupId)
+      .sort((a, b) => (a.installmentNumber || 0) - (b.installmentNumber || 0));
   }
 }
 

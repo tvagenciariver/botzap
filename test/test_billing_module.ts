@@ -92,6 +92,46 @@ async function runTests() {
   assert.ok(scheduledList.some(c => c.id === scheduledCharge.id), 'Cobrança agendada deve constar no filtro quickFilter=scheduled');
   console.log('✅ Cobrança com Envio Agendado criada e validada com sucesso!');
 
+  // 2.2 Teste de Cobrança Recorrente (Mensalidade / Aluguel de Imóvel)
+  console.log('\n2️⃣.2️⃣ Testando cadastro de Cobrança Recorrente (Mensalidade de 3 meses)...');
+  const recurrentCharge = await billingManager.createCharge({
+    agentId: defaultAgent.id,
+    customerName: 'Locatário Teste Recorrência',
+    customerPhone: '5587999881122',
+    serviceType: 'Aluguel de Imóvel',
+    serviceDescription: 'Aluguel AP-202',
+    amount: 1400.00,
+    dueDate: '2026-10-05',
+    isRecurring: true,
+    recurrenceMonths: 3,
+    firstPaymentDate: '2026-10-05',
+    billingMethod: 'pix',
+    pixKey: '12345678900',
+    pixKeyType: 'cpf',
+    sendOption: 'manual'
+  });
+
+  assert.strictEqual(recurrentCharge.isRecurring, true, 'isRecurring deve ser true');
+  assert.ok(recurrentCharge.recurrenceGroupId?.startsWith('rec_'), 'recurrenceGroupId deve iniciar com rec_');
+  assert.strictEqual(recurrentCharge.installmentNumber, 1, 'installmentNumber inicial deve ser 1');
+  assert.strictEqual(recurrentCharge.totalInstallments, 3, 'totalInstallments deve ser 3');
+  assert.strictEqual(recurrentCharge.dueDate, '2026-10-05', 'Data do 1º pagamento deve ser 2026-10-05');
+
+  const groupCharges = billingManager.getChargesByRecurrenceGroup(recurrentCharge.recurrenceGroupId!);
+  assert.strictEqual(groupCharges.length, 3, 'Devem existir 3 cobranças geradas para o grupo de recorrência');
+  assert.strictEqual(groupCharges[0].dueDate, '2026-10-05');
+  assert.strictEqual(groupCharges[1].dueDate, '2026-11-05');
+  assert.strictEqual(groupCharges[2].dueDate, '2026-12-05');
+  assert.strictEqual(groupCharges[1].installmentNumber, 2);
+  assert.strictEqual(groupCharges[2].installmentNumber, 3);
+  assert.strictEqual(groupCharges[1].statusEnvio, 'pendente');
+
+  // Validação da função de datas para viradas de ano e meses de 28/30/31 dias
+  assert.strictEqual(billingManager.addMonthsToDate('2026-01-31', 1), '2026-02-28', '31 de janeiro + 1 mês deve ser 28 de fevereiro');
+  assert.strictEqual(billingManager.addMonthsToDate('2026-01-31', 2), '2026-03-31', '31 de janeiro + 2 meses deve ser 31 de março');
+  assert.strictEqual(billingManager.addMonthsToDate('2026-11-15', 3), '2027-02-15', '15 de novembro + 3 meses deve ser 15 de fevereiro de 2027');
+  console.log('✅ Cobrança Recorrente e cálculo de parcelas mensais validados com sucesso!');
+
   // 3. Teste de Indicadores / KPIs (Stats)
   console.log('\n3️⃣ Testando cálculo de métricas (KPIs)...');
   const stats = billingManager.getStats(defaultAgent.id);
@@ -205,6 +245,7 @@ async function runTests() {
   billingManager.deleteCharge(boletoCharge.id);
   billingManager.deleteCharge(pixCharge.id);
   billingManager.deleteCharge(scheduledCharge.id);
+  groupCharges.forEach(c => billingManager.deleteCharge(c.id));
   console.log('✅ Cobranças de teste removidas.');
 
   console.log('\n🎉 ======================================================');

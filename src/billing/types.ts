@@ -49,6 +49,12 @@ export interface BillingCharge {
   paidBy?: string;
   notes?: string;
 
+  // Recorrência / Assinatura / Mensalidade
+  isRecurring?: boolean;
+  recurrenceGroupId?: string;
+  installmentNumber?: number;
+  totalInstallments?: number;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -186,6 +192,11 @@ export interface CreateBillingDTO {
   sendImmediately?: boolean;
   customMessageTemplate?: string;
   notes?: string;
+
+  // Recorrência / Mensalidade / Aluguel
+  isRecurring?: boolean;
+  recurrenceMonths?: number; // Qtd de meses (ex: 2 a 60)
+  firstPaymentDate?: string; // YYYY-MM-DD (Data do 1º pagamento/vencimento)
 }
 
 export interface BillingFilter {

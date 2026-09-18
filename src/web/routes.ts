@@ -2407,7 +2407,15 @@ apiRouter.post('/api/billing', requireAuth, async (req: Request, res: Response) 
     }
 
     const created = await billingManager.createCharge(dto);
-    res.status(201).json({ success: true, charge: created });
+    res.status(201).json({
+      success: true,
+      charge: created,
+      isRecurring: created.isRecurring,
+      totalInstallments: created.totalInstallments || 1,
+      message: created.isRecurring
+        ? `${created.totalInstallments} mensalidades geradas com sucesso!`
+        : 'Cobrança cadastrada com sucesso!'
+    });
   } catch (err: any) {
     console.error('[API /api/billing] Erro ao criar cobrança:', err.message);
     res.status(400).json({ error: err.message });
