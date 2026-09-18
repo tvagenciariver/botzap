@@ -573,11 +573,18 @@ export class BillingManager {
 
   /**
    * Baixa manual da cobrança (pagamento confirmado pelo operador)
+   * Envia opcionalmente (habilitado por padrão) mensagem de confirmação e agradecimento pelo WhatsApp.
    */
-  markAsPaidManual(
+  async markAsPaidManual(
     chargeId: string,
-    options?: { paidBy?: string; notes?: string; paidMethod?: 'manual' | 'automatico' }
-  ): BillingCharge {
+    options?: {
+      paidBy?: string;
+      notes?: string;
+      paidMethod?: string;
+      sendReceiptMessage?: boolean;
+      customReceiptMessage?: string;
+    }
+  ): Promise<BillingCharge> {
     const charge = this.getChargeById(chargeId);
     if (!charge) {
       throw new Error(`Cobrança com ID ${chargeId} não encontrada.`);
@@ -594,6 +601,63 @@ export class BillingManager {
     charge.updatedAt = now;
     this.saveToDisk();
 
+    let receiptSent = false;
+    const shouldSendReceipt = options?.sendReceiptMessage !== false;
+
+    if (shouldSendReceipt && charge.customerChatId) {
+      try {
+        const agent = agentManager.getAgent(charge.agentId) || agentManager.getDefaultAgent();
+        const session = (agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : (env.wahaSession || 'default');
+        const companyName = agent.companyName || agent.name || 'Setor Financeiro';
+        const formattedAmount = charge.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        const todayDateBR = this.formatDateBR(this.getTodayDateString());
+        const methodLabel = options?.paidMethod || charge.paidMethod || 'PIX / Pagamento';
+
+        // Busca dados do imóvel se for cliente locatário
+        const customer = (charge.customerId ? customerManager.getCustomerById(charge.customerId) : undefined)
+          || customerManager.findCustomerByPhone(charge.customerPhone, charge.agentId);
+
+        let rentalInfoStr = '';
+        if (customer?.isRentalCustomer && customer.rentalInfo) {
+          const parts: string[] = [];
+          if (customer.rentalInfo.propertyCode) parts.push(`Cód. ${customer.rentalInfo.propertyCode}`);
+          if (customer.rentalInfo.propertyType) parts.push(customer.rentalInfo.propertyType);
+          if (customer.rentalInfo.propertyAddress) parts.push(customer.rentalInfo.propertyAddress);
+          rentalInfoStr = parts.join(' - ');
+        }
+
+        let messageText = options?.customReceiptMessage?.trim();
+        if (!messageText) {
+          messageText =
+            `🏢 *${companyName}* — Confirmação de Pagamento Recebido ✅\n\n` +
+            `Olá, *{nome}*! 👋\n\n` +
+            `Confirmamos com sucesso o recebimento do seu pagamento!\n\n` +
+            `📋 *Referente a:* {servico}\n` +
+            (rentalInfoStr ? `🏠 *Imóvel:* {imovel}\n` : '') +
+            `💰 *Valor recebido:* {valor}\n` +
+            `💳 *Forma:* {metodo}\n` +
+            `📅 *Data de confirmação:* {data}\n\n` +
+            `Muito obrigado pela atenção, pontualidade e preferência! A sua fatura já foi devidamente baixada em nosso sistema financeiro. ✨\n\n` +
+            `Caso precise de 2ª via, recibo ou qualquer outra informação, estamos à sua inteira disposição. Tenha um ótimo dia! 😊`;
+        }
+
+        const interpolated = messageText
+          .replace(/{nome}/g, charge.customerName)
+          .replace(/{servico}/g, charge.serviceDescription || charge.serviceType)
+          .replace(/{valor}/g, formattedAmount)
+          .replace(/{metodo}/g, methodLabel)
+          .replace(/{data}/g, todayDateBR)
+          .replace(/{empresa}/g, companyName)
+          .replace(/{imovel}/g, rentalInfoStr || 'Imóvel locado');
+
+        const res = await wahaClient.sendText(charge.customerChatId, interpolated, { session });
+        botTracker.recordBotMessage(charge.customerChatId, interpolated, res?.id);
+        receiptSent = true;
+      } catch (err: any) {
+        console.warn(`[BillingManager] Falha ao enviar mensagem de confirmação de recebimento para ${charge.customerChatId}:`, err.message);
+      }
+    }
+
     this.addLog({
       billingId: charge.id,
       agentId: charge.agentId,
@@ -601,7 +665,9 @@ export class BillingManager {
       customerPhone: charge.customerPhone,
       type: 'baixa_manual',
       status: 'sucesso',
-      message: `Baixa manual efetuada por ${charge.paidBy}. Valor: R$ ${charge.amount.toFixed(2)}.`
+      message: receiptSent
+        ? `Baixa manual efetuada por ${charge.paidBy}. Mensagem de confirmação e agradecimento enviada via WhatsApp para ${charge.customerPhone}. Valor: R$ ${charge.amount.toFixed(2)}.`
+        : `Baixa manual efetuada por ${charge.paidBy}. Valor: R$ ${charge.amount.toFixed(2)}.`
     });
 
     return charge;

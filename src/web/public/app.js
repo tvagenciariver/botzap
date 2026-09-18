@@ -9369,6 +9369,13 @@ function attachBillingTableEvents() {
       if (elName) elName.textContent = name;
       if (elAmt) elAmt.textContent = amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+      const chkReceipt = document.getElementById('billing-paid-send-receipt');
+      if (chkReceipt) chkReceipt.checked = true;
+      const boxReceipt = document.getElementById('billing-paid-receipt-box');
+      if (boxReceipt) boxReceipt.style.display = 'block';
+      const customMsg = document.getElementById('billing-paid-custom-message');
+      if (customMsg) customMsg.value = '';
+
       if (modal) modal.style.display = 'flex';
     });
   });
@@ -9937,29 +9944,51 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-close-billing-paid-modal')?.addEventListener('click', () => { if (modalPaid) modalPaid.style.display = 'none'; });
   document.getElementById('btn-cancel-billing-paid')?.addEventListener('click', () => { if (modalPaid) modalPaid.style.display = 'none'; });
 
+  document.getElementById('billing-paid-send-receipt')?.addEventListener('change', (e) => {
+    const box = document.getElementById('billing-paid-receipt-box');
+    if (box) box.style.display = e.target.checked ? 'block' : 'none';
+  });
+
   document.getElementById('form-billing-paid')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = document.getElementById('billing-paid-id')?.value;
     const paidMethod = document.getElementById('billing-paid-method')?.value;
     const notes = document.getElementById('billing-paid-notes')?.value?.trim();
+    const sendReceiptMessage = document.getElementById('billing-paid-send-receipt')?.checked !== false;
+    const customReceiptMessage = document.getElementById('billing-paid-custom-message')?.value?.trim() || undefined;
 
     if (!id) return;
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Confirmando...';
+    }
 
     try {
       const res = await fetchWithAuth(`/api/billing/${id}/mark-paid`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paidMethod, notes })
+        body: JSON.stringify({ paidMethod, notes, sendReceiptMessage, customReceiptMessage })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Falha ao confirmar baixa');
 
-      showToast('Baixa manual confirmada com sucesso! ✅', 'success');
+      const successToast = sendReceiptMessage
+        ? 'Baixa confirmada e mensagem de agradecimento enviada via WhatsApp! ✅'
+        : 'Baixa manual confirmada com sucesso! ✅';
+      showToast(successToast, 'success');
+
       if (modalPaid) modalPaid.style.display = 'none';
       loadBilling();
       loadBillingStats();
     } catch (err) {
       showToast(err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Confirmar Baixa ✅';
+      }
     }
   });
 

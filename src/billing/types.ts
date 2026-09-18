@@ -45,7 +45,7 @@ export interface BillingCharge {
 
   // Baixa / Pagamento
   paidAt?: string;
-  paidMethod?: 'automatico' | 'manual';
+  paidMethod?: 'automatico' | 'manual' | string;
   paidBy?: string;
   notes?: string;
 

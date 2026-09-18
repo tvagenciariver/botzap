@@ -177,16 +177,23 @@ async function runTests() {
   assert.strictEqual(updatedSchedCharge?.statusPagamento, 'aguardando_confirmacao');
   console.log('✅ BillingAgent reconheceu envio de imagem sem legenda e atualizou status para "aguardando_confirmacao"!');
 
-  // 6. Teste de Baixa Manual
-  console.log('\n6️⃣ Testando Baixa Manual do Pagamento...');
-  const paidCharge = billingManager.markAsPaidManual(boletoCharge.id, {
+  // 6. Teste de Baixa Manual com Disparo de Mensagem de Confirmação & Agradecimento
+  console.log('\n6️⃣ Testando Baixa Manual do Pagamento (com mensagem de agradecimento)...');
+  const paidCharge = await billingManager.markAsPaidManual(boletoCharge.id, {
     paidBy: 'Dr. Financeiro',
-    notes: 'PIX conferido no extrato bancário'
+    paidMethod: 'PIX',
+    notes: 'PIX conferido no extrato bancário',
+    sendReceiptMessage: true
   });
 
   assert.strictEqual(paidCharge.statusPagamento, 'pago', 'Status deve ser pago');
   assert.strictEqual(paidCharge.paidBy, 'Dr. Financeiro');
   assert.ok(paidCharge.paidAt, 'paidAt deve estar preenchido');
+
+  const logs = billingManager.getLogs(boletoCharge.id);
+  const bajaLog = logs.find(l => l.type === 'baixa_manual');
+  assert.ok(bajaLog, 'Deve existir log do tipo baixa_manual');
+  console.log(`✅ Log de baixa manual registrado: "${bajaLog?.message}"`);
 
   // Re-checa KPIs
   const statsAfterPaid = billingManager.getStats(defaultAgent.id);

@@ -2610,14 +2610,16 @@ apiRouter.post('/api/billing/:id/send', requireAuth, async (req: Request, res: R
  * POST /api/billing/:id/mark-paid
  * Dá baixa manual na cobrança (marca como pago)
  */
-apiRouter.post('/api/billing/:id/mark-paid', requireAuth, (req: Request, res: Response) => {
+apiRouter.post('/api/billing/:id/mark-paid', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { notes, paidMethod } = req.body;
+    const { notes, paidMethod, sendReceiptMessage, customReceiptMessage } = req.body;
     const paidBy = req.user?.name || 'Operador';
-    const updated = billingManager.markAsPaidManual(req.params.id, {
+    const updated = await billingManager.markAsPaidManual(req.params.id, {
       paidBy,
       notes,
-      paidMethod: paidMethod || 'manual'
+      paidMethod: paidMethod || 'manual',
+      sendReceiptMessage: sendReceiptMessage !== false,
+      customReceiptMessage
     });
     res.json({ success: true, message: 'Baixa manual efetuada com sucesso!', charge: updated });
   } catch (err: any) {
