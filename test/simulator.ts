@@ -153,7 +153,9 @@ async function runTests() {
   }
 }
 
-runTests().catch(err => {
+runTests().then(() => {
+  process.exit(0);
+}).catch(err => {
   console.error('❌ Erro durante os testes:', err);
   process.exit(1);
 });

@@ -81,6 +81,7 @@ export interface BotConfig {
   debounceSeconds: number;
   enableTypingSimulation: boolean;
   enableSendSeen: boolean;
+  keepChatUnread?: boolean;
   enableAudioTranscription: boolean;
   pauseDurationHours: number;
   pauseDurationMinutes: number;
@@ -152,6 +153,7 @@ export function loadBotConfig(): BotConfig {
     debounceSeconds: stored.debounceSeconds ?? 2.5,
     enableTypingSimulation: stored.enableTypingSimulation ?? true,
     enableSendSeen: stored.enableSendSeen ?? true,
+    keepChatUnread: stored.keepChatUnread ?? false,
     enableAudioTranscription: stored.enableAudioTranscription ?? false,
     pauseDurationHours: hours,
     pauseDurationMinutes: Math.round(hours * 60),

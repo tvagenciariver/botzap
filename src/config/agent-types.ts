@@ -33,6 +33,7 @@ export interface AgentProfile {
   debounceSeconds: number;
   enableTypingSimulation: boolean;
   enableSendSeen: boolean;
+  keepChatUnread?: boolean; // Manter conversa como não lida no WhatsApp mesmo após o bot iniciar atendimento/responder
   enableAudioTranscription?: boolean;
 
   // Horário Comercial Próprio

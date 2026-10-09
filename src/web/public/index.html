@@ -913,6 +913,10 @@
                             <input type="checkbox" id="modal-agent-seen" checked>
                             <span>Marcar Mensagem como "Lida" (Check Azul)</span>
                           </label>
+                          <label class="switch-row" title="Mantém a conversa com a bolinha verde de não lida no WhatsApp do celular mesmo após o bot iniciar o atendimento e enviar respostas.">
+                            <input type="checkbox" id="modal-agent-keepChatUnread">
+                            <span>🟢 Manter Conversa como "Não Lida" no Celular</span>
+                          </label>
                         </div>
                       </div>
                     </div>
@@ -1171,9 +1175,10 @@
                 </div>
                 <div class="form-group col-4">
                   <label>Experiência de Conversa</label>
-                  <div class="checkbox-group">
+                  <div class="checkbox-group" style="display: flex; flex-direction: column; gap: 8px;">
                     <label><input type="checkbox" id="cfg-typing" name="enableTypingSimulation"> Simular Digitando...</label>
                     <label><input type="checkbox" id="cfg-seen" name="enableSendSeen"> Enviar Visto (Check Azul)</label>
+                    <label title="Mantém a conversa com a bolinha verde de não lida no WhatsApp do celular mesmo após o bot iniciar o atendimento e enviar respostas."><input type="checkbox" id="cfg-keepChatUnread" name="keepChatUnread"> 🟢 Manter Conversa como "Não Lida" no Celular</label>
                   </div>
                 </div>
               </div>

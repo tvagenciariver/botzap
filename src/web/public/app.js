@@ -970,6 +970,9 @@ async function loadConfig(targetAgentId) {
     document.getElementById('cfg-pauseDurationHours').value = pauseHours;
     document.getElementById('cfg-typing').checked = cfg.enableTypingSimulation !== false;
     document.getElementById('cfg-seen').checked = cfg.enableSendSeen !== false;
+    if (document.getElementById('cfg-keepChatUnread')) {
+      document.getElementById('cfg-keepChatUnread').checked = !!cfg.keepChatUnread;
+    }
     if (document.getElementById('cfg-transcribe-audio')) {
       document.getElementById('cfg-transcribe-audio').checked = !!cfg.enableAudioTranscription;
     }
@@ -1020,6 +1023,7 @@ document.getElementById('config-form')?.addEventListener('submit', async (e) => 
     pauseDurationMinutes: Math.round(pauseHours * 60),
     enableTypingSimulation: document.getElementById('cfg-typing').checked,
     enableSendSeen: document.getElementById('cfg-seen').checked,
+    keepChatUnread: document.getElementById('cfg-keepChatUnread') ? document.getElementById('cfg-keepChatUnread').checked : false,
     enableAudioTranscription: document.getElementById('cfg-transcribe-audio') ? document.getElementById('cfg-transcribe-audio').checked : false,
     apiKey: document.getElementById('cfg-apiKey').value,
     openaiApiKey: document.getElementById('cfg-openaiApiKey').value
@@ -1791,6 +1795,7 @@ async function loadChats() {
             ${isPaused 
               ? `<button class="btn btn-secondary btn-sm" onclick="resumeChat('${chat.chatId}')">▶️ Reativar Bot</button>` 
               : `<button class="btn btn-outline btn-sm" onclick="pauseChat('${chat.chatId}')">⏸️ Pausar 6h</button>`}
+            <button class="btn btn-outline btn-sm" title="Marcar como Não Lida no WhatsApp do Celular" onclick="markChatUnreadManual('${chat.chatId}')">🟢 Não Lida</button>
             <button class="btn btn-outline btn-sm" onclick="clearChat('${chat.chatId}')">🗑️ Limpar</button>
           </td>
         </tr>
@@ -1838,6 +1843,20 @@ window.resumeChat = async function(chatId) {
 window.clearChat = async function(chatId) {
   await fetchWithAuth(`/api/chats/${encodeURIComponent(chatId)}/clear`, { method: 'POST' });
   loadChats();
+};
+
+window.markChatUnreadManual = async function(chatId) {
+  try {
+    const res = await fetchWithAuth(`/api/chats/${encodeURIComponent(chatId)}/unread`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('🟢 Conversa marcada como Não Lida no WhatsApp!', 'success');
+    } else {
+      showToast(`Aviso: ${data.message || data.error || 'Falha ao marcar como não lida'}`, 'warning');
+    }
+  } catch (err) {
+    showToast(`Erro ao marcar como não lida: ${err.message}`, 'error');
+  }
 };
 
 // 5. Logs em Tempo Real (Área do Administrador)
@@ -2886,6 +2905,9 @@ function openNewAgentModal() {
   document.getElementById('modal-agent-debounce').value = 2.5;
   document.getElementById('modal-agent-typing').checked = true;
   document.getElementById('modal-agent-seen').checked = true;
+  if (document.getElementById('modal-agent-keepChatUnread')) {
+    document.getElementById('modal-agent-keepChatUnread').checked = false;
+  }
   if (document.getElementById('modal-agent-transcribe-audio')) {
     document.getElementById('modal-agent-transcribe-audio').checked = false;
   }
@@ -2949,6 +2971,9 @@ async function openEditAgentModal(agentId) {
     document.getElementById('modal-agent-debounce').value = agent.debounceSeconds ?? 2.5;
     document.getElementById('modal-agent-typing').checked = agent.enableTypingSimulation !== false;
     document.getElementById('modal-agent-seen').checked = agent.enableSendSeen !== false;
+    if (document.getElementById('modal-agent-keepChatUnread')) {
+      document.getElementById('modal-agent-keepChatUnread').checked = !!agent.keepChatUnread;
+    }
     if (document.getElementById('modal-agent-transcribe-audio')) {
       document.getElementById('modal-agent-transcribe-audio').checked = !!agent.enableAudioTranscription;
     }
@@ -3035,6 +3060,7 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
       debounceSeconds: parseFloat(document.getElementById('modal-agent-debounce').value) || 2.5,
       enableTypingSimulation: document.getElementById('modal-agent-typing').checked,
       enableSendSeen: document.getElementById('modal-agent-seen').checked,
+      keepChatUnread: document.getElementById('modal-agent-keepChatUnread') ? document.getElementById('modal-agent-keepChatUnread').checked : false,
       enableAudioTranscription: document.getElementById('modal-agent-transcribe-audio') ? document.getElementById('modal-agent-transcribe-audio').checked : false,
       businessHours: {
         enabled: document.getElementById('modal-sched-enabled').checked,

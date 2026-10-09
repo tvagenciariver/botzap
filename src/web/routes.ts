@@ -675,6 +675,7 @@ apiRouter.get('/api/config', requireAuth, (req: Request, res: Response) => {
       pauseDurationMinutes: matchedAgent.pauseDurationMinutes ?? safeGlobalConfig.pauseDurationMinutes,
       enableTypingSimulation: matchedAgent.enableTypingSimulation ?? safeGlobalConfig.enableTypingSimulation,
       enableSendSeen: matchedAgent.enableSendSeen ?? safeGlobalConfig.enableSendSeen,
+      keepChatUnread: matchedAgent.keepChatUnread ?? safeGlobalConfig.keepChatUnread ?? false,
       enableAudioTranscription: matchedAgent.enableAudioTranscription ?? safeGlobalConfig.enableAudioTranscription,
       llmProvider: matchedAgent.llmProvider || safeGlobalConfig.llmProvider || 'gemini',
       model: matchedAgent.model || safeGlobalConfig.model || 'gemini-2.5-flash',
@@ -769,6 +770,7 @@ apiRouter.post('/api/config', requireAdmin, (req: Request, res: Response) => {
         pauseDurationMinutes: typeof botSettings.pauseDurationMinutes === 'number' ? botSettings.pauseDurationMinutes : targetAgent.pauseDurationMinutes,
         enableTypingSimulation: botSettings.enableTypingSimulation !== undefined ? !!botSettings.enableTypingSimulation : targetAgent.enableTypingSimulation,
         enableSendSeen: botSettings.enableSendSeen !== undefined ? !!botSettings.enableSendSeen : targetAgent.enableSendSeen,
+        keepChatUnread: botSettings.keepChatUnread !== undefined ? !!botSettings.keepChatUnread : targetAgent.keepChatUnread,
       };
 
       if (botSettings.mediaHandoffMessage !== undefined) {
@@ -964,6 +966,20 @@ apiRouter.post('/api/chats/:chatId/clear', requireModule('chats'), (req: Request
   const { chatId } = req.params;
   memoryStore.clearHistory(chatId);
   res.json({ success: true, chatId, message: 'Histórico limpo com sucesso.' });
+});
+
+/**
+ * 10b. Marcar conversa como não lida no WhatsApp via WAHA
+ */
+apiRouter.post('/api/chats/:chatId/unread', requireModule('chats'), async (req: Request, res: Response) => {
+  const { chatId } = req.params;
+  const session = req.body?.session;
+  try {
+    const success = await wahaClient.markChatUnread(chatId, session);
+    res.json({ success, chatId, message: success ? 'Conversa marcada como não lida no WhatsApp com sucesso.' : 'Aviso ao marcar conversa como não lida na WAHA.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /**

@@ -234,6 +234,57 @@ export class WahaClient {
   }
 
   /**
+   * Marca uma conversa como NÃO LIDA no WhatsApp.
+   * Faz com que o WhatsApp exiba a bolinha verde / badge de mensagem pendente
+   * para atendentes acessando pelo celular ou WhatsApp Web.
+   * Endpoint oficial da WAHA: POST /api/{session}/chats/{chatId}/unread
+   */
+  async markChatUnread(chatId: string, session?: string): Promise<boolean> {
+    if (chatId.includes('@g.us')) {
+      return false;
+    }
+
+    const rawSession = session || this.defaultSession;
+    const sessionName = (rawSession && rawSession !== '*') ? rawSession : (this.defaultSession || 'default');
+    const cleanId = (typeof chatId === 'string' ? chatId : '').trim();
+    if (!cleanId) return false;
+
+    // Tentativa 1: Endpoint oficial WAHA POST /api/{session}/chats/{chatId}/unread
+    try {
+      await this.client.post(`/api/${sessionName}/chats/${cleanId}/unread`, {});
+      console.log(`[WAHA] 🟢 Conversa ${cleanId} marcada como NÃO LIDA na sessão "${sessionName}".`);
+      return true;
+    } catch (err1: any) {
+      // Tentativa 2: Com encodeURIComponent para proteção de rota contra caracteres especiais
+      try {
+        const encId = encodeURIComponent(cleanId);
+        await this.client.post(`/api/${sessionName}/chats/${encId}/unread`, {});
+        console.log(`[WAHA] 🟢 Conversa ${cleanId} marcada como NÃO LIDA (encoded) na sessão "${sessionName}".`);
+        return true;
+      } catch (err2: any) {
+        // Tentativa 3: Rota alternativa global /api/chats/unread com body { session, chatId }
+        try {
+          await this.client.post('/api/chats/unread', { session: sessionName, chatId: cleanId });
+          console.log(`[WAHA] 🟢 Conversa ${cleanId} marcada como NÃO LIDA via rota alternativa.`);
+          return true;
+        } catch {
+          // Tentativa 4: Formato alternativo com/sem 9º dígito brasileiro
+          const altId = getAlternateBrazilianChatId(cleanId);
+          if (altId && altId !== cleanId) {
+            try {
+              await this.client.post(`/api/${sessionName}/chats/${altId}/unread`, {});
+              console.log(`[WAHA] 🟢 Conversa marcada como NÃO LIDA com número alternativo ${altId}!`);
+              return true;
+            } catch {}
+          }
+        }
+        console.warn(`[WAHA] Aviso ao marcar conversa como não lida (${cleanId}):`, this.extractErrorMessage(err1));
+        return false;
+      }
+    }
+  }
+
+  /**
    * Inicia indicador de "Digitando..." no WhatsApp
    */
   async startTyping(chatId: string, session?: string): Promise<void> {

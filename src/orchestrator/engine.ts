@@ -178,6 +178,12 @@ export class AgentOrchestrator {
           reply_to: payload.id
         });
         console.log(`[Orchestrator] 📤 Transcrição do áudio entregue no WhatsApp/Chatwoot com citação direta.`);
+
+        if (agent.keepChatUnread) {
+          setTimeout(() => {
+            wahaClient.markChatUnread(chatId, activeSession).catch(() => {});
+          }, 1200);
+        }
       } catch (sendErr: any) {
         console.warn(`[Orchestrator] Aviso ao enviar citação de transcrição do áudio para ${chatId}:`, sendErr.message);
       }
@@ -667,7 +673,8 @@ export class AgentOrchestrator {
       : ((agent.wahaSession && agent.wahaSession !== '*') ? agent.wahaSession : env.wahaSession);
 
     // 1. Confirmação de leitura (sendSeen) e indicador de digitação (startTyping)
-    if (agent.enableSendSeen !== false) {
+    // Se a opção keepChatUnread estiver ativa, não enviamos sendSeen antecipado para não marcar a mensagem como lida
+    if (agent.enableSendSeen !== false && !agent.keepChatUnread) {
       await wahaClient.sendSeen(chatId, activeSession);
     }
 
@@ -718,6 +725,17 @@ export class AgentOrchestrator {
           agentName: response.agentName || agent.name,
           companyName: agent.companyName || agent.name
         });
+
+        // 5. Se a opção de manter conversa como não lida estiver ativa:
+        // Marca a conversa como NÃO LIDA no WhatsApp via WAHA após o bot responder/iniciar o atendimento.
+        // O delay garante que o WhatsApp registrou a mensagem enviada antes de aplicar o status de não lida.
+        if (agent.keepChatUnread) {
+          setTimeout(() => {
+            wahaClient.markChatUnread(chatId, activeSession).catch(err => {
+              console.warn(`[Orchestrator] Falha ao marcar conversa como não lida (${chatId}):`, err.message);
+            });
+          }, 1200);
+        }
       } else if (response && !response.replyText && response.handled) {
         this.addLog({
           type: 'info',
@@ -728,10 +746,19 @@ export class AgentOrchestrator {
           agentName: response.agentName || agent.name,
           companyName: agent.companyName || agent.name
         });
+
+        if (agent.keepChatUnread) {
+          setTimeout(() => {
+            wahaClient.markChatUnread(chatId, activeSession).catch(() => {});
+          }, 600);
+        }
       }
     } catch (error: any) {
       if (agent.enableTypingSimulation !== false) {
         await wahaClient.stopTyping(chatId, activeSession);
+      }
+      if (agent.keepChatUnread) {
+        wahaClient.markChatUnread(chatId, activeSession).catch(() => {});
       }
       console.error(`[Orchestrator] Falha no processamento de ${chatId}:`, error.message);
       this.addLog({
