@@ -184,6 +184,9 @@ apiRouter.get('/api/auth/me', (req: Request, res: Response) => {
 
 /**
  * 1. Webhook principal da WAHA (universal para todos os clientes ou com sessão na URL)
+ * IMPORTANTE: Para máximo isolamento entre agentes, configure webhooks com URL específica por sessão:
+ *   /webhook/waha/{nome-da-sessao}
+ * Assim o req.params.session terá sempre o valor correto e não depende do corpo do evento.
  */
 apiRouter.post(['/webhook/waha', '/webhook/waha/:session'], async (req: Request, res: Response) => {
   const event: WahaWebhookEvent = req.body;
@@ -195,12 +198,23 @@ apiRouter.post(['/webhook/waha', '/webhook/waha/:session'], async (req: Request,
   try {
     if (event.event === 'message' || event.event === 'message.any') {
       if (event.payload) {
-        const sessionName = req.params.session
-          || (req.query.session as string)
-          || event.session
-          || (event.payload as any)?.session
-          || (event.payload as any)?._data?.session
-          || env.wahaSession;
+        // Resolução em ordem de confiabilidade decrescente:
+        // 1. URL param (:session) — mais confiável: definido no momento do registro do webhook
+        // 2. query string (?session=...)
+        // 3. Corpo do evento (event.session) — depende da WAHA enviar o campo
+        // 4. Sessão padrão global (env.wahaSession) — fallback de último recurso
+        const sessionFromUrl = req.params.session;
+        const sessionFromQuery = req.query.session as string;
+        const sessionFromBody = event.session || (event.payload as any)?.session || (event.payload as any)?._data?.session;
+
+        const sessionName = (sessionFromUrl || sessionFromQuery || sessionFromBody || env.wahaSession || '').trim();
+
+        if (!sessionName) {
+          console.warn('[WAHA Webhook] ⚠️ Evento recebido sem sessão identificada. Usando sessão padrão.');
+        }
+
+        const sessionSource = sessionFromUrl ? 'url' : (sessionFromQuery ? 'query' : (sessionFromBody ? 'body' : 'env_default'));
+        console.log(`[WAHA Webhook] 📩 Evento "${event.event}" recebido | sessão="${sessionName}" (fonte: ${sessionSource}) | evento_id=${(event.payload as any)?.id || '?'}`);
 
         await orchestrator.processIncomingWahaMessage(event.payload, sessionName);
       }

@@ -174,12 +174,15 @@ export class AgentManager {
   /**
    * Resolução contextual inteligente do agente para uma mensagem recebida.
    * Ordem de prioridade estrita:
-   * 1. Sessão exata e não-curinga da WAHA
-   * 2. Menção direta a especialista ativo no corpo do texto (ex: "Dra. Valéria")
-   * 3. Menção direta ao nome da empresa no corpo do texto (ex: "Vale Studio")
-   * 4. Agendamento ativo ou lembrete pendente para este contato (chatId)
-   * 5. Se houver intenção de agendamento e apenas uma empresa ativa com agenda ativada
-   * 6. Fallback padrão por sessão WAHA
+   * 1. Match por número de telefone de destino (recipientPhone / payload.to)
+   * 2. Sessão exata e não-curinga da WAHA
+   *    🔐 BLOQUEIO DE SEGURANÇA: sessão específica sem agente retorna sentinel inativo (descarte)
+   *    Texto/contexto SÓ é avaliado quando a sessão é '*' ou 'default' (curinga).
+   * 3. [Somente curinga] Menção direta a especialista ativo no corpo do texto
+   * 4. [Somente curinga] Menção direta ao nome da empresa no corpo do texto
+   * 5. [Somente curinga] Agendamento ativo ou lembrete pendente para este contato
+   * 6. [Somente curinga] Intenção de agendamento + única empresa com agenda ativada
+   * 7. Fallback padrão por sessão WAHA (apenas para sessão curinga)
    */
   resolveAgentForMessage(params: {
     sessionName?: string;
@@ -218,30 +221,60 @@ export class AgentManager {
 
     // 2. Se a sessão da WAHA é específica (diferente de '*' e 'default'), tenta correspondência direta
     if (cleanSession && cleanSession !== '*' && cleanSession !== 'default') {
+      // A. Match exato de wahaSession
       for (const a of this.agents.values()) {
         if (a.active && a.wahaSession && a.wahaSession.trim().toLowerCase() === cleanSession) {
           return { agent: a, reason: `exact_session (${a.wahaSession})` };
         }
       }
+      // B. Match exato ou por prefixo de id
       for (const a of this.agents.values()) {
-        if (a.active && a.id.toLowerCase() === cleanSession) {
+        if (a.active && (a.id.toLowerCase() === cleanSession || a.id.toLowerCase().startsWith(cleanSession + '-') || cleanSession.startsWith(a.id.toLowerCase() + '-'))) {
           return { agent: a, reason: `id_session (${a.id})` };
         }
       }
+      // C. Match alfanumérico normalizado (ignora hífens, underlines, espaços e acentos)
       const cleanAlpha = cleanSession.replace(/[^a-z0-9]/g, '');
       if (cleanAlpha && cleanAlpha.length >= 3) {
+        // C.1 Com wahaSession cadastrada no agente
+        for (const a of this.agents.values()) {
+          if (a.active && a.wahaSession) {
+            const sessAlpha = a.wahaSession.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (sessAlpha === cleanAlpha) {
+              return { agent: a, reason: `waha_session_normalized (${a.wahaSession})` };
+            }
+          }
+        }
+        // C.2 Com companyName ou nome do agente
         for (const a of this.agents.values()) {
           if (a.active) {
-            const compAlpha = (a.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            if (compAlpha === cleanAlpha) {
-              return { agent: a, reason: `company_name_session (${a.companyName})` };
+            const compAlpha = (a.companyName || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+            const nameAlpha = (a.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+            if (compAlpha === cleanAlpha || nameAlpha === cleanAlpha) {
+              return { agent: a, reason: `company_name_session (${a.companyName || a.name})` };
             }
           }
         }
       }
+
+      // ============================================================
+      // 🔐 BLOQUEIO DE SEGURANÇA ANTI CROSS-CONTAMINATION
+      // Sessão WAHA específica identificada mas sem agente cadastrado correspondente.
+      // NUNCA fazer fallback para o agente padrão — isso causaria o bug crítico
+      // de mensagens de um cliente serem respondidas pelo bot de outro cliente.
+      // Retornamos um sentinel inativo para o orchestrator descartar silenciosamente.
+      // ============================================================
+      console.warn(`[SEGURANÇA][AgentManager] ⚠️ Sessão WAHA "${sessionName}" não possui agente ativo cadastrado. Mensagem de ${chatId || '?'} DESCARTADA (anti cross-contamination).`);
+      return {
+        agent: { id: '__unknown_session__', name: 'Sessão Desconhecida', active: false, isDefault: false, wahaSession: sessionName || '*' } as any,
+        reason: `unknown_session_blocked (${sessionName})`
+      };
     }
 
-    // 2. Detecção por menção a especialista ativo no texto
+    // A partir daqui: sessão é curinga ('*') ou 'default'.
+    // Somente neste caso aplicamos lógica contextual baseada no conteúdo da mensagem.
+
+    // 3. Detecção por menção a especialista ativo no texto
     if (messageText && messageText.length >= 3) {
       const normText = messageText
         .toLowerCase()
@@ -278,7 +311,7 @@ export class AgentManager {
       }
     }
 
-    // 3. Detecção por menção direta ao nome da empresa no texto
+    // 4. Detecção por menção direta ao nome da empresa no texto
     if (messageText && messageText.length >= 3) {
       const normText = messageText
         .toLowerCase()
@@ -305,7 +338,7 @@ export class AgentManager {
       }
     }
 
-    // 4. Detecção por agendamento ativo ou lembrete pendente para este paciente (chatId)
+    // 5. Detecção por agendamento ativo ou lembrete pendente para este paciente (chatId)
     if (chatId) {
       try {
         const aptFile = path.resolve(process.cwd(), 'data', 'appointments.json');
@@ -333,7 +366,7 @@ export class AgentManager {
       }
     }
 
-    // 5. Se houver apenas UMA empresa com agendamento ativo e a mensagem tiver intenção clara de agendamento
+    // 6. Se houver apenas UMA empresa com agendamento ativo e a mensagem tiver intenção clara de agendamento
     if (messageText) {
       const lower = messageText.toLowerCase();
       const isBookingIntent = [
@@ -349,7 +382,7 @@ export class AgentManager {
       }
     }
 
-    // 6. Fallback padrão por sessão WAHA
+    // 7. Fallback padrão por sessão WAHA (apenas para sessão curinga ou 'default')
     const fallbackAgent = this.getAgentBySession(sessionName || 'default');
     return { agent: fallbackAgent, reason: `session_fallback (${sessionName || 'default'})` };
   }

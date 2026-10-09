@@ -93,12 +93,16 @@ app.listen(env.port, async () => {
   // Inicializa a régua de cobrança automática diária (09:00)
   billingScheduler.start();
 
-  // Teste de conexão não-bloqueante com a WAHA
-
+  // Teste de conexão não-bloqueante com a WAHA e sincronização de sessões
   try {
     const status = await wahaClient.getSessionStatus(env.wahaSession);
     if (status) {
       console.log(`[WAHA] Conectado com sucesso! Sessão "${status.name}" está: ${status.status}`);
+      // Sincroniza o cache de sessões e números conectados imediatamente
+      await wahaClient.syncSessionsCache().catch(err => {
+        console.warn('[WAHA] Aviso ao sincronizar cache inicial de sessões:', err.message);
+      });
+
       // Tenta auto-registrar o webhook para a sessão padrão
       const webhookTarget = `${env.webhookPublicUrl}/webhook/waha`;
       await wahaClient.configureWebhook(webhookTarget, env.wahaSession);
@@ -113,6 +117,11 @@ app.listen(env.port, async () => {
     } else {
       console.log(`[WAHA] Aviso: Sessão "${env.wahaSession}" não encontrada ou WAHA inicializando em ${env.wahaBaseUrl}.`);
     }
+
+    // Sincronização periódica do mapa de sessões e telefones da WAHA a cada 5 minutos
+    setInterval(() => {
+      wahaClient.syncSessionsCache().catch(() => {});
+    }, 5 * 60 * 1000);
   } catch (err: any) {
     console.log(`[WAHA] Não foi possível conectar imediatamente à WAHA em ${env.wahaBaseUrl} (${err.message}). O orquestrador continuará operando normalmente.`);
   }

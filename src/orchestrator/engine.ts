@@ -448,8 +448,24 @@ export class AgentOrchestrator {
     });
 
     if (!agent || !agent.active) {
-      console.log(`[Orchestrator] Sessão "${sessionName}" sem agente ativo associado. Ignorando.`);
+      // Verifica se foi um descarte intencional por segurança (sessão desconhecida)
+      if (agent && (agent as any).id === '__unknown_session__') {
+        console.warn(`[SEGURANÇA][Orchestrator] ⛔ Mensagem de sessão WAHA desconhecida "${sessionName}" descartada (anti cross-contamination). chatId=${chatId}`);
+        this.addLog({
+          type: 'warn',
+          chatId,
+          contactName,
+          message: `⛔ [SEGURANÇA] Sessão WAHA desconhecida "${sessionName}" — mensagem descartada para evitar cross-contamination. Configure o agente correto para esta sessão no painel de Agentes.`
+        });
+      } else {
+        console.log(`[Orchestrator] Sessão "${sessionName}" sem agente ativo associado. Ignorando.`);
+      }
       return;
+    }
+
+    // 🔍 LOG DE AUDITORIA: Avisa quando o fallback foi usado (indica configuração incompleta)
+    if (agentReason.startsWith('session_fallback')) {
+      console.warn(`[AUDITORIA][Orchestrator] ⚠️ Agente "${agent.name}" selecionado via FALLBACK para sessão "${sessionName}". Se isso não for esperado, configure o campo "Sessão WAHA" do agente corretamente.`);
     }
 
     console.log(`[Orchestrator] 🏢 Agente selecionado: "${agent.name}" (${agent.companyName} | ID: ${agent.id}) via [${agentReason}] para ${chatId}`);
@@ -667,6 +683,12 @@ export class AgentOrchestrator {
       : agentManager.resolveAgentForMessage({ sessionName, messageText, chatId, contactName });
 
     const agent = resolved.agent;
+
+    // BLOQUEIO DE SEGURANÇA: Se o agente for inativo, desconhecido ou sentinel, aborta imediatamente
+    if (!agent || !agent.active || agent.id === '__unknown_session__') {
+      console.warn(`[SEGURANÇA][Orchestrator] ⛔ Abortando envio pós-debounce para ${chatId}: agente inativo ou não autorizado para sessão "${sessionName}".`);
+      return;
+    }
 
     const activeSession = (sessionName && sessionName !== '*')
       ? sessionName
