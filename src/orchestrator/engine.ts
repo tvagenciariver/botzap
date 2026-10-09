@@ -447,25 +447,15 @@ export class AgentOrchestrator {
       contactName
     });
 
-    if (!agent || !agent.active) {
-      // Verifica se foi um descarte intencional por segurança (sessão desconhecida)
-      if (agent && (agent as any).id === '__unknown_session__') {
-        console.warn(`[SEGURANÇA][Orchestrator] ⛔ Mensagem de sessão WAHA desconhecida "${sessionName}" descartada (anti cross-contamination). chatId=${chatId}`);
-        this.addLog({
-          type: 'warn',
-          chatId,
-          contactName,
-          message: `⛔ [SEGURANÇA] Sessão WAHA desconhecida "${sessionName}" — mensagem descartada para evitar cross-contamination. Configure o agente correto para esta sessão no painel de Agentes.`
-        });
-      } else {
-        console.log(`[Orchestrator] Sessão "${sessionName}" sem agente ativo associado. Ignorando.`);
-      }
+    if (!agent || !agent.active || agent.id === '__unknown_session__' || agent.id === '__no_agent_matched__') {
+      console.warn(`[SEGURANÇA][Orchestrator] ⛔ Mensagem de ${chatId} (sessão: "${sessionName}") DESCARTADA: nenhum agente ativo associado. Fallback desativado por segurança.`);
+      this.addLog({
+        type: 'warn',
+        chatId,
+        contactName,
+        message: `⛔ [SEGURANÇA] Sessão "${sessionName}" sem agente ativo associado — mensagem descartada para evitar respostas indevidas.`
+      });
       return;
-    }
-
-    // 🔍 LOG DE AUDITORIA: Avisa quando o fallback foi usado (indica configuração incompleta)
-    if (agentReason.startsWith('session_fallback')) {
-      console.warn(`[AUDITORIA][Orchestrator] ⚠️ Agente "${agent.name}" selecionado via FALLBACK para sessão "${sessionName}". Se isso não for esperado, configure o campo "Sessão WAHA" do agente corretamente.`);
     }
 
     console.log(`[Orchestrator] 🏢 Agente selecionado: "${agent.name}" (${agent.companyName} | ID: ${agent.id}) via [${agentReason}] para ${chatId}`);
@@ -679,14 +669,14 @@ export class AgentOrchestrator {
     metadata?: any
   ): Promise<void> {
     const resolved = agentId
-      ? { agent: agentManager.getAgent(agentId) || agentManager.getDefaultAgent(), reason: 'debounced_agentId' }
+      ? { agent: agentManager.getAgent(agentId), reason: 'debounced_agentId' }
       : agentManager.resolveAgentForMessage({ sessionName, messageText, chatId, contactName });
 
     const agent = resolved.agent;
 
-    // BLOQUEIO DE SEGURANÇA: Se o agente for inativo, desconhecido ou sentinel, aborta imediatamente
-    if (!agent || !agent.active || agent.id === '__unknown_session__') {
-      console.warn(`[SEGURANÇA][Orchestrator] ⛔ Abortando envio pós-debounce para ${chatId}: agente inativo ou não autorizado para sessão "${sessionName}".`);
+    // BLOQUEIO DE SEGURANÇA: Se o agente for nulo, inativo ou sentinel, aborta imediatamente sem responder
+    if (!agent || !agent.active || agent.id === '__unknown_session__' || agent.id === '__no_agent_matched__') {
+      console.warn(`[SEGURANÇA][Orchestrator] ⛔ Abortando envio pós-debounce para ${chatId}: nenhum agente ativo autorizado para a sessão "${sessionName}".`);
       return;
     }
 

@@ -120,9 +120,10 @@ export class AgentManager {
   }
 
   /**
-   * Encontra o agente correto para a mensagem recebida pelo nome da sessão da WAHA
+   * Encontra o agente correto para a mensagem recebida pelo nome da sessão da WAHA.
+   * Retorna null se não houver agente ativo para esta sessão (zero fallback para default).
    */
-  getAgentBySession(session: string): AgentProfile {
+  getAgentBySession(session: string): AgentProfile | null {
     if (session) {
       const cleanSession = session.trim().toLowerCase();
 
@@ -140,9 +141,15 @@ export class AgentManager {
         }
       }
 
-      // 3. Busca por nome da empresa normalizado (ex: "vale_studio" bate com "Vale Studio")
+      // 3. Busca por nome da empresa ou wahaSession normalizado
       const cleanAlpha = cleanSession.replace(/[^a-z0-9]/g, '');
       if (cleanAlpha && cleanAlpha.length >= 3) {
+        for (const a of this.agents.values()) {
+          if (a.active && a.wahaSession) {
+            const sessAlpha = a.wahaSession.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (sessAlpha === cleanAlpha) return a;
+          }
+        }
         for (const a of this.agents.values()) {
           if (a.active) {
             const compAlpha = (a.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -155,20 +162,8 @@ export class AgentManager {
       }
     }
 
-    // 4. Busca agente curinga (*) - prioriza o padrão se houver
-    const defaultAgent = this.getDefaultAgent();
-    if (defaultAgent && defaultAgent.active && defaultAgent.wahaSession === '*') {
-      return defaultAgent;
-    }
-
-    for (const a of this.agents.values()) {
-      if (a.active && a.wahaSession === '*') {
-        return a;
-      }
-    }
-
-    // 5. Fallback para agente padrão
-    return defaultAgent;
+    // ZERO FALLBACK: Nenhuma correspondência de sessão encontrada
+    return null;
   }
 
   /**
@@ -382,9 +377,19 @@ export class AgentManager {
       }
     }
 
-    // 7. Fallback padrão por sessão WAHA (apenas para sessão curinga ou 'default')
-    const fallbackAgent = this.getAgentBySession(sessionName || 'default');
-    return { agent: fallbackAgent, reason: `session_fallback (${sessionName || 'default'})` };
+    // 7. SEM FALLBACK PARA AGENTE PADRÃO (ZERO CROSS-CONTAMINATION)
+    // Se a mensagem não teve correspondência com nenhum agente ativo,
+    // ela NUNCA deve ser assumida por outro cliente. NENHUM agente responderá.
+    const matchedBySession = sessionName ? this.getAgentBySession(sessionName) : null;
+    if (matchedBySession && matchedBySession.active) {
+      return { agent: matchedBySession, reason: `session_match (${sessionName})` };
+    }
+
+    console.warn(`[SEGURANÇA][AgentManager] ⛔ Mensagem de ${chatId || '?'} (sessão: "${sessionName || 'desconhecida'}") não pertence a nenhum agente ativo. NENHUM agente responderá (fallback padrão desativado).`);
+    return {
+      agent: { id: '__no_agent_matched__', name: 'Nenhum Agente', active: false, isDefault: false, wahaSession: sessionName || '*' } as any,
+      reason: 'no_agent_matched_no_fallback'
+    };
   }
 
   createAgent(data: Partial<AgentProfile>): AgentProfile {
