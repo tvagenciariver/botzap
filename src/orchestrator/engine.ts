@@ -460,6 +460,21 @@ export class AgentOrchestrator {
 
     console.log(`[Orchestrator] 🏢 Agente selecionado: "${agent.name}" (${agent.companyName} | ID: ${agent.id}) via [${agentReason}] para ${chatId}`);
 
+    // 🔇 VERIFICAÇÃO DE NÚMEROS IGNORADOS (COMUNICAÇÃO INTERNA / EQUIPE / SÓCIOS)
+    if (agentManager.isNumberIgnored(agent, chatId)) {
+      console.log(`[Orchestrator] 🔇 Mensagem de ${chatId} ignorada: número cadastrado na lista de comunicação interna do agente [${agent.name}].`);
+      this.addLog({
+        type: 'info',
+        chatId,
+        contactName,
+        message: `🔇 Comunicação interna: mensagem de ${contactName || chatId} ignorada pelo agente [${agent.name}].`,
+        agentId: agent.id,
+        agentName: agent.name,
+        companyName: agent.companyName
+      });
+      return;
+    }
+
     // BLINDAGEM DE SEGURANÇA: Verificar se o agente está globalmente pausado (botão de pânico)
     if (agent.isPausedGlobally) {
       const pausedUntil = agent.pausedGloballyUntil;
@@ -677,6 +692,12 @@ export class AgentOrchestrator {
     // BLOQUEIO DE SEGURANÇA: Se o agente for nulo, inativo ou sentinel, aborta imediatamente sem responder
     if (!agent || !agent.active || agent.id === '__unknown_session__' || agent.id === '__no_agent_matched__') {
       console.warn(`[SEGURANÇA][Orchestrator] ⛔ Abortando envio pós-debounce para ${chatId}: nenhum agente ativo autorizado para a sessão "${sessionName}".`);
+      return;
+    }
+
+    // 🔇 VERIFICAÇÃO DE NÚMEROS IGNORADOS (COMUNICAÇÃO INTERNA)
+    if (agentManager.isNumberIgnored(agent, chatId)) {
+      console.log(`[Orchestrator] 🔇 Cancelando envio pós-debounce para ${chatId}: número na lista de comunicação interna do agente [${agent.name}].`);
       return;
     }
 

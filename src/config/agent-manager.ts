@@ -481,6 +481,9 @@ export class AgentManager {
       enableSendSeen: data.enableSendSeen !== false,
       keepChatUnread: !!data.keepChatUnread,
       enableAudioTranscription: !!data.enableAudioTranscription,
+      ignoredNumbers: Array.isArray(data.ignoredNumbers)
+        ? data.ignoredNumbers.map(n => String(n).trim().replace(/\D/g, '')).filter(n => n.length >= 8)
+        : [],
       enableBooking: !!data.enableBooking,
       enableAutoReminders: data.enableAutoReminders !== false,
       autoReminderTime: data.autoReminderTime || '18:00',
@@ -517,6 +520,12 @@ export class AgentManager {
       updates.phoneNumber = updates.phoneNumber ? updates.phoneNumber.trim() : undefined;
     }
 
+    if (updates.ignoredNumbers !== undefined) {
+      updates.ignoredNumbers = Array.isArray(updates.ignoredNumbers)
+        ? updates.ignoredNumbers.map(n => String(n).trim().replace(/\D/g, '')).filter(n => n.length >= 8)
+        : [];
+    }
+
     if (updates.pauseDurationHours !== undefined) {
       updates.pauseDurationMinutes = Math.round(updates.pauseDurationHours * 60);
     }
@@ -531,6 +540,49 @@ export class AgentManager {
     this.agents.set(id, updated);
     this.saveToDisk();
     return updated;
+  }
+
+  /**
+   * Verifica se determinado número/chatId está na lista de números ignorados do agente (comunicação interna/equipe/sócios)
+   */
+  isNumberIgnored(agent: AgentProfile | null | undefined, rawPhoneOrChatId: string): boolean {
+    if (!agent || !agent.ignoredNumbers || !Array.isArray(agent.ignoredNumbers) || agent.ignoredNumbers.length === 0) {
+      return false;
+    }
+    if (!rawPhoneOrChatId) return false;
+
+    const incomingDigits = rawPhoneOrChatId.replace(/:\d+@/, '@').replace(/\D/g, '');
+    if (incomingDigits.length < 8) return false;
+
+    // Normalização sem 9º dígito (para DDDs brasileiros)
+    const incomingWithout9 = incomingDigits.length === 13 && incomingDigits.startsWith('55')
+      ? incomingDigits.slice(0, 4) + incomingDigits.slice(5)
+      : (incomingDigits.length === 11 ? incomingDigits.slice(0, 2) + incomingDigits.slice(3) : incomingDigits);
+
+    for (const rawIgnored of agent.ignoredNumbers) {
+      if (!rawIgnored) continue;
+      const ignDigits = String(rawIgnored).replace(/\D/g, '');
+      if (ignDigits.length < 8) continue;
+
+      // 1. Match exato nos dígitos
+      if (incomingDigits === ignDigits) return true;
+
+      // 2. Match de terminação (com/sem DDI 55 ou DDD)
+      if (incomingDigits.endsWith(ignDigits) || ignDigits.endsWith(incomingDigits)) {
+        return true;
+      }
+
+      // 3. Match considerando variação com/sem 9º dígito brasileiro
+      const ignWithout9 = ignDigits.length === 13 && ignDigits.startsWith('55')
+        ? ignDigits.slice(0, 4) + ignDigits.slice(5)
+        : (ignDigits.length === 11 ? ignDigits.slice(0, 2) + ignDigits.slice(3) : ignDigits);
+
+      if (incomingWithout9 === ignWithout9 || incomingWithout9.endsWith(ignWithout9) || ignWithout9.endsWith(incomingWithout9)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   duplicateAgent(id: string): AgentProfile {

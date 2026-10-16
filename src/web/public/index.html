@@ -732,6 +732,23 @@
                       </div>
                     </div>
 
+                    <div class="form-row" style="margin-top: 15px;">
+                      <div class="form-group col-12">
+                        <div style="padding: 14px 18px; background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.28); border-radius: 8px;">
+                          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                            <label for="modal-agent-ignoredNumbers" style="font-weight: 600; color: #f59e0b; display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px;">
+                              <span>🔇 Números Ignorados (Comunicação Interna / Equipe / Sócios)</span>
+                              <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; font-size: 11px;">Silêncio Total</span>
+                            </label>
+                          </div>
+                          <textarea id="modal-agent-ignoredNumbers" rows="3" class="form-control" placeholder="Cole os números aqui (um por linha ou separados por vírgula):&#10;5587999991234&#10;87988887777&#10;5587991234567"></textarea>
+                          <small class="form-hint" style="color: var(--text-muted); margin-top: 6px; display: block;">
+                            O bot <strong>nunca responderá</strong> a mensagens vindas desses números (não envia respostas, não digita e não marca como lida), permitindo conversas internas entre sua equipe, diretores ou fornecedores sem intervenção do robô.
+                          </small>
+                        </div>
+                      </div>
+                    </div>
+
                     <div class="agent-toggles-grid" style="margin-top: 25px;">
                       <label class="setting-toggle-card">
                         <input type="checkbox" id="modal-agent-active" checked>

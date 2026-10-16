@@ -2922,6 +2922,9 @@ function openNewAgentModal() {
   if (document.getElementById('modal-agent-phoneNumber')) {
     document.getElementById('modal-agent-phoneNumber').value = '';
   }
+  if (document.getElementById('modal-agent-ignoredNumbers')) {
+    document.getElementById('modal-agent-ignoredNumbers').value = '';
+  }
   document.getElementById('modal-agent-description').value = '';
   document.getElementById('modal-agent-active').checked = true;
   document.getElementById('modal-agent-isDefault').checked = false;
@@ -2989,6 +2992,9 @@ async function openEditAgentModal(agentId) {
     document.getElementById('modal-agent-session').value = agent.wahaSession || '';
     if (document.getElementById('modal-agent-phoneNumber')) {
       document.getElementById('modal-agent-phoneNumber').value = agent.phoneNumber || '';
+    }
+    if (document.getElementById('modal-agent-ignoredNumbers')) {
+      document.getElementById('modal-agent-ignoredNumbers').value = Array.isArray(agent.ignoredNumbers) ? agent.ignoredNumbers.join('\n') : '';
     }
     document.getElementById('modal-agent-description').value = agent.description || '';
     document.getElementById('modal-agent-active').checked = agent.active !== false;
@@ -3134,11 +3140,18 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
     const keywordsRaw = document.getElementById('modal-agent-handoffKeywords').value;
     const keywords = keywordsRaw.split(',').map(k => k.trim()).filter(k => k.length > 0);
 
+    const ignoredRaw = document.getElementById('modal-agent-ignoredNumbers')?.value || '';
+    const ignoredNumbers = ignoredRaw
+      .split(/[\n,;]+/)
+      .map(n => n.trim().replace(/\D/g, ''))
+      .filter(n => n.length >= 8);
+
     const payload = {
       name: document.getElementById('modal-agent-name').value.trim(),
       companyName: document.getElementById('modal-agent-company').value.trim(),
       wahaSession: document.getElementById('modal-agent-session').value.trim(),
       phoneNumber: (document.getElementById('modal-agent-phoneNumber')?.value || '').trim() || undefined,
+      ignoredNumbers,
       description: document.getElementById('modal-agent-description').value.trim(),
       active: document.getElementById('modal-agent-active').checked,
       isDefault: document.getElementById('modal-agent-isDefault').checked,

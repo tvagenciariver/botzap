@@ -35,6 +35,7 @@ export interface AgentProfile {
   enableSendSeen: boolean;
   keepChatUnread?: boolean; // Manter conversa como não lida no WhatsApp mesmo após o bot iniciar atendimento/responder
   enableAudioTranscription?: boolean;
+  ignoredNumbers?: string[]; // Lista de números de telefone ignorados pelo bot (comunicação interna/equipe/sócios)
 
   // Horário Comercial Próprio
   businessHours: BusinessHoursConfig;
