@@ -2845,27 +2845,75 @@ function closeAgentModal() {
   if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-async function populateAgentSessionDatalist() {
-  const datalist = document.getElementById('modal-agent-session-list');
-  if (!datalist) return;
+let wahaSessionsCache = [];
+
+async function populateAgentSessionSelect(selectedSession = '') {
+  const sel = document.getElementById('modal-agent-session-select');
+  const inputEl = document.getElementById('modal-agent-session');
+  if (!sel) return;
+
+  sel.innerHTML = '<option value="">⏳ Carregando sessões ativas da WAHA...</option>';
+
   try {
     const res = await fetchWithAuth('/api/waha/sessions');
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data.sessions)) {
-        datalist.innerHTML = data.sessions.map(s => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)} (${s.status || 'Ativa'})</option>`).join('');
+      const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+      wahaSessionsCache = sessions;
+
+      if (sessions.length === 0) {
+        sel.innerHTML = '<option value="">⚠️ Nenhuma sessão encontrada na WAHA</option>';
+        return;
       }
+
+      let optionsHtml = '<option value="">-- Escolha uma Sessão Ativa da WAHA --</option>';
+      for (const s of sessions) {
+        const name = s.name || '';
+        const pushName = s.pushName || s.me?.pushName || '';
+        const phone = s.phoneNumber || (s.me?.id ? String(s.me.id).replace(/\D/g, '') : '');
+        const status = s.status || 'UNKNOWN';
+        const isWorking = status === 'WORKING';
+        const icon = isWorking ? '🟢' : (status === 'FAILED' ? '🔴' : '🟡');
+
+        let label = `${icon} ${name}`;
+        if (pushName) label += ` — ${pushName}`;
+        if (phone) label += ` (📱 ${phone})`;
+        label += ` [${status}]`;
+
+        const isSelected = selectedSession && selectedSession === name;
+        optionsHtml += `<option value="${escapeHtml(name)}" data-pushname="${escapeHtml(pushName)}" data-phone="${escapeHtml(phone)}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+      }
+
+      optionsHtml += '<option value="__custom__">✏️ Digitar manualmente outro nome de sessão...</option>';
+      sel.innerHTML = optionsHtml;
+
+      // Se havia uma sessão selecionada, define o select
+      if (selectedSession) {
+        if (sessions.some(s => s.name === selectedSession)) {
+          sel.value = selectedSession;
+        } else {
+          sel.value = '__custom__';
+        }
+      }
+    } else {
+      sel.innerHTML = '<option value="">Não foi possível carregar sessões da WAHA</option>';
     }
   } catch (e) {
-    // silencia erro de rede
+    sel.innerHTML = '<option value="">Erro ao carregar sessões da WAHA</option>';
   }
+}
+
+// Alias para compatibilidade
+function populateAgentSessionDatalist() {
+  const curVal = document.getElementById('modal-agent-session')?.value || '';
+  populateAgentSessionSelect(curVal);
 }
 
 function openNewAgentModal() {
   document.getElementById('modal-agent-id').value = '';
   document.getElementById('agent-modal-title').textContent = '➕ Criar Novo Agente / Cliente';
   document.getElementById('agent-modal-subtitle').textContent = 'Defina os dados, IA, prompts e horários exclusivos deste cliente com amplo conforto.';
-  populateAgentSessionDatalist();
+  populateAgentSessionSelect('');
 
   // Default values
   document.getElementById('modal-agent-name').value = '';
@@ -2925,11 +2973,12 @@ function openNewAgentModal() {
 
 async function openEditAgentModal(agentId) {
   try {
-    populateAgentSessionDatalist();
     const res = await fetchWithAuth(`/api/agents/${agentId}`);
     const data = await res.json();
     const agent = data.agent;
     if (!agent) throw new Error('Agente não encontrado.');
+
+    populateAgentSessionSelect(agent.wahaSession || '');
 
     document.getElementById('modal-agent-id').value = agent.id;
     document.getElementById('agent-modal-title').textContent = `✏️ Editando Agente: ${agent.name}`;
@@ -2996,6 +3045,56 @@ document.getElementById('btn-create-agent')?.addEventListener('click', openNewAg
 document.getElementById('btn-back-to-agents')?.addEventListener('click', closeAgentModal);
 document.getElementById('btn-cancel-agent-top')?.addEventListener('click', closeAgentModal);
 document.getElementById('btn-cancel-agent-bottom')?.addEventListener('click', closeAgentModal);
+
+// Listener para seleção de sessão da WAHA no modal
+document.getElementById('modal-agent-session-select')?.addEventListener('change', (e) => {
+  const sel = e.target;
+  const val = sel.value;
+  const inputEl = document.getElementById('modal-agent-session');
+  const phoneEl = document.getElementById('modal-agent-phoneNumber');
+  const compEl = document.getElementById('modal-agent-company');
+
+  if (!val || val === '__custom__') {
+    if (val === '__custom__') inputEl?.focus();
+    return;
+  }
+
+  if (inputEl) inputEl.value = val;
+
+  const opt = sel.selectedOptions[0];
+  if (opt) {
+    const phone = opt.getAttribute('data-phone');
+    const pushName = opt.getAttribute('data-pushname');
+
+    if (phone && phoneEl && !phoneEl.value.trim()) {
+      phoneEl.value = phone;
+    }
+    if (pushName && compEl && !compEl.value.trim()) {
+      compEl.value = pushName;
+    }
+  }
+});
+
+// Botão de atualizar sessões da WAHA
+document.getElementById('btn-refresh-agent-sessions')?.addEventListener('click', async () => {
+  const currentVal = document.getElementById('modal-agent-session')?.value || '';
+  showToast('Consultando sessões ativas na WAHA...', 'info');
+  await populateAgentSessionSelect(currentVal);
+  showToast('Lista de sessões atualizada com sucesso!', 'success');
+});
+
+// Sincronização se o usuário digitar manualmente no input
+document.getElementById('modal-agent-session')?.addEventListener('input', (e) => {
+  const val = e.target.value.trim();
+  const sel = document.getElementById('modal-agent-session-select');
+  if (!sel) return;
+  const matchOpt = Array.from(sel.options).find(o => o.value === val);
+  if (matchOpt) {
+    sel.value = val;
+  } else if (val) {
+    sel.value = '__custom__';
+  }
+});
 
 // Salvar Agente no Formulário (Top ou Bottom)
 document.getElementById('agent-modal-form')?.addEventListener('submit', async (e) => {

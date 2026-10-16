@@ -8,6 +8,7 @@ export class WahaClient {
   private client!: AxiosInstance;
   private defaultSession!: string;
   private sessionPhoneMap: Map<string, string> = new Map();
+  private sessionToPhoneMap: Map<string, string> = new Map();
   private sessionPushNameMap: Map<string, string> = new Map();
   private lastSessionSyncAt: number = 0;
 
@@ -332,7 +333,7 @@ export class WahaClient {
   /**
    * Lista todas as sessões ativas na WAHA e atualiza o mapa de telefones conectados
    */
-  async listSessions(): Promise<WahaSessionStatus[]> {
+  async listSessions(): Promise<any[]> {
     try {
       const response = await this.client.get('/api/sessions');
       const sessions = Array.isArray(response.data) ? response.data : [];
@@ -343,19 +344,60 @@ export class WahaClient {
         if (s.me?.pushName) {
           this.sessionPushNameMap.set(s.name, s.me.pushName);
         }
+
+        let phoneClean = '';
         if (s.me?.id) {
           const rawId = String(s.me.id);
-          const clean = rawId.replace(/:\d+@/, '@').replace(/\D/g, '');
-          if (clean.length >= 8) {
-            this.sessionPhoneMap.set(clean, s.name);
+          phoneClean = rawId.replace(/:\d+@/, '@').replace(/\D/g, '');
+        }
+
+        // Se a sessão não tiver me.id (ex: conectando), tenta extrair telefone do nome da sessão (padrão Chatwoot: id_inbox_telefone)
+        if (!phoneClean || phoneClean.length < 8) {
+          const parts = s.name.split('_');
+          const lastPart = parts[parts.length - 1];
+          if (lastPart && /^\d{10,13}$/.test(lastPart)) {
+            phoneClean = lastPart;
           }
         }
+
+        if (phoneClean && phoneClean.length >= 8) {
+          this.sessionPhoneMap.set(phoneClean, s.name);
+          this.sessionToPhoneMap.set(s.name, phoneClean);
+          (s as any).phoneNumber = phoneClean;
+        }
+
+        (s as any).pushName = s.me?.pushName || '';
       }
       this.lastSessionSyncAt = Date.now();
       return sessions;
     } catch (error: any) {
       return [];
     }
+  }
+
+  /**
+   * Obtém o PushName (nome amigável no WhatsApp) associado à sessão da WAHA
+   */
+  getPushNameBySession(sessionName: string): string | undefined {
+    if (!sessionName) return undefined;
+    return this.sessionPushNameMap.get(sessionName);
+  }
+
+  /**
+   * Obtém o número de telefone do chip conectado na sessão da WAHA
+   */
+  getPhoneNumberBySession(sessionName: string): string | undefined {
+    if (!sessionName) return undefined;
+    if (this.sessionToPhoneMap.has(sessionName)) {
+      return this.sessionToPhoneMap.get(sessionName);
+    }
+    // Fallback: se o nome da sessão contém o telefone no final (ex: 6_14_5587991252580)
+    const parts = sessionName.split('_');
+    const lastPart = parts[parts.length - 1];
+    if (lastPart && /^\d{10,13}$/.test(lastPart)) {
+      return lastPart;
+    }
+    return undefined;
   }
 
   /**

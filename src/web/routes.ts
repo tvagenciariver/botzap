@@ -937,6 +937,18 @@ apiRouter.post('/api/waha/setup-webhook', requireAdmin, async (req: Request, res
 });
 
 /**
+ * 8.1 Listar sessões ativas da WAHA em tempo real para seleção visual nos agentes
+ */
+apiRouter.get('/api/waha/sessions', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const sessions = await wahaClient.listSessions();
+    res.json({ success: true, sessions });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, sessions: [] });
+  }
+});
+
+/**
  * 7. Listar conversas ativas
  */
 apiRouter.get('/api/chats', requireModule('chats'), (_req: Request, res: Response) => {

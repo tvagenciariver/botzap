@@ -252,6 +252,54 @@ export class AgentManager {
         }
       }
 
+      // D. Match pelo número de telefone embutido no nome da sessão da WAHA (ex: "6_14_5587991252580" -> "5587991252580")
+      const sessionParts = cleanSession.split('_');
+      const lastSessionPart = sessionParts[sessionParts.length - 1];
+      const embeddedDigits = (lastSessionPart && /^\d{8,14}$/.test(lastSessionPart))
+        ? lastSessionPart
+        : (cleanSession.match(/\d{10,14}/)?.[0] || '');
+
+      if (embeddedDigits && embeddedDigits.length >= 8) {
+        for (const a of this.agents.values()) {
+          if (a.active && a.phoneNumber) {
+            const agentDigits = a.phoneNumber.replace(/\D/g, '');
+            if (agentDigits.length >= 8 && (embeddedDigits.endsWith(agentDigits) || agentDigits.endsWith(embeddedDigits))) {
+              return { agent: a, reason: `session_embedded_phone (${embeddedDigits} -> ${a.companyName})` };
+            }
+          }
+        }
+      }
+
+      // E. Match pelo telefone conectado da sessão obtido da WAHA
+      const wahaConnectedPhone = wahaClient.getPhoneNumberBySession(cleanSession);
+      if (wahaConnectedPhone && wahaConnectedPhone.length >= 8) {
+        for (const a of this.agents.values()) {
+          if (a.active && a.phoneNumber) {
+            const agentDigits = a.phoneNumber.replace(/\D/g, '');
+            if (agentDigits.length >= 8 && (wahaConnectedPhone.endsWith(agentDigits) || agentDigits.endsWith(wahaConnectedPhone))) {
+              return { agent: a, reason: `waha_session_connected_phone (${wahaConnectedPhone} -> ${a.companyName})` };
+            }
+          }
+        }
+      }
+
+      // F. Match pelo PushName da conta conectada na WAHA para esta sessão (ex: "Aviva Sport")
+      const sessionPushName = wahaClient.getPushNameBySession(cleanSession);
+      if (sessionPushName) {
+        const pushAlpha = sessionPushName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+        if (pushAlpha && pushAlpha.length >= 3) {
+          for (const a of this.agents.values()) {
+            if (a.active) {
+              const compAlpha = (a.companyName || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+              const nameAlpha = (a.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+              if (compAlpha === pushAlpha || nameAlpha === pushAlpha || (pushAlpha.length >= 5 && (compAlpha.includes(pushAlpha) || pushAlpha.includes(compAlpha)))) {
+                return { agent: a, reason: `waha_session_pushname (${sessionPushName} -> ${a.companyName})` };
+              }
+            }
+          }
+        }
+      }
+
       // ============================================================
       // 🔐 BLOQUEIO DE SEGURANÇA ANTI CROSS-CONTAMINATION
       // Sessão WAHA específica identificada mas sem agente cadastrado correspondente.

@@ -704,11 +704,18 @@
 
                     <div class="form-row" style="margin-top: 15px;">
                       <div class="form-group col-6">
-                        <label for="modal-agent-session">Sessão da WAHA Vinculada *</label>
-                        <input type="text" id="modal-agent-session" class="form-control" list="modal-agent-session-list" placeholder="Ex: vale_studio, unimagem ou default">
-                        <datalist id="modal-agent-session-list"></datalist>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                          <label for="modal-agent-session-select" style="margin: 0; font-weight: 600;">Sessão da WAHA Vinculada *</label>
+                          <button type="button" id="btn-refresh-agent-sessions" class="btn btn-sm btn-outline" style="padding: 2px 8px; font-size: 11px;" title="Buscar sessões ativas diretamente na WAHA">
+                            🔄 Atualizar Sessões
+                          </button>
+                        </div>
+                        <select id="modal-agent-session-select" class="form-control" style="margin-bottom: 8px;">
+                          <option value="">-- Selecione uma sessão da WAHA --</option>
+                        </select>
+                        <input type="text" id="modal-agent-session" class="form-control form-control-sm" placeholder="Nome exato da sessão (ex: 6_14_5587991252580)">
                         <small class="form-hint">
-                          Identificador da sessão da WAHA correspondente a este número/empresa.
+                          Selecione a sessão no menu acima. O nome técnico e o número do chip serão vinculados automaticamente para isolamento absoluto.
                         </small>
                       </div>
                       <div class="form-group col-6">
