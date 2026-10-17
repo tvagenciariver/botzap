@@ -27,15 +27,12 @@ services:
   # Banco de Dados Relacional PostgreSQL (ACID)
   postgres:
     image: postgres:16-alpine
-    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-botzap}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-da5507d4f8eb04d894ebfe62a494eaf6}
       POSTGRES_DB: ${POSTGRES_DB:-botzap}
     volumes:
       - botzap_postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     deploy:
       replicas: 1
       restart_policy:
