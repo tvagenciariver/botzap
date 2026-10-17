@@ -1110,6 +1110,15 @@ apiRouter.post('/api/agents', requireAdmin, (req: Request, res: Response) => {
       wahaClient.configureWebhook(webhookTarget, created.wahaSession).catch(err => {
         console.warn(`[WAHA] Aviso ao auto-configurar webhook para sessão "${created.wahaSession}":`, err.message);
       });
+      // Sincronização proativa de LIDs da sessão
+      setTimeout(async () => {
+        try {
+          await wahaClient.syncSessionLids(created.wahaSession);
+          for (const num of created.ignoredNumbers || []) {
+            await wahaClient.resolvePhoneToLid(num, created.wahaSession).catch(() => null);
+          }
+        } catch {}
+      }, 500);
     }
 
     res.status(201).json({ success: true, agent: sanitizeAgentProfile(created) });
@@ -1154,6 +1163,15 @@ apiRouter.put('/api/agents/:id', requireAdmin, (req: Request, res: Response) => 
       wahaClient.configureWebhook(webhookTarget, updated.wahaSession).catch(err => {
         console.warn(`[WAHA] Aviso ao auto-configurar webhook para sessão "${updated.wahaSession}":`, err.message);
       });
+      // Sincronização proativa de LIDs da sessão e dos números ignorados
+      setTimeout(async () => {
+        try {
+          await wahaClient.syncSessionLids(updated.wahaSession);
+          for (const num of updated.ignoredNumbers || []) {
+            await wahaClient.resolvePhoneToLid(num, updated.wahaSession).catch(() => null);
+          }
+        } catch {}
+      }, 500);
     }
 
     res.json({ success: true, agent: sanitizeAgentProfile(updated) });

@@ -92,4 +92,18 @@ const matchD1 = agentManager.isNumberIgnored(agentWithPhone, '5587999990000@c.us
 console.log('Match D1 (Número de cliente não ignorado):', matchD1);
 if (matchD1) throw new Error('Falha no Match D1: cliente real não pode ser ignorado!');
 
+// Cenário E: Teste de isNumberIgnoredAsync quando o mapeamento ainda não está em cache
+const agentE: AgentProfile = {
+  id: 'avi-a2o1',
+  name: 'Aviva Sport',
+  companyName: 'Aviva Sport',
+  active: true,
+  isDefault: false,
+  ignoredNumbers: ['87988177877', '+5587988177877', '5587988177877']
+} as any;
+
+const matchE1 = await agentManager.isNumberIgnoredAsync(agentE, '62887095701679@lid');
+console.log('Match E1 (isNumberIgnoredAsync com LID mapeado e lista de telefones):', matchE1);
+if (!matchE1) throw new Error('Falha no Match E1: isNumberIgnoredAsync deve retornar true!');
+
 console.log('\n🎉 TODOS OS TESTES PASSARAM COM 100% DE SUCESSO!');

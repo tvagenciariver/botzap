@@ -493,6 +493,227 @@ export class WahaClient {
   }
 
   /**
+   * Sincroniza todos os mapeamentos LID <-> Telefone da sessão via endpoint oficial WAHA:
+   * GET /api/{session}/lids?limit=500
+   */
+  async syncSessionLids(session?: string): Promise<{ lid: string; pn: string }[]> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    try {
+      const res = await this.client.get(`/api/${sessionName}/lids`, {
+        params: { limit: 500 },
+        timeout: 4000
+      });
+      if (Array.isArray(res.data) && res.data.length > 0) {
+        let count = 0;
+        for (const item of res.data) {
+          if (item && item.lid && item.pn) {
+            lidMapper.register(item.lid, item.pn);
+            count++;
+          }
+        }
+        if (count > 0) {
+          console.log(`[WAHA] 🔄 Sincronizados ${count} mapeamentos LID <-> Telefone da sessão "${sessionName}".`);
+        }
+        return res.data;
+      }
+    } catch (err: any) {
+      // Ignora silenciosamente se o endpoint de lids não estiver disponível na versão
+    }
+    return [];
+  }
+
+  /**
+   * Resolve um identificador @lid para o telefone real (@c.us) utilizando a API oficial de LIDs da WAHA:
+   * 1. Cache do lidMapper
+   * 2. GET /api/{session}/lids/{lid}
+   * 3. Sincronização geral GET /api/{session}/lids
+   * 4. GET /api/contacts?contactId={lid}
+   * 5. GET /api/{session}/contacts/{lid}
+   * 6. Busca em lista de contatos (/api/contacts/all)
+   */
+  async resolveLidToPhone(lid: string, session?: string): Promise<string | null> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    let cleanId = (typeof lid === 'string' ? lid : '').trim();
+    if (!cleanId) return null;
+
+    if (cleanId.includes(':') && cleanId.includes('@')) {
+      cleanId = cleanId.replace(/:\d+@/, '@');
+    }
+
+    if (!cleanId.endsWith('@lid') && !cleanId.includes('@')) {
+      cleanId = `${cleanId}@lid`;
+    }
+
+    // 1. Verifica cache local do lidMapper
+    const cached = lidMapper.getPhone(cleanId);
+    if (cached) return cached;
+
+    const lidDigits = cleanId.replace(/\D/g, '');
+    if (lidDigits) {
+      const cachedDigits = lidMapper.getPhone(`${lidDigits}@lid`);
+      if (cachedDigits) return cachedDigits;
+    }
+
+    const encId = encodeURIComponent(cleanId);
+
+    // 2. Endpoint nativo oficial WAHA: GET /api/{session}/lids/{lid}
+    try {
+      const res = await this.client.get(`/api/${sessionName}/lids/${encId}`, { timeout: 3000 });
+      if (res.data?.pn) {
+        const pnStr = String(res.data.pn);
+        const resolved = pnStr.endsWith('@c.us') ? pnStr : `${pnStr.replace(/\D/g, '')}@c.us`;
+        lidMapper.register(cleanId, resolved);
+        console.log(`[WAHA] 🔍 Resolvido LID ${cleanId} -> ${resolved} via /api/${sessionName}/lids/{lid}`);
+        return resolved;
+      }
+    } catch {
+      // continua
+    }
+
+    // 3. Tentativa com dígitos puros
+    try {
+      const res = await this.client.get(`/api/${sessionName}/lids/${lidDigits}`, { timeout: 3000 });
+      if (res.data?.pn) {
+        const pnStr = String(res.data.pn);
+        const resolved = pnStr.endsWith('@c.us') ? pnStr : `${pnStr.replace(/\D/g, '')}@c.us`;
+        lidMapper.register(cleanId, resolved);
+        console.log(`[WAHA] 🔍 Resolvido LID ${cleanId} -> ${resolved} via /api/${sessionName}/lids/${lidDigits}`);
+        return resolved;
+      }
+    } catch {
+      // continua
+    }
+
+    // 4. Sincroniza a tabela completa de LIDs da sessão
+    try {
+      await this.syncSessionLids(sessionName);
+      const afterSync = lidMapper.getPhone(cleanId) || (lidDigits ? lidMapper.getPhone(`${lidDigits}@lid`) : undefined);
+      if (afterSync) {
+        console.log(`[WAHA] 🔍 Recuperado ${cleanId} -> ${afterSync} após syncSessionLids`);
+        return afterSync;
+      }
+    } catch {
+      // continua
+    }
+
+    // 5. Endpoint de contatos: GET /api/contacts?contactId={cleanId}&session={session}
+    try {
+      const res = await this.client.get('/api/contacts', {
+        params: { contactId: cleanId, session: sessionName },
+        timeout: 3000
+      });
+      const data = res.data;
+      if (data) {
+        const cand = data.number || data.id?.user || (typeof data.id === 'string' && data.id.endsWith('@c.us') ? data.id : null) || data.pn;
+        if (cand) {
+          const digits = String(cand).replace(/\D/g, '');
+          if (digits.length >= 10 && digits.length <= 13) {
+            const resolved = `${digits.startsWith('55') ? digits : '55' + digits}@c.us`;
+            lidMapper.register(cleanId, resolved);
+            return resolved;
+          }
+        }
+      }
+    } catch {
+      // continua
+    }
+
+    // 6. Endpoint de contatos por path: GET /api/{session}/contacts/{encId}
+    try {
+      const res = await this.client.get(`/api/${sessionName}/contacts/${encId}`, { timeout: 3000 });
+      const data = res.data;
+      if (data) {
+        const cand = data.number || data.id?.user || (typeof data.id === 'string' && data.id.endsWith('@c.us') ? data.id : null) || data.pn;
+        if (cand) {
+          const digits = String(cand).replace(/\D/g, '');
+          if (digits.length >= 10 && digits.length <= 13) {
+            const resolved = `${digits.startsWith('55') ? digits : '55' + digits}@c.us`;
+            lidMapper.register(cleanId, resolved);
+            return resolved;
+          }
+        }
+      }
+    } catch {
+      // continua
+    }
+
+    // 7. Busca iterativa em todos os contatos da sessão
+    try {
+      const contacts = await this.getContacts(sessionName);
+      for (const c of contacts) {
+        if (!c) continue;
+        const cLid = (c.lid || (typeof c.id === 'string' && c.id.endsWith('@lid') ? c.id : ''));
+        if (cLid && (cLid === cleanId || cLid.replace(/\D/g, '') === lidDigits)) {
+          const cand = c.number || (typeof c.id === 'string' && c.id.endsWith('@c.us') ? c.id : null);
+          if (cand) {
+            const digits = String(cand).replace(/\D/g, '');
+            if (digits.length >= 10 && digits.length <= 13) {
+              const resolved = `${digits.startsWith('55') ? digits : '55' + digits}@c.us`;
+              lidMapper.register(cleanId, resolved);
+              console.log(`[WAHA] 🔍 Encontrado contato para LID ${cleanId}: ${resolved}`);
+              return resolved;
+            }
+          }
+        }
+      }
+    } catch {
+      // continua
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve um número de telefone (@c.us) para seu identificador @lid correspondente:
+   * 1. Cache do lidMapper
+   * 2. GET /api/{session}/lids/pn/{phoneNumber}
+   * 3. Variação com/sem 9º dígito brasileiro
+   */
+  async resolvePhoneToLid(phone: string, session?: string): Promise<string | null> {
+    const sessionName = (session && session !== '*') ? session : (this.defaultSession || 'default');
+    const cleanDigits = String(phone || '').replace(/\D/g, '');
+    if (cleanDigits.length < 8) return null;
+
+    const fullCUs = `${cleanDigits.startsWith('55') ? cleanDigits : '55' + cleanDigits}@c.us`;
+
+    // 1. Cache do lidMapper
+    const cached = lidMapper.getLid(fullCUs) || lidMapper.getLid(cleanDigits);
+    if (cached) return cached;
+
+    // 2. Query WAHA GET /api/{session}/lids/pn/{phoneNumber}
+    const candidates = [
+      cleanDigits,
+      fullCUs,
+      cleanDigits.startsWith('55') ? cleanDigits.slice(2) : cleanDigits,
+      cleanDigits.startsWith('55') ? cleanDigits : `55${cleanDigits}`
+    ];
+
+    // Variação do 9º dígito
+    const alt = getAlternateBrazilianChatId(fullCUs);
+    if (alt) {
+      candidates.push(alt.replace(/\D/g, ''));
+      candidates.push(alt);
+    }
+
+    for (const cand of candidates) {
+      try {
+        const res = await this.client.get(`/api/${sessionName}/lids/pn/${encodeURIComponent(cand)}`, { timeout: 3000 });
+        if (res.data?.lid) {
+          const lidStr = String(res.data.lid);
+          const resolvedLid = lidStr.endsWith('@lid') ? lidStr : `${lidStr.replace(/\D/g, '')}@lid`;
+          lidMapper.register(resolvedLid, fullCUs);
+          console.log(`[WAHA] 🔍 Resolvido Telefone ${cand} -> LID ${resolvedLid} via /api/${sessionName}/lids/pn/`);
+          return resolvedLid;
+        }
+      } catch {
+        // continua
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Obtém mensagens recentes de um chat ou grupo para captura de notifyName / pushName
    */
   async getChatMessages(chatId: string, limit: number = 100, session?: string): Promise<any[]> {

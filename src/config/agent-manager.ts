@@ -681,6 +681,92 @@ export class AgentManager {
     return false;
   }
 
+  /**
+   * Versão assíncrona com consulta ativa à WAHA:
+   * 1. Executa verificação síncrona imediata via isNumberIgnored.
+   * 2. Se for um @lid e ainda não tiver mapeamento, consulta resolveLidToPhone(rawPhoneOrChatId, sessionName).
+   * 3. Para cada número na lista de ignorados, consulta resolvePhoneToLid(ignoredPhone, sessionName).
+   * 4. Se ainda não resolveu, sincroniza a tabela de LIDs da WAHA e reavalia.
+   */
+  async isNumberIgnoredAsync(
+    agent: AgentProfile | null | undefined,
+    rawPhoneOrChatId: string,
+    sessionName?: string
+  ): Promise<boolean> {
+    if (!agent || !agent.ignoredNumbers || !Array.isArray(agent.ignoredNumbers) || agent.ignoredNumbers.length === 0) {
+      return false;
+    }
+    if (!rawPhoneOrChatId) return false;
+
+    // 1. Verificação síncrona rápida
+    if (this.isNumberIgnored(agent, rawPhoneOrChatId)) {
+      return true;
+    }
+
+    const session = (sessionName && sessionName !== '*')
+      ? sessionName
+      : (agent.wahaSession && agent.wahaSession !== '*' ? agent.wahaSession : 'default');
+
+    let target = String(rawPhoneOrChatId).trim();
+    if (target.includes(':')) {
+      const colonIdx = target.indexOf(':');
+      const atIdx = target.indexOf('@');
+      if (colonIdx !== -1 && atIdx !== -1 && colonIdx < atIdx) {
+        const prefix = target.substring(0, colonIdx);
+        if (!/^\d+$/.test(prefix)) {
+          target = target.substring(colonIdx + 1).trim();
+        }
+      }
+    }
+
+    // 2. Se o target for LID, tenta resolver ativamente via WAHA API
+    if (target.includes('@lid')) {
+      try {
+        const resolvedPhone = await wahaClient.resolveLidToPhone(target, session);
+        if (resolvedPhone) {
+          if (this.isNumberIgnored(agent, resolvedPhone)) {
+            return true;
+          }
+        }
+      } catch {
+        // continua
+      }
+    }
+
+    // 3. Tenta resolver na WAHA os telefones da lista de ignorados para seus respectivos @lid
+    for (const rawIgnored of agent.ignoredNumbers) {
+      if (!rawIgnored) continue;
+      const cleanIgnored = sanitizeIgnoredNumber(rawIgnored) || String(rawIgnored).trim();
+      if (!cleanIgnored || cleanIgnored.includes('@lid')) continue;
+
+      const digits = cleanIgnored.replace(/\D/g, '');
+      if (digits.length >= 8 && digits.length <= 13) {
+        try {
+          const mappedLid = await wahaClient.resolvePhoneToLid(digits, session);
+          if (mappedLid) {
+            if (this.isNumberIgnored(agent, rawPhoneOrChatId)) {
+              return true;
+            }
+          }
+        } catch {
+          // continua
+        }
+      }
+    }
+
+    // 4. Sincroniza a tabela inteira de LIDs da sessão e retesta
+    try {
+      await wahaClient.syncSessionLids(session);
+      if (this.isNumberIgnored(agent, rawPhoneOrChatId)) {
+        return true;
+      }
+    } catch {
+      // continua
+    }
+
+    return false;
+  }
+
   duplicateAgent(id: string): AgentProfile {
     const source = this.agents.get(id);
     if (!source) {

@@ -323,34 +323,48 @@ export class AgentOrchestrator {
     // Se o chatId veio no formato @lid (Linked Device), traduz para o chatId do telefone real (@c.us)
     if (chatId && chatId.endsWith('@lid')) {
       const originalLid = chatId;
-      const rawCandidate = payload._data?.senderPn ||
-        payload._data?.key?.senderPn ||
-        payload.senderPn ||
-        payload.key?.senderPn ||
-        payload._data?.author ||
-        payload._data?.key?.participant ||
-        payload._data?.id?.participant ||
-        payload._data?.participant ||
-        payload.author ||
-        payload.participant ||
-        payload._data?.contact?.number ||
-        payload._data?.contact?.id ||
-        payload._data?.sender?.id ||
-        payload._data?.sender?.phone ||
-        payload.pn ||
-        payload._data?.pn ||
-        payload.replyTo?.participant ||
-        payload._data?.from;
+
+      const candidates = [
+        payload._data?.senderPn,
+        payload._data?.key?.senderPn,
+        payload.senderPn,
+        payload.key?.senderPn,
+        payload._data?.contact?.number,
+        payload._data?.contact?.id,
+        payload._data?.sender?.id,
+        payload._data?.sender?.phone,
+        payload.pn,
+        payload._data?.pn,
+        payload.fromNumber,
+        payload._data?.fromNumber,
+        payload._data?.authorNumber,
+        payload.participantPn,
+        payload.authorPn,
+        payload._data?.participantPn,
+        payload.replyTo?.participant,
+        payload._data?.key?.participant,
+        payload._data?.id?.participant,
+        payload._data?.participant,
+        payload.author,
+        payload.participant,
+        payload._data?.from,
+        payload.from,
+        payload.to
+      ];
 
       let realPhone = '';
-      if (rawCandidate) {
+      for (const rawCandidate of candidates) {
+        if (!rawCandidate) continue;
         const candidateStr = String(rawCandidate).trim();
+        if (candidateStr.endsWith('@lid')) continue; // Pula identificadores que sejam LIDs
         if (candidateStr.endsWith('@c.us') || candidateStr.endsWith('@s.whatsapp.net')) {
           realPhone = candidateStr;
-        } else if (!candidateStr.endsWith('@lid')) {
+          break;
+        } else {
           const digits = candidateStr.replace(/\D/g, '');
           if (digits.length >= 10 && digits.length <= 13) {
             realPhone = `${digits.startsWith('55') ? digits : '55' + digits}@c.us`;
+            break;
           }
         }
       }
@@ -367,7 +381,7 @@ export class AgentOrchestrator {
         if (cleanReal.endsWith('@s.whatsapp.net')) {
           cleanReal = cleanReal.replace('@s.whatsapp.net', '@c.us');
         }
-        console.log(`[Orchestrator] Mapeado chatId LID ${originalLid} para telefone real: ${cleanReal}`);
+        console.log(`[Orchestrator] Mapeado chatId LID ${originalLid} para telefone real via payload: ${cleanReal}`);
         lidMapper.register(originalLid, cleanReal);
         chatId = cleanReal;
       } else {
@@ -378,21 +392,14 @@ export class AgentOrchestrator {
         } else {
           // Consulta ativa na WAHA para resolver o LID para telefone real
           try {
-            const contact = await wahaClient.getContact(originalLid, sessionName);
-            if (contact) {
-              const candidateNum = contact.number || contact.id?.user || contact.id;
-              if (candidateNum && typeof candidateNum === 'string') {
-                const digits = candidateNum.replace(/\D/g, '');
-                if (digits.length >= 10 && digits.length <= 13) {
-                  const resolvedReal = `${digits.startsWith('55') ? digits : '55' + digits}@c.us`;
-                  console.log(`[Orchestrator] 🔍 Resolvido LID ${originalLid} para telefone real via WAHA getContact: ${resolvedReal}`);
-                  lidMapper.register(originalLid, resolvedReal);
-                  chatId = resolvedReal;
-                }
-              }
+            const resolvedFromWaha = await wahaClient.resolveLidToPhone(originalLid, sessionName);
+            if (resolvedFromWaha) {
+              console.log(`[Orchestrator] 🔍 Resolvido LID ${originalLid} para telefone real via WAHA API: ${resolvedFromWaha}`);
+              lidMapper.register(originalLid, resolvedFromWaha);
+              chatId = resolvedFromWaha;
             }
           } catch (err: any) {
-            console.warn(`[Orchestrator] Não foi possível resolver LID ${originalLid} via WAHA getContact:`, err.message);
+            console.warn(`[Orchestrator] Não foi possível resolver LID ${originalLid} via WAHA API:`, err.message);
           }
         }
       }
@@ -480,7 +487,10 @@ export class AgentOrchestrator {
     console.log(`[Orchestrator] 🏢 Agente selecionado: "${agent.name}" (${agent.companyName} | ID: ${agent.id}) via [${agentReason}] para ${chatId}`);
 
     // 🔇 VERIFICAÇÃO DE NÚMEROS IGNORADOS (COMUNICAÇÃO INTERNA / EQUIPE / SÓCIOS)
-    if (agentManager.isNumberIgnored(agent, chatId)) {
+    const isIgnoredIncoming = agentManager.isNumberIgnored(agent, chatId) ||
+      await agentManager.isNumberIgnoredAsync(agent, chatId, sessionName);
+
+    if (isIgnoredIncoming) {
       console.log(`[Orchestrator] 🔇 Mensagem de ${chatId} ignorada: número cadastrado na lista de comunicação interna do agente [${agent.name}].`);
       this.addLog({
         type: 'info',
@@ -715,7 +725,10 @@ export class AgentOrchestrator {
     }
 
     // 🔇 VERIFICAÇÃO DE NÚMEROS IGNORADOS (COMUNICAÇÃO INTERNA)
-    if (agentManager.isNumberIgnored(agent, chatId)) {
+    const isIgnoredDebounced = agentManager.isNumberIgnored(agent, chatId) ||
+      await agentManager.isNumberIgnoredAsync(agent, chatId, sessionName);
+
+    if (isIgnoredDebounced) {
       console.log(`[Orchestrator] 🔇 Cancelando envio pós-debounce para ${chatId}: número na lista de comunicação interna do agente [${agent.name}].`);
       return;
     }
