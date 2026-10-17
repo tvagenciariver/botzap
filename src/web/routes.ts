@@ -29,6 +29,7 @@ import { billingScheduler } from '../billing/billing-scheduler.js';
 import { customerManager } from '../billing/customer-manager.js';
 import { CreateBillingDTO, BillingFilter, CreateCustomerDTO, UpdateCustomerDTO, CustomerFilter } from '../billing/types.js';
 import { UserSession, AppModule } from '../auth/user-types.js';
+import { isDatabaseConnected } from '../database/db.js';
 
 declare global {
   namespace Express {
@@ -341,9 +342,14 @@ apiRouter.get('/api/status', requireAuth, async (req: Request, res: Response) =>
 
   res.json({
     orchestrator: 'online',
-    version: '2.8.6',
-    build: '2026-09-18-R2-RECURRENT-BILLING',
-    buildDate: '2026.09.18',
+    version: '2.9.0',
+    build: '2026-10-16-POSTGRESQL-ACID',
+    buildDate: '2026.10.16',
+    database: {
+      type: 'PostgreSQL',
+      connected: isDatabaseConnected(),
+      status: isDatabaseConnected() ? 'connected' : 'offline_fallback'
+    },
     timestamp: new Date().toISOString(),
     agentsCount: {
       total: allAgents.length,

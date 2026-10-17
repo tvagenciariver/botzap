@@ -711,6 +711,18 @@ async function checkStatus() {
       const buildTag = document.getElementById('footer-build-tag');
       if (buildTag) buildTag.textContent = `build ${data.buildDate}`;
     }
+    // Indicador dinâmico do Banco de Dados PostgreSQL
+    const footerDbText = document.getElementById('footer-db-text');
+    const footerDbStatus = document.getElementById('footer-db-status');
+    if (data.database && footerDbText && footerDbStatus) {
+      if (data.database.connected) {
+        footerDbStatus.style.color = '#10b981';
+        footerDbText.textContent = 'PostgreSQL Conectado';
+      } else {
+        footerDbStatus.style.color = '#f59e0b';
+        footerDbText.textContent = 'PostgreSQL Offline (Modo Local)';
+      }
+    }
     if (typeof updatePanicButtonVisibility === 'function') {
       updatePanicButtonVisibility();
     }

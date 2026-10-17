@@ -76,7 +76,7 @@ app.get('*', (_req, res) => {
 app.listen(env.port, async () => {
   const config = loadBotConfig();
   console.log('\n======================================================');
-  console.log('🤖 BotZap v2.8.6 [Build 2026-09-18-R2-RECURRENT-BILLING]');
+  console.log('🤖 BotZap v2.9.0 [Build 2026-10-16-POSTGRESQL-ACID]');
   console.log('   Orquestrador de Agentes IA (WAHA + Gemini Flash)');
   console.log('======================================================');
   console.log(`🌐 Servidor rodando em: http://localhost:${env.port}`);
