@@ -5,6 +5,7 @@ import { matchPhoneOrChatId } from './phone-utils.js';
 import { isHolidayDate } from '../orchestrator/schedule-helper.js';
 import { agentManager } from '../config/agent-manager.js';
 import { loadBotConfig } from '../config/index.js';
+import { query, isDatabaseConnected } from '../database/db.js';
 
 export class AppointmentManager {
   private appointmentsFile: string;
@@ -40,7 +41,7 @@ export class AppointmentManager {
       }
     } else {
       this.specialists = this.getSeedSpecialists();
-      this.saveSpecialists();
+      this.saveSpecialistsLocal();
     }
 
     // 2. Carrega ou inicializa Serviços
@@ -54,7 +55,7 @@ export class AppointmentManager {
       }
     } else {
       this.services = this.getSeedServices();
-      this.saveServices();
+      this.saveServicesLocal();
     }
 
     // 3. Carrega Agendamentos
@@ -68,11 +69,94 @@ export class AppointmentManager {
       }
     } else {
       this.appointments = this.getSeedAppointments();
-      this.saveAppointments();
+      this.saveAppointmentsLocal();
     }
   }
 
-  private saveAppointments(): void {
+  /**
+   * Sincroniza especialistas, serviços e agendamentos com o PostgreSQL
+   */
+  async syncWithDatabase(): Promise<void> {
+    if (!isDatabaseConnected()) return;
+    try {
+      // 1. Especialistas
+      const specRes = await query('SELECT * FROM specialists ORDER BY name ASC');
+      if (specRes.rows && specRes.rows.length > 0) {
+        this.specialists = specRes.rows.map(r => ({
+          id: r.id,
+          agentId: r.agent_id,
+          name: r.name,
+          role: r.role,
+          phone: r.phone || '',
+          email: r.email || undefined,
+          avatar: r.avatar || undefined,
+          workingDays: Array.isArray(r.working_days) ? r.working_days : (typeof r.working_days === 'string' ? JSON.parse(r.working_days) : []),
+          workHoursStart: r.work_hours_start || '08:00',
+          workHoursEnd: r.work_hours_end || '18:00',
+          breakStart: r.break_start || undefined,
+          breakEnd: r.break_end || undefined,
+          slotDurationMinutes: parseInt(r.slot_duration_minutes, 10) || 30,
+          serviceIds: Array.isArray(r.service_ids) ? r.service_ids : (typeof r.service_ids === 'string' ? JSON.parse(r.service_ids) : []),
+          active: r.active !== false,
+          createdAt: r.created_at || new Date().toISOString()
+        }));
+        this.saveSpecialistsLocal();
+      }
+
+      // 2. Serviços
+      const srvRes = await query('SELECT * FROM services ORDER BY name ASC');
+      if (srvRes.rows && srvRes.rows.length > 0) {
+        this.services = srvRes.rows.map(r => ({
+          id: r.id,
+          agentId: r.agent_id,
+          name: r.name,
+          description: r.description || undefined,
+          durationMinutes: parseInt(r.duration_minutes, 10) || 30,
+          price: r.price ? parseFloat(r.price) : undefined,
+          active: r.active !== false,
+          createdAt: r.created_at || new Date().toISOString()
+        }));
+        this.saveServicesLocal();
+      }
+
+      // 3. Agendamentos
+      const aptRes = await query('SELECT * FROM appointments ORDER BY date DESC, start_time ASC');
+      if (aptRes.rows && aptRes.rows.length > 0) {
+        this.appointments = aptRes.rows.map(r => ({
+          id: r.id,
+          agentId: r.agent_id,
+          specialistId: r.specialist_id,
+          specialistName: r.specialist_name || '',
+          specialistRole: r.specialist_role || '',
+          serviceId: r.service_id || undefined,
+          serviceName: r.service_name || '',
+          clientChatId: r.client_chat_id || '',
+          clientPhone: r.client_phone || '',
+          clientName: r.client_name || '',
+          clientCpf: r.client_cpf || undefined,
+          date: r.date,
+          startTime: r.start_time,
+          endTime: r.end_time,
+          status: r.status as AppointmentStatus,
+          notes: r.notes || undefined,
+          notifiedSpecialist: !!r.notified_specialist,
+          notifiedAt: r.notified_at || undefined,
+          reminderSent: !!r.reminder_sent,
+          reminderSentAt: r.reminder_sent_at || undefined,
+          bookedVia: (r.booked_via || 'manual') as any,
+          createdAt: r.created_at || new Date().toISOString(),
+          updatedAt: r.updated_at || new Date().toISOString()
+        }));
+        this.saveAppointmentsLocal();
+      }
+
+      console.log(`[AppointmentManager] 🐘 Sincronizados do PostgreSQL: ${this.specialists.length} especialistas, ${this.services.length} serviços, ${this.appointments.length} agendamentos.`);
+    } catch (err: any) {
+      console.warn('[AppointmentManager] Falha ao sincronizar dados com PostgreSQL:', err.message);
+    }
+  }
+
+  private saveAppointmentsLocal(): void {
     try {
       fs.writeFileSync(this.appointmentsFile, JSON.stringify(this.appointments, null, 2), 'utf-8');
     } catch (err) {
@@ -80,7 +164,7 @@ export class AppointmentManager {
     }
   }
 
-  private saveSpecialists(): void {
+  private saveSpecialistsLocal(): void {
     try {
       fs.writeFileSync(this.specialistsFile, JSON.stringify(this.specialists, null, 2), 'utf-8');
     } catch (err) {
@@ -88,11 +172,94 @@ export class AppointmentManager {
     }
   }
 
-  private saveServices(): void {
+  private saveServicesLocal(): void {
     try {
       fs.writeFileSync(this.servicesFile, JSON.stringify(this.services, null, 2), 'utf-8');
     } catch (err) {
       console.error('[AppointmentManager] Falha ao salvar services.json:', err);
+    }
+  }
+
+  private saveAppointments(): void {
+    this.saveAppointmentsLocal();
+    if (isDatabaseConnected()) {
+      for (const a of this.appointments) {
+        query(
+          `INSERT INTO appointments (
+            id, agent_id, specialist_id, specialist_name, specialist_role, service_id, service_name,
+            client_chat_id, client_phone, client_name, client_cpf, date, start_time, end_time,
+            status, notes, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          ON CONFLICT (id) DO UPDATE SET
+            status = EXCLUDED.status,
+            notes = EXCLUDED.notes,
+            updated_at = EXCLUDED.updated_at;`,
+          [
+            a.id, a.agentId, a.specialistId, a.specialistName || '', a.specialistRole || '',
+            a.serviceId || '', a.serviceName || '', a.clientChatId || '', a.clientPhone || '',
+            a.clientName || '', a.clientCpf || '', a.date, a.startTime, a.endTime,
+            a.status, a.notes || '', a.createdAt || new Date().toISOString(), a.updatedAt || new Date().toISOString()
+          ]
+        ).catch(err => console.warn('[AppointmentManager] Erro ao salvar agendamento no PostgreSQL:', err.message));
+      }
+    }
+  }
+
+  private saveSpecialists(): void {
+    this.saveSpecialistsLocal();
+    if (isDatabaseConnected()) {
+      for (const s of this.specialists) {
+        query(
+          `INSERT INTO specialists (
+            id, agent_id, name, role, phone, email, avatar, working_days,
+            work_hours_start, work_hours_end, break_start, break_end,
+            slot_duration_minutes, service_ids, active, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            role = EXCLUDED.role,
+            phone = EXCLUDED.phone,
+            email = EXCLUDED.email,
+            avatar = EXCLUDED.avatar,
+            working_days = EXCLUDED.working_days,
+            work_hours_start = EXCLUDED.work_hours_start,
+            work_hours_end = EXCLUDED.work_hours_end,
+            break_start = EXCLUDED.break_start,
+            break_end = EXCLUDED.break_end,
+            slot_duration_minutes = EXCLUDED.slot_duration_minutes,
+            service_ids = EXCLUDED.service_ids,
+            active = EXCLUDED.active;`,
+          [
+            s.id, s.agentId, s.name, s.role, s.phone || '', s.email || '', s.avatar || '',
+            JSON.stringify(s.workingDays || []), s.workHoursStart || '08:00', s.workHoursEnd || '18:00',
+            s.breakStart || '', s.breakEnd || '', s.slotDurationMinutes || 30,
+            JSON.stringify(s.serviceIds || []), s.active !== false, s.createdAt || new Date().toISOString()
+          ]
+        ).catch(err => console.warn('[AppointmentManager] Erro ao salvar especialista no PostgreSQL:', err.message));
+      }
+    }
+  }
+
+  private saveServices(): void {
+    this.saveServicesLocal();
+    if (isDatabaseConnected()) {
+      for (const s of this.services) {
+        query(
+          `INSERT INTO services (
+            id, agent_id, name, description, duration_minutes, price, active, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            description = EXCLUDED.description,
+            duration_minutes = EXCLUDED.duration_minutes,
+            price = EXCLUDED.price,
+            active = EXCLUDED.active;`,
+          [
+            s.id, s.agentId, s.name, s.description || '', s.durationMinutes || 30,
+            s.price || 0, s.active !== false, s.createdAt || new Date().toISOString()
+          ]
+        ).catch(err => console.warn('[AppointmentManager] Erro ao salvar serviço no PostgreSQL:', err.message));
+      }
     }
   }
 

@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { UserProfile, UserSession, AppModule } from './user-types.js';
 import { loadBotConfig, env } from '../config/index.js';
+import { query, isDatabaseConnected } from '../database/db.js';
 
 export class UserManager {
   private usersFile: string;
@@ -17,6 +18,34 @@ export class UserManager {
 
     this.usersFile = path.join(dataDir, 'users.json');
     this.loadUsers();
+  }
+
+  /**
+   * Sincroniza usuários com o PostgreSQL
+   */
+  async syncWithDatabase(): Promise<void> {
+    if (!isDatabaseConnected()) return;
+    try {
+      const res = await query('SELECT * FROM users ORDER BY created_at ASC');
+      if (res.rows && res.rows.length > 0) {
+        this.users = res.rows.map(row => ({
+          id: row.id,
+          username: row.username,
+          password: row.password,
+          name: row.name,
+          role: row.role,
+          assignedAgentId: row.assigned_agent_id || '*',
+          allowedModules: Array.isArray(row.allowed_modules) ? row.allowed_modules : (typeof row.allowed_modules === 'string' ? JSON.parse(row.allowed_modules) : []),
+          active: row.active !== false,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
+        }));
+        console.log(`[UserManager] 🐘 Sincronizados ${this.users.length} usuário(s) diretamente do PostgreSQL.`);
+        this.saveUsers();
+      }
+    } catch (err: any) {
+      console.warn('[UserManager] Falha ao sincronizar usuários com PostgreSQL:', err.message);
+    }
   }
 
   private loadUsers(): void {
@@ -157,6 +186,27 @@ export class UserManager {
     this.users.push(newUser);
     this.saveUsers();
 
+    if (isDatabaseConnected()) {
+      query(
+        `INSERT INTO users (id, username, password, name, role, assigned_agent_id, allowed_modules, active, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (id) DO UPDATE SET
+          username = EXCLUDED.username,
+          password = EXCLUDED.password,
+          name = EXCLUDED.name,
+          role = EXCLUDED.role,
+          assigned_agent_id = EXCLUDED.assigned_agent_id,
+          allowed_modules = EXCLUDED.allowed_modules,
+          active = EXCLUDED.active,
+          updated_at = EXCLUDED.updated_at;`,
+        [
+          newUser.id, newUser.username, newUser.password, newUser.name, newUser.role,
+          newUser.assignedAgentId || '*', JSON.stringify(newUser.allowedModules || []),
+          newUser.active !== false, newUser.createdAt, newUser.updatedAt
+        ]
+      ).catch(err => console.warn('[UserManager] Erro ao salvar usuário no PostgreSQL:', err.message));
+    }
+
     const { password, ...safe } = newUser;
     return safe;
   }
@@ -196,6 +246,20 @@ export class UserManager {
     this.users[idx] = updatedUser;
     this.saveUsers();
 
+    if (isDatabaseConnected()) {
+      query(
+        `UPDATE users SET
+          username = $1, password = $2, name = $3, role = $4,
+          assigned_agent_id = $5, allowed_modules = $6, active = $7, updated_at = $8
+         WHERE id = $9;`,
+        [
+          updatedUser.username, updatedUser.password, updatedUser.name, updatedUser.role,
+          updatedUser.assignedAgentId || '*', JSON.stringify(updatedUser.allowedModules || []),
+          updatedUser.active !== false, updatedUser.updatedAt, id
+        ]
+      ).catch(err => console.warn('[UserManager] Erro ao atualizar usuário no PostgreSQL:', err.message));
+    }
+
     const { password, ...safe } = updatedUser;
     return safe;
   }
@@ -216,6 +280,10 @@ export class UserManager {
     this.users = this.users.filter(u => u.id !== id);
     if (this.users.length !== initialLen) {
       this.saveUsers();
+      if (isDatabaseConnected()) {
+        query('DELETE FROM users WHERE id = $1;', [id])
+          .catch(err => console.warn('[UserManager] Erro ao excluir usuário no PostgreSQL:', err.message));
+      }
       return true;
     }
     return false;

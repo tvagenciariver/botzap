@@ -4,6 +4,8 @@ import { AgentProfile } from './agent-types.js';
 import { loadBotConfig, defaultBusinessHours } from './index.js';
 import { wahaClient } from '../waha/client.js';
 import { lidMapper, matchPhoneOrChatId, getAllChatIdAliases } from '../appointments/phone-utils.js';
+import { getAllAgentsFromDb, saveAgentToDb, deleteAgentFromDb } from '../database/agent-repository.js';
+import { isDatabaseConnected } from '../database/db.js';
 
 const agentsFilePath = path.resolve(process.cwd(), 'data', 'agents.json');
 
@@ -12,6 +14,29 @@ export class AgentManager {
 
   constructor() {
     this.loadFromDisk();
+  }
+
+  /**
+   * Sincroniza a memória com o banco de dados relacional PostgreSQL
+   */
+  async syncWithDatabase(): Promise<void> {
+    if (!isDatabaseConnected()) return;
+    try {
+      const dbAgents = await getAllAgentsFromDb();
+      if (dbAgents && dbAgents.length > 0) {
+        this.agents.clear();
+        for (const a of dbAgents) {
+          if (a && a.id) {
+            this.agents.set(a.id, a);
+          }
+        }
+        console.log(`[AgentManager] 🐘 Sincronizados ${this.agents.size} agente(s) diretamente do PostgreSQL.`);
+        // Atualiza espelho local atômico
+        this.saveToDisk();
+      }
+    } catch (err: any) {
+      console.warn('[AgentManager] Falha ao sincronizar agentes com PostgreSQL:', err.message);
+    }
   }
 
   private loadFromDisk(): void {
@@ -550,6 +575,10 @@ export class AgentManager {
 
     this.agents.set(newAgent.id, newAgent);
     this.saveToDisk();
+    // Persistência transacional no PostgreSQL
+    saveAgentToDb(newAgent).catch(err => {
+      console.warn(`[AgentManager] Aviso ao persistir novo agente no PostgreSQL:`, err.message);
+    });
     return newAgent;
   }
 
@@ -612,6 +641,10 @@ export class AgentManager {
 
     this.agents.set(id, updated);
     this.saveToDisk();
+    // Persistência transacional no PostgreSQL
+    saveAgentToDb(updated).catch(err => {
+      console.warn(`[AgentManager] Aviso ao sincronizar atualização no PostgreSQL:`, err.message);
+    });
     return updated;
   }
 
@@ -903,6 +936,9 @@ export class AgentManager {
 
     this.agents.delete(id);
     this.saveToDisk();
+    deleteAgentFromDb(id).catch(err => {
+      console.warn(`[AgentManager] Aviso ao excluir agente "${id}" do PostgreSQL:`, err.message);
+    });
     return true;
   }
 }

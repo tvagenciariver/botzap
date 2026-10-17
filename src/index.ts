@@ -11,6 +11,11 @@ import { reminderScheduler } from './appointments/reminder-scheduler.js';
 import { blastScheduler } from './blast/blast-scheduler.js';
 import { billingScheduler } from './billing/billing-scheduler.js';
 import { agentManager } from './config/agent-manager.js';
+import { userManager } from './auth/user-manager.js';
+import { appointmentManager } from './appointments/appointment-manager.js';
+import { memoryStore } from './gemini/memory.js';
+import { initDatabase } from './database/db.js';
+import { migrateJsonToPostgres } from './database/migrations.js';
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -83,6 +88,21 @@ app.listen(env.port, async () => {
   console.log(`⏰ Lembretes Automáticos D-1: ${config.enableAutoReminders !== false ? `Ativo às ${config.autoReminderTime || '18:00'} ✅` : 'Desativado ❌'}`);
   console.log(`💳 Régua de Cobrança Diária: Ativa às ${(config as any).billingScheduler?.targetTime || '09:00'} ✅`);
   console.log('======================================================\n');
+
+  // Inicialização e Sincronização do Banco de Dados Relacional PostgreSQL (ACID)
+  try {
+    const dbOk = await initDatabase();
+    if (dbOk) {
+      await migrateJsonToPostgres();
+      await agentManager.syncWithDatabase();
+      await userManager.syncWithDatabase();
+      await appointmentManager.syncWithDatabase();
+      await memoryStore.syncWithDatabase();
+      console.log('[PostgreSQL] 🚀 Todos os dados críticos (agentes, prompts, usuários, consultas) sincronizados com sucesso.');
+    }
+  } catch (dbErr: any) {
+    console.warn('[PostgreSQL] Aviso na sincronização inicial do banco de dados:', dbErr.message);
+  }
 
   // Inicializa o agendador automático em segundo plano para lembretes D-1
   reminderScheduler.start();

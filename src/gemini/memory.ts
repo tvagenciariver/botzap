@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getAllChatIdAliases } from '../appointments/phone-utils.js';
+import { query, isDatabaseConnected } from '../database/db.js';
 
 export interface ChatMessage {
   role: 'user' | 'model';
@@ -28,6 +29,35 @@ export class MemoryStore {
 
   constructor() {
     this.loadFromDisk();
+  }
+
+  /**
+   * Sincroniza sessões de chat com o PostgreSQL
+   */
+  async syncWithDatabase(): Promise<void> {
+    if (!isDatabaseConnected()) return;
+    try {
+      const res = await query('SELECT * FROM chat_sessions ORDER BY last_message_at DESC LIMIT 500');
+      if (res.rows && res.rows.length > 0) {
+        for (const row of res.rows) {
+          const key = row.chat_id;
+          this.sessions.set(key, {
+            chatId: row.chat_id,
+            agentId: row.agent_id || 'default',
+            contactName: row.contact_name || undefined,
+            isPaused: !!row.is_paused,
+            pausedUntil: row.paused_until ? Number(row.paused_until) : undefined,
+            lastMessageAt: Number(row.last_message_at) || Date.now(),
+            lastOutOfHoursNoticeAt: row.last_out_of_hours_notice_at ? Number(row.last_out_of_hours_notice_at) : undefined,
+            messages: Array.isArray(row.messages) ? row.messages : (typeof row.messages === 'string' ? JSON.parse(row.messages) : [])
+          });
+        }
+        console.log(`[MemoryStore] 🐘 Sincronizadas ${res.rows.length} sessão(ões) de conversa do PostgreSQL.`);
+        this.saveToDiskLocal();
+      }
+    } catch (err: any) {
+      console.warn('[MemoryStore] Falha ao sincronizar conversas com PostgreSQL:', err.message);
+    }
   }
 
   private loadFromDisk(): void {
@@ -58,17 +88,45 @@ export class MemoryStore {
     }, 1000);
   }
 
-  private saveToDisk(): void {
+  private saveToDiskLocal(): void {
     try {
       const dir = path.dirname(memoryPath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      // Salva os dados no disco
       const data = Array.from(this.sessions.values());
       fs.writeFileSync(memoryPath, JSON.stringify(data, null, 2), 'utf-8');
     } catch (err: any) {
       console.error('[MemoryStore] Erro ao salvar chat_sessions.json:', err.message);
+    }
+  }
+
+  private saveToDisk(): void {
+    this.saveToDiskLocal();
+
+    if (isDatabaseConnected()) {
+      for (const s of this.sessions.values()) {
+        if (!s || !s.chatId) continue;
+        query(
+          `INSERT INTO chat_sessions (
+            chat_id, agent_id, contact_name, messages, is_paused, paused_until,
+            last_message_at, last_out_of_hours_notice_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          ON CONFLICT (chat_id, agent_id) DO UPDATE SET
+            contact_name = EXCLUDED.contact_name,
+            messages = EXCLUDED.messages,
+            is_paused = EXCLUDED.is_paused,
+            paused_until = EXCLUDED.paused_until,
+            last_message_at = EXCLUDED.last_message_at,
+            last_out_of_hours_notice_at = EXCLUDED.last_out_of_hours_notice_at,
+            updated_at = EXCLUDED.updated_at;`,
+          [
+            s.chatId, s.agentId || 'default', s.contactName || '', JSON.stringify(s.messages || []),
+            !!s.isPaused, s.pausedUntil || null, s.lastMessageAt || Date.now(),
+            s.lastOutOfHoursNoticeAt || null, Date.now()
+          ]
+        ).catch(err => console.warn('[MemoryStore] Erro ao persistir chat no PostgreSQL:', err.message));
+      }
     }
   }
 
