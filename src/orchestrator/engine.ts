@@ -612,9 +612,9 @@ export class AgentOrchestrator {
       }
 
       // 1. Verificação de resposta estrita a lembrete D-1 de consulta (1 ou 2, sim/não, confirmar/cancelar/liberar vaga)
-      // Pode despausar mesmo se a sessão atual for default, caso haja agendamento ativo com lembrete pendente
+      // Apenas se o agente atual possuir agendamento habilitado
       const isReminderMsg = (bookingAgent as any)?.isReminderChoice?.(effectiveBody);
-      if (isReminderMsg && bookingAgent && !canHandleBilling) {
+      if (agent.enableBooking && isReminderMsg && bookingAgent && !canHandleBilling) {
         canHandleBooking = await bookingAgent.canHandle(testCtx);
       }
 

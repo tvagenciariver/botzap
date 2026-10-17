@@ -4,6 +4,7 @@ import { notificationService, matchPhoneOrChatId } from '../../appointments/noti
 import { partnerManager } from '../../appointments/partner-manager.js';
 import { Specialist, ServiceItem, Appointment, Partner } from '../../appointments/types.js';
 import { agentManager } from '../../config/agent-manager.js';
+import { AgentProfile } from '../../config/agent-types.js';
 import { lidMapper } from '../../appointments/phone-utils.js';
 import { pendingReminderTracker } from '../../appointments/pending-reminder-tracker.js';
 
@@ -380,17 +381,24 @@ export class BookingAgent implements IAgent {
     let contactName: string | undefined;
     let session: string | undefined;
     let quotedMessageId: string | undefined;
+    let agent: AgentProfile | undefined;
 
     if (typeof chatIdOrContext === 'string') {
       chatId = chatIdOrContext;
     } else if (chatIdOrContext) {
       chatId = chatIdOrContext.chatId;
       agentId = chatIdOrContext.agent?.id || fallbackAgentId;
+      agent = chatIdOrContext.agent;
       contactName = chatIdOrContext.contactName;
       session = chatIdOrContext.session;
       quotedMessageId = chatIdOrContext.metadata?.payload?.replyTo?.id ||
         chatIdOrContext.metadata?.payload?._data?.quotedStanzaID ||
         chatIdOrContext.metadata?.payload?.quotedMsgId;
+    }
+
+    // 🔒 ISOLAMENTO MULTI-EMPRESA: Se o agente atual não possui agenda habilitada, nunca busca consultas
+    if (agent && !agent.enableBooking) {
+      return undefined;
     }
 
     console.log(`[BookingAgent] 🔍 Buscando agendamento para resposta a lembrete: chatId=${chatId}, contactName=${contactName || 'N/A'}, agentId=${agentId || 'N/A'}, session=${session || 'N/A'}`);
@@ -407,8 +415,10 @@ export class BookingAgent implements IAgent {
     if (tracked) {
       const apt = appointmentManager.getAppointment(tracked.appointmentId);
       if (apt && apt.status !== 'cancelled' && apt.status !== 'cancelled_by_patient') {
-        console.log(`[BookingAgent] ✅ Agendamento localizado com sucesso via PendingReminderTracker: ${apt.id} (${apt.clientName})`);
-        return apt;
+        if (!agentId || agentId === 'all' || agentId === '*' || apt.agentId === agentId) {
+          console.log(`[BookingAgent] ✅ Agendamento localizado com sucesso via PendingReminderTracker: ${apt.id} (${apt.clientName})`);
+          return apt;
+        }
       }
     }
 
@@ -424,8 +434,8 @@ export class BookingAgent implements IAgent {
     const isActive = (a: Appointment) =>
       (a.status === 'confirmed' || a.status === 'scheduled' || a.status === 'presence_confirmed') && isMatch(a);
 
-    // Prioridade 1: Agendamento com lembrete pendente na empresa específica
-    if (agentId && agentId !== 'all') {
+    // Prioridade 1: Agendamento com lembrete pendente ou ativo na empresa específica deste agente
+    if (agentId && agentId !== 'all' && agentId !== '*') {
       const companyApts = all.filter(a => a.agentId === agentId);
       const companyReminder = companyApts.find(isPendingReminder);
       if (companyReminder) {
@@ -438,61 +448,26 @@ export class BookingAgent implements IAgent {
         console.log(`[BookingAgent] ✅ Agendamento ativo localizado na empresa: ${companyActive.id} (${companyActive.clientName})`);
         return companyActive;
       }
+
+      // 🛡️ SE O AGENTE É ESPECÍFICO (ex: Aviva Sport, Vale Studio):
+      // NUNCA buscar em outras empresas do sistema para evitar contaminação cruzada!
+      return undefined;
     }
 
-    // Prioridade 2: Agendamento com lembrete pendente em qualquer empresa cadastrada
-    const globalReminder = all.find(isPendingReminder);
+    // Prioridade 2: Agendamento com lembrete pendente em empresas com agenda habilitada
+    const globalReminder = all.find(a => isPendingReminder(a) && agentManager.getAgent(a.agentId)?.enableBooking);
     if (globalReminder) {
       console.log(`[BookingAgent] ✅ Agendamento localizado por lembrete global: ${globalReminder.id} (${globalReminder.clientName})`);
       return globalReminder;
     }
 
-    // Prioridade 3: Qualquer agendamento ativo correspondente a este contato
-    const globalActive = all.find(isActive);
+    // Prioridade 3: Qualquer agendamento ativo correspondente a este contato em empresa com agenda
+    const globalActive = all.find(a => isActive(a) && agentManager.getAgent(a.agentId)?.enableBooking);
     if (globalActive) {
       console.log(`[BookingAgent] ✅ Agendamento ativo localizado globalmente: ${globalActive.id} (${globalActive.clientName})`);
       return globalActive;
     }
 
-    // Prioridade 4: Se o chatId for @lid ou sem match direto, correlaciona por contactName com agendamentos de amanhã/hoje
-    if (contactName && contactName.trim().length >= 3) {
-      const cleanContact = contactName.toLowerCase().trim().replace(/[^a-z0-9áéíóúãõç\s]/g, '');
-      const contactTokens = cleanContact.split(/\s+/).filter(t => t.length >= 3);
-
-      const candidateApts = all.filter(a => 
-        (a.status === 'confirmed' || a.status === 'scheduled' || a.status === 'presence_confirmed') &&
-        (Boolean(a.reminderSent) || a.date === appointmentManager.getTodayDateString() || a.date === appointmentManager.getTomorrowDateString())
-      );
-
-      for (const apt of candidateApts) {
-        const cleanClient = apt.clientName.toLowerCase().trim().replace(/[^a-z0-9áéíóúãõç\s]/g, '');
-        const clientTokens = cleanClient.split(/\s+/).filter(t => t.length >= 3);
-
-        const firstMatch = contactTokens.length > 0 && clientTokens.length > 0 && contactTokens[0] === clientTokens[0];
-        const sharedToken = contactTokens.some(ct => clientTokens.includes(ct));
-
-        if (firstMatch || sharedToken) {
-          console.log(`[BookingAgent] ✅ Agendamento correlacionado por nome do contato: ${apt.id} (${apt.clientName}) para contactName="${contactName}"`);
-          if (chatId.endsWith('@lid') && apt.clientChatId) {
-            lidMapper.register(chatId, apt.clientChatId);
-          }
-          return apt;
-        }
-      }
-    }
-
-    // Prioridade 5: Se há apenas UM agendamento ativo com reminderSent === true em todo o sistema
-    const singleReminderList = all.filter(a => Boolean(a.reminderSent) && (a.status === 'confirmed' || a.status === 'scheduled'));
-    if (singleReminderList.length === 1) {
-      const single = singleReminderList[0];
-      console.log(`[BookingAgent] ✅ Agendamento único com lembrete pendente no sistema: ${single.id} (${single.clientName})`);
-      if (chatId.endsWith('@lid') && single.clientChatId) {
-        lidMapper.register(chatId, single.clientChatId);
-      }
-      return single;
-    }
-
-    console.warn(`[BookingAgent] ⚠️ Nenhum agendamento encontrado para resposta a lembrete (chatId=${chatId})`);
     return undefined;
   }
 
@@ -500,6 +475,13 @@ export class BookingAgent implements IAgent {
    * Decide se este agente deve tratar a mensagem.
    */
   async canHandle(context: AgentContext): Promise<boolean> {
+    // 🔒 BLINDAGEM MULTI-EMPRESA: Se o agente/empresa atual NÃO tem agendamento habilitado
+    // (ex: confecção esportiva, e-commerce, finanças, etc.), NUNCA interceptar a conversa!
+    // A mensagem deve fluir diretamente para a IA (Gemini / OpenAI) do respectivo agente.
+    if (!context.agent?.enableBooking) {
+      return false;
+    }
+
     const text = (context.userMessage || '').trim();
     const chatId = context.chatId;
 
@@ -509,8 +491,6 @@ export class BookingAgent implements IAgent {
     }
 
     // 2. Se o usuário respondeu à mensagem de confirmação/desistência de lembrete (opção 1 ou 2)
-    // CRÍTICO: Avalia ANTES do check de enableBooking do agente da sessão, pois o lembrete
-    // pode ter sido disparado por outra empresa/agente do consultório para este mesmo contato!
     const isConfirm = this.isConfirmChoice(text);
     const isCancel = this.isCancelChoice(text);
 
@@ -519,12 +499,6 @@ export class BookingAgent implements IAgent {
       if (apt) {
         return true;
       }
-    }
-
-    // 🔒 BLINDAGEM CRÍTICA: Se a empresa/agente NÃO possui a agenda habilitada,
-    // NUNCA interceptar a conversa! O bot deve responder estritamente conforme o prompt da IA.
-    if (!context.agent?.enableBooking) {
-      return false;
     }
 
     const lowerText = text.toLowerCase();
