@@ -1201,6 +1201,36 @@ apiRouter.post('/api/agents/:id/duplicate', requireAdmin, (req: Request, res: Re
 });
 
 /**
+ * 14.1 Histórico de Versões do Prompt do Agente
+ */
+apiRouter.get('/api/agents/:id/prompt-history', requireAuth, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const history = agentManager.getPromptHistory(id);
+    res.json({ success: true, history });
+  } catch (err: any) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+/**
+ * 14.2 Restaurar Versão Anterior do Prompt do Agente
+ */
+apiRouter.post('/api/agents/:id/prompt-restore', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { index } = req.body;
+    if (typeof index !== 'number' || index < 0) {
+      return res.status(400).json({ error: 'Índice da versão inválido.' });
+    }
+    const restored = agentManager.restorePromptVersion(id, index);
+    res.json({ success: true, agent: sanitizeAgentProfile(restored) });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
  * 15. Pausa de Emergência Individual — Congela todas as respostas de um agente
  */
 apiRouter.post('/api/agents/:id/pause', requireAuth, (req: Request, res: Response) => {

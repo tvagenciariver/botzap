@@ -15,26 +15,43 @@ export class AgentManager {
   }
 
   private loadFromDisk(): void {
-    try {
-      if (fs.existsSync(agentsFilePath)) {
-        const raw = fs.readFileSync(agentsFilePath, 'utf-8');
-        const list: AgentProfile[] = JSON.parse(raw);
-        if (Array.isArray(list) && list.length > 0) {
-          this.agents.clear();
-          for (const a of list) {
-            if (a && a.id) {
-              this.agents.set(a.id, a);
+    const tryLoad = (filePath: string): boolean => {
+      try {
+        if (fs.existsSync(filePath)) {
+          const raw = fs.readFileSync(filePath, 'utf-8');
+          if (!raw || !raw.trim()) return false;
+          const list: AgentProfile[] = JSON.parse(raw);
+          if (Array.isArray(list) && list.length > 0) {
+            this.agents.clear();
+            for (const a of list) {
+              if (a && a.id) {
+                this.agents.set(a.id, a);
+              }
             }
+            console.log(`[AgentManager] ${this.agents.size} agente(s) carregado(s) com sucesso de "${path.basename(filePath)}".`);
+            return true;
           }
-          console.log(`[AgentManager] ${this.agents.size} agente(s) carregado(s) com sucesso.`);
-          return;
         }
+      } catch (err: any) {
+        console.warn(`[AgentManager] Falha ao ler ${path.basename(filePath)}:`, err.message);
       }
-    } catch (err: any) {
-      console.warn('[AgentManager] Aviso ao carregar agents.json:', err.message);
+      return false;
+    };
+
+    // 1. Tenta carregar o arquivo principal
+    if (tryLoad(agentsFilePath)) {
+      return;
     }
 
-    // Se o arquivo não existir ou estiver vazio, faz a migração automática das configurações existentes
+    // 2. Se o principal falhar ou estiver ausente, tenta carregar o backup .bak
+    const bakPath = agentsFilePath + '.bak';
+    if (tryLoad(bakPath)) {
+      console.warn('[AgentManager] ⚠️ agents.json principal estava ausente ou corrompido. Restaurado automaticamente com sucesso a partir de agents.json.bak!');
+      this.saveToDisk();
+      return;
+    }
+
+    // 3. Se nenhum arquivo existir, faz a migração automática das configurações padrão
     this.migrateFromBotConfig();
   }
 
@@ -74,7 +91,6 @@ export class AgentManager {
       updatedAt: Date.now()
     };
 
-
     this.agents.set(defaultAgent.id, defaultAgent);
     this.saveToDisk();
     console.log(`[AgentManager] Agente padrão "${defaultAgent.name}" criado com sucesso.`);
@@ -86,10 +102,42 @@ export class AgentManager {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
+
       const list = Array.from(this.agents.values());
-      fs.writeFileSync(agentsFilePath, JSON.stringify(list, null, 2), 'utf-8');
+      // Proteção de segurança: nunca sobrescreve com array vazio se existiam agentes
+      if (list.length === 0) {
+        console.warn('[AgentManager] Tentativa de salvar lista vazia de agentes ignorada para evitar perda de dados.');
+        return;
+      }
+
+      const content = JSON.stringify(list, null, 2);
+
+      // 1. Cria backup contínuo do agents.json atual se válido antes de sobrescrever
+      if (fs.existsSync(agentsFilePath)) {
+        try {
+          const currentRaw = fs.readFileSync(agentsFilePath, 'utf-8');
+          if (currentRaw && currentRaw.trim().length > 10) {
+            // Valida se o conteúdo atual em disco é JSON válido antes de transformá-lo em .bak
+            const parsed = JSON.parse(currentRaw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const bakPath = agentsFilePath + '.bak';
+              fs.writeFileSync(bakPath, currentRaw, 'utf-8');
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Escrita atômica com fsyncSync para garantir que o kernel descarregue os dados fisicamente no disco/volume
+      const tmpPath = `${agentsFilePath}.tmp.${Date.now()}`;
+      const fd = fs.openSync(tmpPath, 'w');
+      fs.writeSync(fd, content, undefined, 'utf-8');
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+
+      // 3. Renomeação atômica
+      fs.renameSync(tmpPath, agentsFilePath);
     } catch (err: any) {
-      console.error('[AgentManager] Erro ao salvar agents.json:', err.message);
+      console.error('[AgentManager] Erro ao salvar atomicamente agents.json:', err.message);
     }
   }
 
@@ -531,6 +579,30 @@ export class AgentManager {
       updates.pauseDurationMinutes = Math.round(updates.pauseDurationHours * 60);
     }
 
+    // 🛡️ VERSIONAMENTO E HISTÓRICO ATÔMICO DE PROMPT
+    // Se a instrução do sistema foi alterada para um texto válido e diferente do atual:
+    if (
+      updates.systemInstruction !== undefined &&
+      typeof updates.systemInstruction === 'string' &&
+      updates.systemInstruction.trim() !== '' &&
+      updates.systemInstruction.trim() !== existing.systemInstruction.trim()
+    ) {
+      const history = Array.isArray(existing.promptHistory) ? [...existing.promptHistory] : [];
+      if (existing.systemInstruction && existing.systemInstruction.trim() !== '') {
+        history.unshift({
+          prompt: existing.systemInstruction,
+          savedAt: existing.updatedAt || Date.now(),
+          note: `Versão anterior arquivada automaticamente em ${new Date().toLocaleString('pt-BR')}`
+        });
+      }
+      // Mantém até 30 versões no histórico
+      updates.promptHistory = history.slice(0, 30);
+    } else if (updates.systemInstruction !== undefined && (!updates.systemInstruction || updates.systemInstruction.trim() === '')) {
+      // Se tentou enviar vazio acidentalmente, preserva o prompt existente para evitar perda de dados
+      console.warn(`[AgentManager] Tentativa de salvar prompt em branco para agente "${existing.name}" (${id}) rejeitada. Prompt preservado.`);
+      delete updates.systemInstruction;
+    }
+
     const updated: AgentProfile = {
       ...existing,
       ...updates,
@@ -541,6 +613,39 @@ export class AgentManager {
     this.agents.set(id, updated);
     this.saveToDisk();
     return updated;
+  }
+
+  /**
+   * Retorna o histórico de versões do prompt do agente
+   */
+  getPromptHistory(id: string) {
+    const agent = this.agents.get(id);
+    if (!agent) {
+      throw new Error(`Agente com ID "${id}" não encontrado.`);
+    }
+    return agent.promptHistory || [];
+  }
+
+  /**
+   * Restaura uma versão específica do histórico de prompts do agente
+   */
+  restorePromptVersion(id: string, versionIndex: number): AgentProfile {
+    const agent = this.agents.get(id);
+    if (!agent) {
+      throw new Error(`Agente com ID "${id}" não encontrado.`);
+    }
+    const history = agent.promptHistory || [];
+    if (versionIndex < 0 || versionIndex >= history.length) {
+      throw new Error(`Versão #${versionIndex} não encontrada no histórico do agente.`);
+    }
+    const targetVersion = history[versionIndex];
+    if (!targetVersion || !targetVersion.prompt) {
+      throw new Error('Conteúdo da versão selecionada é inválido.');
+    }
+
+    return this.updateAgent(id, {
+      systemInstruction: targetVersion.prompt
+    });
   }
 
   /**

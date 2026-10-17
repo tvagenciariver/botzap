@@ -3031,12 +3031,20 @@ function openNewAgentModal() {
   showAgentEditor();
 }
 
+let currentAgentPromptHistory = [];
+
 async function openEditAgentModal(agentId) {
   try {
-    const res = await fetchWithAuth(`/api/agents/${agentId}`);
+    const res = await fetchWithAuth(`/api/agents/${agentId}?_t=${Date.now()}`);
     const data = await res.json();
     const agent = data.agent;
     if (!agent) throw new Error('Agente não encontrado.');
+
+    currentAgentPromptHistory = agent.promptHistory || [];
+    const histBtnCount = document.getElementById('prompt-history-count');
+    if (histBtnCount) {
+      histBtnCount.textContent = currentAgentPromptHistory.length;
+    }
 
     populateAgentSessionSelect(agent.wahaSession || '');
 
@@ -3101,6 +3109,68 @@ async function openEditAgentModal(agentId) {
   } catch (err) {
     showToast(`Erro ao carregar agente: ${err.message}`, 'error');
   }
+}
+
+function openPromptHistoryModal() {
+  const modal = document.getElementById('modal-prompt-history');
+  const listEl = document.getElementById('prompt-history-list');
+  if (!modal || !listEl) return;
+
+  if (!currentAgentPromptHistory || currentAgentPromptHistory.length === 0) {
+    listEl.innerHTML = `
+      <div style="text-align: center; padding: 40px 20px; color: #94a3b8;">
+        <span style="font-size: 36px; display: block; margin-bottom: 10px;">🕒</span>
+        <strong style="color: #f1f5f9; display: block; margin-bottom: 4px; font-size: 15px;">Nenhuma versão arquivada ainda</strong>
+        <span style="font-size: 13px;">As versões anteriores do prompt são salvas automaticamente aqui a cada edição que você fizer para segurança absoluta.</span>
+      </div>
+    `;
+  } else {
+    listEl.innerHTML = currentAgentPromptHistory.map((item, idx) => {
+      const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleString('pt-BR') : 'Data não registrada';
+      const promptPreview = escapeHtml(item.prompt || '').substring(0, 350) + ((item.prompt || '').length > 350 ? '...' : '');
+      const note = item.note ? `<div style="font-size: 11px; color: #38bdf8; margin-top: 4px;">ℹ️ ${escapeHtml(item.note)}</div>` : '';
+      return `
+        <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid var(--border, #334155); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); font-size: 11px; font-weight: 600;">Versão #${currentAgentPromptHistory.length - idx}</span>
+              <span style="font-size: 12px; color: #94a3b8;">📅 ${dateStr}</span>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="restorePromptFromHistory(${idx})" style="padding: 3px 12px; font-size: 11px; border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.08); font-weight: 600;">
+              ↩️ Restaurar Esta Versão
+            </button>
+          </div>
+          ${note}
+          <div style="background: rgba(0, 0, 0, 0.4); border-radius: 6px; padding: 10px; font-family: monospace; font-size: 11.5px; color: #cbd5e1; white-space: pre-wrap; max-height: 140px; overflow-y: auto; line-height: 1.45; border: 1px solid rgba(255,255,255,0.05);">
+${promptPreview}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  modal.style.display = 'flex';
+}
+
+function closePromptHistoryModal() {
+  const modal = document.getElementById('modal-prompt-history');
+  if (modal) modal.style.display = 'none';
+}
+
+function restorePromptFromHistory(index) {
+  if (!currentAgentPromptHistory || !currentAgentPromptHistory[index]) return;
+  const version = currentAgentPromptHistory[index];
+  const dateStr = version.savedAt ? new Date(version.savedAt).toLocaleString('pt-BR') : '';
+  if (!confirm(`Deseja carregar a versão salva em "${dateStr}" no editor?\n\n(Lembre-se de clicar em "Salvar Agente" para confirmar a gravação no servidor).`)) {
+    return;
+  }
+  const txtArea = document.getElementById('modal-agent-systemInstruction');
+  if (txtArea) {
+    txtArea.value = version.prompt;
+    txtArea.focus();
+  }
+  closePromptHistoryModal();
+  showToast('Versão anterior carregada no editor! Clique em "Salvar Agente" para confirmar.', 'info');
 }
 
 // Event Listeners de Botões
@@ -3229,6 +3299,13 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
       })
       .filter(n => n.length >= 8);
 
+    const systemInstruction = document.getElementById('modal-agent-systemInstruction').value.trim();
+    if (!systemInstruction) {
+      showToast('O Prompt do Sistema não pode ficar em branco. Defina as diretrizes da IA antes de salvar.', 'error');
+      setSaving(false);
+      return;
+    }
+
     const payload = {
       name: document.getElementById('modal-agent-name').value.trim(),
       companyName: document.getElementById('modal-agent-company').value.trim(),
@@ -3246,7 +3323,7 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
       geminiApiKey: document.getElementById('modal-agent-geminiApiKey').value.trim(),
       model: document.getElementById('modal-agent-model').value,
       temperature: parseFloat(document.getElementById('modal-agent-temperature').value) || 0.4,
-      systemInstruction: document.getElementById('modal-agent-systemInstruction').value.trim(),
+      systemInstruction,
       businessInfo: document.getElementById('modal-agent-businessInfo').value.trim(),
       handoffKeywords: keywords,
       handoffMessage: document.getElementById('modal-agent-handoffMessage').value.trim(),

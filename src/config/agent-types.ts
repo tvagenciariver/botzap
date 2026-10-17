@@ -1,5 +1,11 @@
 import { BusinessHoursConfig } from './index.js';
 
+export interface PromptHistoryEntry {
+  prompt: string;
+  savedAt: number;
+  note?: string;
+}
+
 export interface AgentProfile {
   id: string; // identificador único (slug ou uuid)
   name: string; // nome do bot (ex: "Sofia")
@@ -22,6 +28,7 @@ export interface AgentProfile {
 
   // Prompts e Conhecimento
   systemInstruction: string;
+  promptHistory?: PromptHistoryEntry[]; // Histórico versionado de alterações do prompt
   businessInfo: string;
 
   // Transbordo Humano e Pausa

@@ -29,6 +29,9 @@ Thumbs.db
 waha_sessions/
 data/chat_sessions.json
 data/agents.json
+data/agents.json.bak
+data/*.bak
+data/*.tmp*
 data/appointments.json
 data/specialists.json
 data/services.json

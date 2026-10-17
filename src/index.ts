@@ -36,10 +36,10 @@ if (!fs.existsSync(publicPath)) {
   publicPath = path.resolve(process.cwd(), 'src', 'web', 'public');
 }
 
-// Middleware anti-cache para garantir que index.html e assets HTML nunca fiquem em cache
+// Middleware anti-cache para garantir que APIs, index.html e assets nunca fiquem em cache desatualizado
 app.use((req, res, next) => {
-  if (req.path === '/' || req.path.endsWith('.html')) {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  if (req.path.startsWith('/api') || req.path === '/' || req.path.endsWith('.html') || req.path.endsWith('.js') || req.path.endsWith('.css')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
   }
@@ -48,8 +48,8 @@ app.use((req, res, next) => {
 
 app.use(express.static(publicPath, {
   setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    if (filePath.endsWith('.html') || filePath.endsWith('.js') || filePath.endsWith('.css')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
     }

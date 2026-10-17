@@ -860,14 +860,42 @@
                   </div>
                   <div class="card-body">
                     <div class="form-group">
-                      <div class="label-with-tip">
-                        <label for="modal-agent-systemInstruction">
+                      <div class="label-with-tip" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <label for="modal-agent-systemInstruction" style="margin-bottom: 0;">
                           <strong>Prompt do Sistema (Persona, Tom de Voz e Instruções de Atendimento) *</strong>
                         </label>
-                        <span class="label-tag">Tag dinâmica: <code>{companyName}</code></span>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                          <button type="button" class="btn btn-outline btn-sm" id="btn-agent-prompt-history" onclick="openPromptHistoryModal()" style="font-size: 11px; padding: 3px 10px; border-color: rgba(99, 102, 241, 0.4); color: #818cf8; background: rgba(99, 102, 241, 0.08); font-weight: 600; cursor: pointer;">
+                            🕒 Histórico de Versões (<span id="prompt-history-count">0</span>)
+                          </button>
+                          <span class="label-tag">Tag dinâmica: <code>{companyName}</code></span>
+                        </div>
                       </div>
                       <textarea id="modal-agent-systemInstruction" rows="10" class="form-control form-control-textarea editor-prompt-textarea" placeholder="Defina detalhadamente como o bot deve se comportar, tom de voz (acolhedor, profissional), regras de saudação, orientações sobre como responder dúvidas..."></textarea>
                       <small class="form-hint">Dica: use a tag <code>{companyName}</code> para substituir pelo nome da empresa automaticamente.</small>
+                    </div>
+
+                    <!-- Modal / Painel: Histórico de Versões do Prompt -->
+                    <div id="modal-prompt-history" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 99999; align-items: center; justify-content: center; padding: 20px;">
+                      <div style="background: var(--bg-card, #1e293b); border: 1px solid var(--border, #334155); border-radius: 14px; max-width: 720px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);">
+                        <div style="padding: 16px 20px; border-bottom: 1px solid var(--border, #334155); display: flex; justify-content: space-between; align-items: center;">
+                          <div>
+                            <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                              🕒 Histórico de Versões Salvas do Prompt
+                            </h3>
+                            <p style="margin: 4px 0 0 0; font-size: 12px; color: #94a3b8;">
+                              Cada alteração salva é arquivada automaticamente. Você pode restaurar qualquer versão com um clique.
+                            </p>
+                          </div>
+                          <button type="button" class="btn btn-outline btn-sm" onclick="closePromptHistoryModal()" style="font-size: 18px; line-height: 1; padding: 4px 10px;">&times;</button>
+                        </div>
+                        <div id="prompt-history-list" style="padding: 16px 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 12px;">
+                          <!-- Renderizado dinamicamente via app.js -->
+                        </div>
+                        <div style="padding: 12px 20px; border-top: 1px solid var(--border, #334155); display: flex; justify-content: flex-end;">
+                          <button type="button" class="btn btn-outline" onclick="closePromptHistoryModal()">Fechar</button>
+                        </div>
+                      </div>
                     </div>
 
                     <div class="form-group" style="margin-top: 25px;">
