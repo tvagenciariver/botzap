@@ -1784,9 +1784,17 @@ async function loadChats() {
 
       const lastDate = new Date(chat.lastMessageAt).toLocaleTimeString('pt-BR');
 
+      const displayId = chat.cleanChatId || chat.chatId;
+      const resolvedInfo = chat.resolvedPhone ? `<br><small style="color: #10b981; font-size: 11px; font-weight: 500;">📱 ${chat.resolvedPhone}</small>` : '';
+      const agentInfo = chat.agentName ? `<br><small class="text-muted" style="font-size: 11px;">🏢 ${chat.agentName}</small>` : '';
+
       return `
         <tr>
-          <td><strong>${chat.chatId}</strong></td>
+          <td>
+            <strong>${displayId}</strong>
+            ${resolvedInfo}
+            ${agentInfo}
+          </td>
           <td>${chat.contactName || '-'}</td>
           <td>${statusBadge}</td>
           <td>${chat.messageCount} msgs</td>
@@ -1796,6 +1804,7 @@ async function loadChats() {
               ? `<button class="btn btn-secondary btn-sm" onclick="resumeChat('${chat.chatId}')">▶️ Reativar Bot</button>` 
               : `<button class="btn btn-outline btn-sm" onclick="pauseChat('${chat.chatId}')">⏸️ Pausar 6h</button>`}
             <button class="btn btn-outline btn-sm" title="Marcar como Não Lida no WhatsApp do Celular" onclick="markChatUnreadManual('${chat.chatId}')">🟢 Não Lida</button>
+            <button class="btn btn-outline btn-sm" style="color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);" title="Ignorar este contato no agente (Comunicação Interna)" onclick="ignoreChatNumber('${chat.cleanChatId || chat.chatId}', '${chat.agentId}')">🔇 Ignorar</button>
             <button class="btn btn-outline btn-sm" onclick="clearChat('${chat.chatId}')">🗑️ Limpar</button>
           </td>
         </tr>
@@ -1856,6 +1865,54 @@ window.markChatUnreadManual = async function(chatId) {
     }
   } catch (err) {
     showToast(`Erro ao marcar como não lida: ${err.message}`, 'error');
+  }
+};
+
+window.ignoreChatNumber = async function(cleanId, agentId) {
+  try {
+    let targetAgentId = agentId;
+    if (!targetAgentId || targetAgentId === 'default' || targetAgentId === '__unknown_session__') {
+      const res = await fetchWithAuth('/api/agents');
+      const agents = await res.json();
+      if (!Array.isArray(agents) || agents.length === 0) {
+        showToast('Nenhum agente configurado no sistema.', 'error');
+        return;
+      }
+      targetAgentId = agents[0].id;
+    }
+
+    const res = await fetchWithAuth(`/api/agents/${targetAgentId}`);
+    const agent = await res.json();
+    if (!agent || !agent.id) {
+      showToast('Agente não encontrado.', 'error');
+      return;
+    }
+
+    if (!confirm(`Deseja silenciar/ignorar este contato:\n\n${cleanId}\n\nno agente [${agent.name} - ${agent.companyName}]?\nO bot NUNCA responderá a este contato.`)) {
+      return;
+    }
+
+    const currentIgnored = Array.isArray(agent.ignoredNumbers) ? [...agent.ignoredNumbers] : [];
+    if (!currentIgnored.includes(cleanId)) {
+      currentIgnored.push(cleanId);
+    }
+
+    const saveRes = await fetchWithAuth(`/api/agents/${targetAgentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ignoredNumbers: currentIgnored })
+    });
+
+    const saved = await saveRes.json();
+    if (saved && saved.id) {
+      showToast(`🔇 ${cleanId} adicionado com sucesso aos números ignorados de [${agent.name}]!`, 'success');
+      loadChats();
+    } else {
+      showToast('Falha ao atualizar lista de ignorados do agente.', 'error');
+    }
+  } catch (err) {
+    console.error('Erro ao ignorar contato:', err);
+    showToast('Erro ao silenciar contato: ' + err.message, 'error');
   }
 };
 
@@ -3143,7 +3200,33 @@ document.getElementById('agent-modal-form')?.addEventListener('submit', async (e
     const ignoredRaw = document.getElementById('modal-agent-ignoredNumbers')?.value || '';
     const ignoredNumbers = ignoredRaw
       .split(/[\n,;]+/)
-      .map(n => n.trim().replace(/\D/g, ''))
+      .map(item => {
+        let n = item.trim();
+        if (!n) return '';
+        // Remove prefixo de agente se houver (ex: "avi-a2o1:62887095701679@lid" -> "62887095701679@lid")
+        if (n.includes(':')) {
+          const colonIdx = n.indexOf(':');
+          const atIdx = n.indexOf('@');
+          if (colonIdx !== -1 && atIdx !== -1 && colonIdx < atIdx) {
+            const prefix = n.substring(0, colonIdx);
+            if (!/^\d+$/.test(prefix)) {
+              n = n.substring(colonIdx + 1).trim();
+            }
+          }
+        }
+        if (n.includes(':') && n.includes('@')) {
+          n = n.replace(/:\d+@/, '@');
+        }
+        if (n.toLowerCase().includes('@lid')) {
+          const digits = n.replace(/\D/g, '');
+          return digits.length >= 8 ? `${digits}@lid` : '';
+        }
+        const digits = n.replace(/\D/g, '');
+        if (digits.length >= 14 && (!digits.startsWith('55') || digits.length >= 15)) {
+          return `${digits}@lid`;
+        }
+        return digits.length >= 8 ? digits : '';
+      })
       .filter(n => n.length >= 8);
 
     const payload = {

@@ -375,6 +375,25 @@ export class AgentOrchestrator {
         if (cachedPhone) {
           console.log(`[Orchestrator] Recuperado telefone real para LID ${originalLid} do registro: ${cachedPhone}`);
           chatId = cachedPhone;
+        } else {
+          // Consulta ativa na WAHA para resolver o LID para telefone real
+          try {
+            const contact = await wahaClient.getContact(originalLid, sessionName);
+            if (contact) {
+              const candidateNum = contact.number || contact.id?.user || contact.id;
+              if (candidateNum && typeof candidateNum === 'string') {
+                const digits = candidateNum.replace(/\D/g, '');
+                if (digits.length >= 10 && digits.length <= 13) {
+                  const resolvedReal = `${digits.startsWith('55') ? digits : '55' + digits}@c.us`;
+                  console.log(`[Orchestrator] 🔍 Resolvido LID ${originalLid} para telefone real via WAHA getContact: ${resolvedReal}`);
+                  lidMapper.register(originalLid, resolvedReal);
+                  chatId = resolvedReal;
+                }
+              }
+            }
+          } catch (err: any) {
+            console.warn(`[Orchestrator] Não foi possível resolver LID ${originalLid} via WAHA getContact:`, err.message);
+          }
         }
       }
     } else if (chatId) {

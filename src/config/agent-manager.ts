@@ -3,6 +3,7 @@ import path from 'path';
 import { AgentProfile } from './agent-types.js';
 import { loadBotConfig, defaultBusinessHours } from './index.js';
 import { wahaClient } from '../waha/client.js';
+import { lidMapper, matchPhoneOrChatId, getAllChatIdAliases } from '../appointments/phone-utils.js';
 
 const agentsFilePath = path.resolve(process.cwd(), 'data', 'agents.json');
 
@@ -482,7 +483,7 @@ export class AgentManager {
       keepChatUnread: !!data.keepChatUnread,
       enableAudioTranscription: !!data.enableAudioTranscription,
       ignoredNumbers: Array.isArray(data.ignoredNumbers)
-        ? data.ignoredNumbers.map(n => String(n).trim().replace(/\D/g, '')).filter(n => n.length >= 8)
+        ? data.ignoredNumbers.map(n => sanitizeIgnoredNumber(n)).filter((n): n is string => Boolean(n))
         : [],
       enableBooking: !!data.enableBooking,
       enableAutoReminders: data.enableAutoReminders !== false,
@@ -522,7 +523,7 @@ export class AgentManager {
 
     if (updates.ignoredNumbers !== undefined) {
       updates.ignoredNumbers = Array.isArray(updates.ignoredNumbers)
-        ? updates.ignoredNumbers.map(n => String(n).trim().replace(/\D/g, '')).filter(n => n.length >= 8)
+        ? updates.ignoredNumbers.map(n => sanitizeIgnoredNumber(n)).filter((n): n is string => Boolean(n))
         : [];
     }
 
@@ -543,7 +544,13 @@ export class AgentManager {
   }
 
   /**
-   * Verifica se determinado número/chatId está na lista de números ignorados do agente (comunicação interna/equipe/sócios)
+   * Verifica se determinado número/chatId está na lista de números ignorados do agente (comunicação interna/equipe/sócios).
+   * Suporta:
+   * 1. Telefones móveis ou fixos (com/sem DDI 55, com/sem 9º dígito brasileiro).
+   * 2. Identificadores WhatsApp @lid (ex: "62887095701679@lid" ou "62887095701679").
+   * 3. Mapeamento bidirecional LID <-> Telefone real (via lidMapper).
+   * 4. Identificadores copiados da interface com prefixo de agente (ex: "avi-a2o1:62887095701679@lid").
+   * 5. Variações multi-dispositivo (:0, :1, etc.).
    */
   isNumberIgnored(agent: AgentProfile | null | undefined, rawPhoneOrChatId: string): boolean {
     if (!agent || !agent.ignoredNumbers || !Array.isArray(agent.ignoredNumbers) || agent.ignoredNumbers.length === 0) {
@@ -551,34 +558,123 @@ export class AgentManager {
     }
     if (!rawPhoneOrChatId) return false;
 
-    const incomingDigits = rawPhoneOrChatId.replace(/:\d+@/, '@').replace(/\D/g, '');
-    if (incomingDigits.length < 8) return false;
+    // 1. Limpa prefixo de agente se houver (ex: "avi-a2o1:62887095701679@lid" -> "62887095701679@lid")
+    let target = String(rawPhoneOrChatId).trim();
+    if (target.includes(':')) {
+      const colonIdx = target.indexOf(':');
+      const atIdx = target.indexOf('@');
+      if (colonIdx !== -1 && atIdx !== -1 && colonIdx < atIdx) {
+        const prefix = target.substring(0, colonIdx);
+        // Se o prefixo não for exclusivamente numérico, é um prefixo de agentId (ex: "avi-a2o1")
+        if (!/^\d+$/.test(prefix)) {
+          target = target.substring(colonIdx + 1).trim();
+        }
+      }
+    }
 
-    // Normalização sem 9º dígito (para DDDs brasileiros)
-    const incomingWithout9 = incomingDigits.length === 13 && incomingDigits.startsWith('55')
-      ? incomingDigits.slice(0, 4) + incomingDigits.slice(5)
-      : (incomingDigits.length === 11 ? incomingDigits.slice(0, 2) + incomingDigits.slice(3) : incomingDigits);
+    // 2. Remove sufixo de dispositivo (:0, :1) antes do @
+    if (target.includes(':') && target.includes('@')) {
+      target = target.replace(/:\d+@/, '@');
+    }
+
+    // 3. Normalização básica do target
+    const targetIsLid = target.toLowerCase().includes('@lid');
+    const targetLidDigits = targetIsLid ? target.replace(/\D/g, '') : null;
+
+    // Aliases cruzados do target (inclui 9º dígito e mapeamento LID)
+    const targetAliases = new Set<string>(getAllChatIdAliases(target));
+    targetAliases.add(target);
+
+    let targetMappedPhone: string | undefined;
+    if (targetIsLid) {
+      targetMappedPhone = lidMapper.getPhone(target) || (targetLidDigits ? lidMapper.getPhone(`${targetLidDigits}@lid`) : undefined);
+      if (targetMappedPhone) {
+        targetAliases.add(targetMappedPhone);
+        for (const a of getAllChatIdAliases(targetMappedPhone)) {
+          targetAliases.add(a);
+        }
+      }
+    } else {
+      const mappedLid = lidMapper.getLid(target);
+      if (mappedLid) {
+        targetAliases.add(mappedLid);
+      }
+    }
+
+    const targetDigits = target.replace(/\D/g, '');
 
     for (const rawIgnored of agent.ignoredNumbers) {
       if (!rawIgnored) continue;
-      const ignDigits = String(rawIgnored).replace(/\D/g, '');
-      if (ignDigits.length < 8) continue;
+      const cleanIgnored = sanitizeIgnoredNumber(rawIgnored) || String(rawIgnored).trim();
+      if (!cleanIgnored) continue;
 
-      // 1. Match exato nos dígitos
-      if (incomingDigits === ignDigits) return true;
+      // Match 1: Igualdade exata de string (ex: "62887095701679@lid" === "62887095701679@lid")
+      if (target === cleanIgnored) return true;
 
-      // 2. Match de terminação (com/sem DDI 55 ou DDD)
-      if (incomingDigits.endsWith(ignDigits) || ignDigits.endsWith(incomingDigits)) {
+      const ignIsLid = cleanIgnored.toLowerCase().includes('@lid');
+      const ignLidDigits = ignIsLid ? cleanIgnored.replace(/\D/g, '') : (cleanIgnored.length >= 14 ? cleanIgnored.replace(/\D/g, '') : null);
+
+      // Match 2: Se ambos possuem formato/dígitos de LID, compara dígitos diretos
+      if (targetLidDigits && ignLidDigits) {
+        if (targetLidDigits === ignLidDigits) return true;
+      }
+
+      // Match 3: Resolução cruzada LID <-> Telefone Real
+      if (targetIsLid && !ignIsLid) {
+        // Target é LID, Ignored é telefone real cadastrado pelo usuário
+        if (targetMappedPhone && matchPhoneOrChatId(targetMappedPhone, cleanIgnored)) {
+          return true;
+        }
+        const ignLid = lidMapper.getLid(cleanIgnored);
+        if (ignLid && (ignLid === target || (targetLidDigits && ignLid.includes(targetLidDigits)))) {
+          return true;
+        }
+      } else if (!targetIsLid && ignIsLid) {
+        // Target é telefone real, Ignored é LID cadastrado pelo usuário
+        const ignMappedPhone = lidMapper.getPhone(cleanIgnored);
+        if (ignMappedPhone && matchPhoneOrChatId(target, ignMappedPhone)) {
+          return true;
+        }
+        const targetLid = lidMapper.getLid(target);
+        if (targetLid && (targetLid === cleanIgnored || (ignLidDigits && targetLid.includes(ignLidDigits)))) {
+          return true;
+        }
+      }
+
+      // Match 4: Compara aliases completos via getAllChatIdAliases
+      const ignAliases = getAllChatIdAliases(cleanIgnored);
+      for (const ignAlias of ignAliases) {
+        if (targetAliases.has(ignAlias)) return true;
+      }
+
+      // Match 5: Comparação inteligente via matchPhoneOrChatId (trata @c.us, DDI 55, DDD e 9º dígito)
+      if (matchPhoneOrChatId(target, cleanIgnored)) {
         return true;
       }
 
-      // 3. Match considerando variação com/sem 9º dígito brasileiro
-      const ignWithout9 = ignDigits.length === 13 && ignDigits.startsWith('55')
-        ? ignDigits.slice(0, 4) + ignDigits.slice(5)
-        : (ignDigits.length === 11 ? ignDigits.slice(0, 2) + ignDigits.slice(3) : ignDigits);
+      // Match 6: Comparação puramente numérica de telefone (para comprimentos <= 13 dígitos)
+      const ignDigits = cleanIgnored.replace(/\D/g, '');
+      if (targetDigits.length >= 8 && ignDigits.length >= 8) {
+        if (targetDigits === ignDigits) return true;
 
-      if (incomingWithout9 === ignWithout9 || incomingWithout9.endsWith(ignWithout9) || ignWithout9.endsWith(incomingWithout9)) {
-        return true;
+        if (targetDigits.length <= 13 && ignDigits.length <= 13) {
+          if (targetDigits.endsWith(ignDigits) || ignDigits.endsWith(targetDigits)) {
+            return true;
+          }
+
+          // Normalização do 9º dígito móvel brasileiro
+          const targetWithout9 = targetDigits.length === 13 && targetDigits.startsWith('55')
+            ? targetDigits.slice(0, 4) + targetDigits.slice(5)
+            : (targetDigits.length === 11 ? targetDigits.slice(0, 2) + targetDigits.slice(3) : targetDigits);
+
+          const ignWithout9 = ignDigits.length === 13 && ignDigits.startsWith('55')
+            ? ignDigits.slice(0, 4) + ignDigits.slice(5)
+            : (ignDigits.length === 11 ? ignDigits.slice(0, 2) + ignDigits.slice(3) : ignDigits);
+
+          if (targetWithout9 === ignWithout9 || targetWithout9.endsWith(ignWithout9) || ignWithout9.endsWith(targetWithout9)) {
+            return true;
+          }
+        }
       }
     }
 
@@ -621,3 +717,62 @@ export class AgentManager {
 }
 
 export const agentManager = new AgentManager();
+
+/**
+ * Sanitiza e normaliza números ou identificadores @lid inseridos pelo usuário.
+ * Suporta:
+ * - Telefones normais: "5587988887777", "87988887777", "(87) 98888-7777", "+55 87 8888-7777"
+ * - Identificadores @lid: "62887095701679@lid", "62887095701679:0@lid"
+ * - Prefixos de agentes copiados da tela: "avi-a2o1:62887095701679@lid" -> "62887095701679@lid"
+ * - LIDs de 14+ dígitos sem sufixo: "62887095701679" -> "62887095701679@lid"
+ */
+export function sanitizeIgnoredNumber(raw: any): string | null {
+  if (raw === null || raw === undefined) return null;
+  let str = String(raw).trim();
+  if (!str) return null;
+
+  // 1. Remove qualquer prefixo de agente se houver (ex: "avi-a2o1:62887095701679@lid" -> "62887095701679@lid")
+  if (str.includes(':')) {
+    const colonIdx = str.indexOf(':');
+    const atIdx = str.indexOf('@');
+    if (colonIdx !== -1 && atIdx !== -1 && colonIdx < atIdx) {
+      const prefix = str.substring(0, colonIdx);
+      if (!/^\d+$/.test(prefix)) {
+        str = str.substring(colonIdx + 1).trim();
+      }
+    }
+  }
+
+  // 2. Remove sufixo de dispositivo multi-device (:0, :1, etc) antes de @
+  if (str.includes(':') && str.includes('@')) {
+    str = str.replace(/:\d+@/, '@');
+  }
+
+  // 3. Se contiver @lid
+  if (str.toLowerCase().includes('@lid')) {
+    const lidDigits = str.replace(/\D/g, '');
+    if (lidDigits.length >= 8) {
+      return `${lidDigits}@lid`;
+    }
+  }
+
+  // 4. Se for telefone com @c.us ou @s.whatsapp.net
+  if (str.toLowerCase().includes('@c.us') || str.toLowerCase().includes('@s.whatsapp.net')) {
+    const digits = str.replace(/\D/g, '');
+    if (digits.length >= 8) {
+      return digits;
+    }
+  }
+
+  // 5. Se for puramente dígitos ou telefone formatado
+  const digits = str.replace(/\D/g, '');
+  if (digits.length >= 8) {
+    // WhatsApp LIDs tipicamente possuem 14 a 16 dígitos e NÃO iniciam com 55 (DDI Brasil).
+    if (digits.length >= 14 && (!digits.startsWith('55') || digits.length >= 15)) {
+      return `${digits}@lid`;
+    }
+    return digits;
+  }
+
+  return null;
+}

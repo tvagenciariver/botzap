@@ -952,7 +952,28 @@ apiRouter.get('/api/waha/sessions', requireAuth, async (_req: Request, res: Resp
  * 7. Listar conversas ativas
  */
 apiRouter.get('/api/chats', requireModule('chats'), (_req: Request, res: Response) => {
-  const chats = memoryStore.listActiveChats();
+  const rawChats = memoryStore.listActiveChats();
+  const chats = rawChats.map(chat => {
+    let cleanChatId = chat.chatId;
+    if (cleanChatId.includes(':')) {
+      const colonIdx = cleanChatId.indexOf(':');
+      const atIdx = cleanChatId.indexOf('@');
+      if (colonIdx !== -1 && atIdx !== -1 && colonIdx < atIdx) {
+        const prefix = cleanChatId.substring(0, colonIdx);
+        if (!/^\d+$/.test(prefix)) {
+          cleanChatId = cleanChatId.substring(colonIdx + 1);
+        }
+      }
+    }
+    const resolvedPhone = cleanChatId.includes('@lid') ? (lidMapper.getPhone(cleanChatId) || null) : null;
+    const agent = chat.agentId ? agentManager.getAgent(chat.agentId) : null;
+    return {
+      ...chat,
+      cleanChatId,
+      resolvedPhone,
+      agentName: agent ? agent.name : (chat.agentId || 'default')
+    };
+  });
   res.json({ chats });
 });
 
